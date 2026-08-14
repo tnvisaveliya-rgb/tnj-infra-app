@@ -465,4 +465,4 @@
     )
   }
 
-  export default PlantReports
+ export default DailyReports

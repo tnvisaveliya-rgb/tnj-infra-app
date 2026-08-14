@@ -9,17 +9,17 @@ function SiteReportPage() {
   const [selectedVendor, setSelectedVendor] = useState('all')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [reports, setReports] = useState([])
+  const [movements, setMovements] = useState([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     loadSites()
-    loadReports()
+    loadMovements()
   }, [])
 
   useEffect(() => {
     loadVendorsAndParties()
-    loadReports()
+    loadMovements()
   }, [selectedSite])
 
   const loadSites = async () => {
@@ -54,51 +54,39 @@ function SiteReportPage() {
     }
   }
 
-  const loadReports = async () => {
+  const loadMovements = async () => {
     setLoading(true)
-    let query = supabase.from('daily_reports').select('*').order('created_at', { ascending: false })
+    let query = supabase.from('material_movements').select('*').order('created_at', { ascending: false })
     
     if (selectedSite !== 'all') {
       query = query.eq('site_name', selectedSite)
     }
     if (fromDate) {
-      query = query.gte('report_date', fromDate)
+      query = query.gte('entry_date', fromDate)
     }
     if (toDate) {
-      query = query.lte('report_date', toDate)
+      query = query.lte('entry_date', toDate)
     }
 
     const { data, error } = await query
     if (error) {
-      console.error("Error loading reports:", error.message)
+      console.error("Error loading movements:", error.message)
     } else {
       let filtered = data || []
       
-      // Smart Filtering across contractor_details, inward_sources, etc.
+      // source_destination નો ઉપયોગ કરીને વેન્ડર/પાર્ટી વાઇઝ ફિલ્ટર કરવું
       if (selectedVendor !== 'all') {
-        filtered = filtered.filter(r => {
-          let sources = []
-          try {
-            const conDetails = typeof r.contractor_details === 'string' ? JSON.parse(r.contractor_details) : (r.contractor_details || [])
-            const inSources = typeof r.inward_sources === 'string' ? JSON.parse(r.inward_sources) : (r.inward_sources || [])
-            sources = [...conDetails, ...inSources]
-          } catch (e) {
-            sources = []
-          }
-
-          return sources.some(source => {
-            const vName = source.vendor || source.party_name || source.contractorName || source.name || ''
-            return vName.trim().toLowerCase() === selectedVendor.trim().toLowerCase()
-          })
-        })
+        filtered = filtered.filter(m => 
+          m.source_destination && m.source_destination.trim().toLowerCase() === selectedVendor.trim().toLowerCase()
+        )
       }
-      setReports(filtered)
+      setMovements(filtered)
     }
     setLoading(false)
   }
 
   useEffect(() => {
-    loadReports()
+    loadMovements()
   }, [fromDate, toDate, selectedVendor])
 
   const handlePrintPDF = () => {
@@ -108,10 +96,11 @@ function SiteReportPage() {
   return (
     <div style={{ padding: '24px', fontFamily: 'Inter, sans-serif', maxWidth: '1200px', margin: '0 auto', backgroundColor: '#f8fafc', minHeight: '100vh' }}>
       
+      {/* Header & Print Button */}
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px' }}>
         <div>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📋 Site Vendor & Date Master Report</h1>
-          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>Filter reports by site-specific contractors, vendors, and date range.</p>
+          <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📋 Site Vendor & Material Inward Report</h1>
+          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>Filter material movements by site, vendor/source destination, and date range.</p>
         </div>
         <button 
           onClick={handlePrintPDF}
@@ -137,6 +126,7 @@ function SiteReportPage() {
           <Filter size={16} /> Filters:
         </div>
 
+        {/* Site Dropdown */}
         <select 
           value={selectedSite} 
           onChange={(e) => setSelectedSite(e.target.value)}
@@ -146,17 +136,19 @@ function SiteReportPage() {
           {sites.map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
         </select>
 
+        {/* Vendor / Source Destination Dropdown */}
         <select 
           value={selectedVendor} 
           onChange={(e) => setSelectedVendor(e.target.value)}
           style={{ flex: '1 1 180px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}
         >
-          <option value="all">👥 {selectedSite === 'all' ? 'All Contractors / Vendors' : `Parties for ${selectedSite}`}</option>
+          <option value="all">👥 {selectedSite === 'all' ? 'All Vendors / Sources' : `Vendors for ${selectedSite}`}</option>
           {vendorsList.map((vName, idx) => (
             <option key={idx} value={vName}>{vName}</option>
           ))}
         </select>
 
+        {/* From Date */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 140px' }}>
           <span style={{ fontSize: '11px', color: '#64748b' }}>From:</span>
           <input 
@@ -167,6 +159,7 @@ function SiteReportPage() {
           />
         </div>
 
+        {/* To Date */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 140px' }}>
           <span style={{ fontSize: '11px', color: '#64748b' }}>To:</span>
           <input 
@@ -177,6 +170,7 @@ function SiteReportPage() {
           />
         </div>
 
+        {/* Reset */}
         {(selectedSite !== 'all' || selectedVendor !== 'all' || fromDate || toDate) && (
           <button 
             onClick={() => { setSelectedSite('all'); setSelectedVendor('all'); setFromDate(''); setToDate(''); }}
@@ -191,86 +185,88 @@ function SiteReportPage() {
       <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
           <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
-            Report Results ({reports.length} Records Found)
+            Report Results ({movements.length} Records Found)
           </h3>
           <span style={{ fontSize: '12px', color: '#64748b' }}>T&J Infra Management System</span>
         </div>
 
         {loading ? (
           <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '30px' }}>Loading report data...</p>
-        ) : reports.length === 0 ? (
-          <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '30px' }}>No reports found matching your selected filters.</p>
+        ) : movements.length === 0 ? (
+          <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '30px' }}>No material movement records found matching your filters.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {reports.map((r, index) => {
-              let conList = []
-              let matList = []
-              try {
-                conList = typeof r.contractor_details === 'string' ? JSON.parse(r.contractor_details) : (r.contractor_details || [])
-                matList = typeof r.material_usages === 'string' ? JSON.parse(r.material_usages) : (r.material_usages || [])
-              } catch (e) {
-                conList = []
-                matList = []
-              }
+            {movements.map((m, index) => {
+              const itemsList = typeof m.items === 'string' ? JSON.parse(m.items) : (m.items || [])
+              const billUrls = m.bill_urls || []
 
               return (
-                <div key={r.id || index} style={{ padding: '16px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
+                <div key={m.id || index} style={{ padding: '16px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
                   
                   {/* Meta Info */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '3px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
-                        🏗️ {r.site_name}
+                        🏗️ {m.site_name}
+                      </span>
+                      <span style={{ backgroundColor: m.movement_type === 'inward' ? '#e0f2fe' : '#ffedd5', color: m.movement_type === 'inward' ? '#0369a1' : '#c2410c', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                        {m.movement_type}
                       </span>
                       <span style={{ fontSize: '12px', color: '#475569', fontWeight: '600' }}>
-                        📅 Date: {r.report_date}
+                        📅 Date: {m.entry_date}
                       </span>
                     </div>
                     <span style={{ fontSize: '11px', color: '#0284c7', backgroundColor: '#e0f2fe', padding: '3px 8px', borderRadius: '4px', fontWeight: '600' }}>
-                      Report ID: #{r.id ? r.id.toString().slice(0, 8) : index + 1}
+                      ID: #{m.id ? m.id.toString().slice(0, 8) : index + 1}
                     </span>
                   </div>
 
-                  {/* Contractor & Material Details Table */}
-                  <div style={{ marginTop: '10px', overflowX: 'auto' }}>
-                    <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '6px' }}>📦 Contractor, Material & Damage / Bill Details:</p>
-                    
+                  {/* Vendor / Source Details */}
+                  <div style={{ marginBottom: '8px', fontSize: '13px', color: '#334155' }}>
+                    <strong>Vendor / Source Destination:</strong> <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{m.source_destination || 'N/A'}</span>
+                  </div>
+
+                  {/* Material Table */}
+                  <div style={{ marginTop: '6px', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: '#fff' }}>
                       <thead>
                         <tr style={{ backgroundColor: '#f1f5f9', color: '#475569', textAlign: 'left' }}>
-                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Contractor / Party</th>
-                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Labour Count</th>
-                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Material / Usage</th>
-                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Attached Bill</th>
+                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Material Name</th>
+                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Quantity</th>
+                          <th style={{ padding: '8px', border: '1px solid #cbd5e1' }}>Attached Bill / File</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {conList.map((con, cIdx) => (
-                          <tr key={cIdx}>
-                            <td style={{ padding: '8px', border: '1px solid #cbd5e1', fontWeight: '600', color: '#0f172a' }}>
-                              {con.contractorName || 'N/A'}
-                            </td>
-                            <td style={{ padding: '8px', border: '1px solid #cbd5e1' }}>
-                              {con.labourCount || '0'}
-                            </td>
-                            <td style={{ padding: '8px', border: '1px solid #cbd5e1' }}>
-                              {con.materials && con.materials.length > 0 ? con.materials.map(m => `${m.material || ''} (${m.quantity || 0} ${m.unit || ''})`).join(', ') : 'N/A'}
-                            </td>
-                            <td style={{ padding: '8px', border: '1px solid #cbd5e1' }}>
-                              {matList.some(m => m.bill_urls && m.bill_urls.length > 0) ? (
-                                matList.map((m, mIdx) => (
-                                  m.bill_urls && m.bill_urls.map((url, uIdx) => (
-                                    <a key={`${mIdx}-${uIdx}`} href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600', textDecoration: 'none' }}>
-                                      <FileText size={14} /> View Bill <ExternalLink size={12} />
+                        {itemsList.map((item, iIdx) => {
+                          const matName = item.materialName === 'Other' ? item.customMaterialName : (item.materialName || item.material || 'N/A')
+                          return (
+                            <tr key={iIdx}>
+                              <td style={{ padding: '8px', border: '1px solid #cbd5e1', fontWeight: '600', color: '#0f172a' }}>
+                                {matName}
+                              </td>
+                              <td style={{ padding: '8px', border: '1px solid #cbd5e1' }}>
+                                {item.quantity || item.qty || 0} {item.unit || ''}
+                              </td>
+                              <td style={{ padding: '8px', border: '1px solid #cbd5e1' }}>
+                                {billUrls.length > 0 ? (
+                                  billUrls.map((url, uIdx) => (
+                                    <a 
+                                      key={uIdx} 
+                                      href={url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      style={{ color: '#2563eb', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600', marginBottom: '2px' }}
+                                    >
+                                      <FileText size={14} /> View Bill #{uIdx + 1} <ExternalLink size={12} />
                                     </a>
                                   ))
-                                ))
-                              ) : (
-                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>No Bill</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '11px' }}>No Attachment</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
