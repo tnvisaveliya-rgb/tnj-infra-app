@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, Users, Building2, LogOut, Menu, X, ChevronRight, Receipt, FileText } from 'lucide-react'
+import { LayoutDashboard, Building2, LogOut, Menu, X, ChevronRight, Receipt, FileText } from 'lucide-react'
 
 function Layout({ children }) {
   const location = useLocation()
@@ -9,13 +9,31 @@ function Layout({ children }) {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const navItems = [
+  const userEmail = (user?.email || '').trim().toLowerCase()
+
+  // બધા ઉપલબ્ધ નેવિગેશન ઓપ્શન્સ (અહીં transactions ની જગ્યાએ /supervisor-dashboard અથવા સાચો પાથ સેટ કરો)
+  const allNavItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/employees', label: 'Employees', icon: Users },
     { path: '/crm', label: 'CRM', icon: Building2 },
-    { path: '/transactions', label: 'Transactions', icon: Receipt },
-    { path: '/reports', label: 'Daily Reports', icon: FileText },
+    { path: '/supervisor-dashboard', label: 'Site Daily Progress Report', icon: Receipt },
+    { path: '/PlantReports', label: 'Plant Report', icon: FileText },
   ]
+
+  // ઈમેલ મુજબ મેનુ ફિલ્ટર કરવાનું લોજિક
+  const getFilteredNavItems = () => {
+    if (userEmail === 'infra.tnj@gmail.com') {
+      return allNavItems
+    } else if (userEmail === 'patelvarun61961@gmail.com') {
+      // વરુણ માટે ફક્ત 'Site Daily Progress Report'
+      return allNavItems.filter(item => item.path === '/supervisor-dashboard')
+    } else if (userEmail === 'patelvarun61961@gmail.com') {
+      // મૌલિક માટે ફક્ત 'CRM'
+      return allNavItems.filter(item => item.path === '/crm')
+    }
+    return []
+  }
+
+  const navItems = getFilteredNavItems()
 
   const handleLogout = async () => {
     await logout()
@@ -60,7 +78,7 @@ function Layout({ children }) {
       >
         <div>
           {/* Logo Header */}
-          <div style={{ height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'between', padding: '0 24px', borderBottom: '1px solid #1e293b' }}>
+          <div style={{ height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid #1e293b' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ width: '36px', height: '36px', backgroundColor: '#2563eb', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
                 T&J
@@ -114,13 +132,15 @@ function Layout({ children }) {
         <div style={{ padding: '16px', borderTop: '1px solid #1e293b', backgroundColor: 'rgba(15, 23, 42, 0.8)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px', backgroundColor: '#1e293b', borderRadius: '10px', marginBottom: '12px' }}>
             <div style={{ width: '32px', height: '32px', backgroundColor: '#3b82f6', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>
-              {user?.email?.charAt(0).toUpperCase() || 'U'}
+              {userEmail?.charAt(0).toUpperCase() || 'U'}
             </div>
             <div style={{ overflow: 'hidden' }}>
               <p style={{ fontSize: '12px', fontWeight: 'bold', margin: 0, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user?.email || 'User'}
+                {userEmail || 'User'}
               </p>
-              <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0 }}>Administrator</p>
+              <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0 }}>
+                {userEmail === 'infra.tnj@gmail.com' ? 'Administrator' : 'User'}
+              </p>
             </div>
           </div>
           <button
@@ -169,7 +189,7 @@ function Layout({ children }) {
           </div>
 
           <div style={{ fontSize: '12px', color: '#64748b' }}>
-            Welcome, <strong style={{ color: '#0f172a' }}>{user?.email?.split('@')[0] || 'User'}</strong>
+            Welcome, <strong style={{ color: '#0f172a' }}>{userEmail?.split('@')[0] || 'User'}</strong>
           </div>
         </header>
 

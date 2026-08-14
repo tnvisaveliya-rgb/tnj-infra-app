@@ -47,7 +47,7 @@ export async function updateLead(id, leadData) {
 
   if (error) throw error
   return data
-}
+} 
 // 4. Delete Lead
 export async function deleteLead(id) {
   const { error } = await supabase
