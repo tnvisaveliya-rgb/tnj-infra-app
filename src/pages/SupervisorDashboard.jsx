@@ -3,15 +3,16 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, AlertCircle, X, Filter } from 'lucide-react'
 import ExpensesPage from './SupervisorExpenses';
+
 function SupervisorDashboard() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('site_report')
   const [sites, setSites] = useState([])
-  const [vendors, setVendors] = useState([]) // All site vendors
-  const [outwardParties, setOutwardParties] = useState([]) // All outward parties
-  const [contractors, setContractors] = useState([]) // All contractors
-  const [materialsMaster, setMaterialsMaster] = useState([]) // Site-wise Materials Master
-  const [workDescriptions, setWorkDescriptions] = useState([]) // Site-wise Work Descriptions Master
+  const [vendors, setVendors] = useState([]) 
+  const [outwardParties, setOutwardParties] = useState([]) 
+  const [contractors, setContractors] = useState([]) 
+  const [materialsMaster, setMaterialsMaster] = useState([]) 
+  const [workDescriptions, setWorkDescriptions] = useState([]) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -25,12 +26,12 @@ function SupervisorDashboard() {
   const [reportForm, setReportForm] = useState({
     siteName: '',
     reportDate: new Date().toISOString().split('T')[0],
-    inwardSources: [{ sourceName: '', customSourceName: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
-    palingWorkRows: [{ contractorName: '', runningFeet: '', height: '', description: '' }], // Paling Work
+    inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
+    palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }], 
     contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
     finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
-    damageItems: [], // Initial empty so rows are hidden until "+ Add Damage" is clicked
-    outwardDestinations: [], // Initial empty so rows are hidden until "+ Add Destination" is clicked
+    damageItems: [], 
+    outwardDestinations: [], 
     description: ''
   })
 
@@ -99,7 +100,6 @@ function SupervisorDashboard() {
     setTransactions(data || [])
   }
 
-  // સાઇટ વાઇઝ ફિલ્ટર કરેલા ડેટા
   const currentSiteVendors = vendors.filter(v => v.site_name === reportForm.siteName)
   const currentSiteOutwardParties = outwardParties.filter(op => op.site_name === reportForm.siteName)
   const currentSiteContractors = contractors.filter(c => c.site_name === reportForm.siteName)
@@ -107,7 +107,7 @@ function SupervisorDashboard() {
   const currentSiteWorkDescriptions = workDescriptions.filter(w => w.site_name === reportForm.siteName)
 
   // --- ADD / REMOVE ROW HANDLERS ---
-  const addInwardSource = () => setReportForm({...reportForm, inwardSources: [...reportForm.inwardSources, { sourceName: '', customSourceName: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }]})
+  const addInwardSource = () => setReportForm({...reportForm, inwardSources: [...reportForm.inwardSources, { sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }]})
   const removeInwardSource = (index) => setReportForm({...reportForm, inwardSources: reportForm.inwardSources.filter((_, i) => i !== index)})
   const addMaterialToInward = (sIndex) => {
     const updated = [...reportForm.inwardSources]
@@ -121,10 +121,10 @@ function SupervisorDashboard() {
   }
 
   // Paling Work Handlers
-  const addPalingWorkRow = () => setReportForm({...reportForm, palingWorkRows: [...reportForm.palingWorkRows, { contractorName: '', runningFeet: '', height: '', description: '' }]})
+  const addPalingWorkRow = () => setReportForm({...reportForm, palingWorkRows: [...reportForm.palingWorkRows, { contractorName: '', qty: '', nos: '', description: '' }]})
   const removePalingWorkRow = (index) => setReportForm({...reportForm, palingWorkRows: reportForm.palingWorkRows.filter((_, i) => i !== index)})
 
-  const addOutwardDest = () => setReportForm({...reportForm, outwardDestinations: [...reportForm.outwardDestinations, { destName: '', customDestName: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }]})
+  const addOutwardDest = () => setReportForm({...reportForm, outwardDestinations: [...reportForm.outwardDestinations, { destName: '', customDestName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }]})
   const removeOutwardDest = (index) => setReportForm({...reportForm, outwardDestinations: reportForm.outwardDestinations.filter((_, i) => i !== index)})
   const addMaterialToOutward = (dIndex) => {
     const updated = [...reportForm.outwardDestinations]
@@ -162,7 +162,6 @@ function SupervisorDashboard() {
       return
     }
 
-    // Check Inward bills requirement
     for (let i = 0; i < reportForm.inwardSources.length; i++) {
       const src = reportForm.inwardSources[i]
       const hasData = src.items.some(it => it.quantity && parseFloat(it.quantity) > 0)
@@ -172,7 +171,6 @@ function SupervisorDashboard() {
       }
     }
 
-    // Check Outward slips requirement
     for (let i = 0; i < reportForm.outwardDestinations.length; i++) {
       const dest = reportForm.outwardDestinations[i]
       const hasData = dest.items.some(it => it.quantity && parseFloat(it.quantity) > 0)
@@ -182,7 +180,6 @@ function SupervisorDashboard() {
       }
     }
 
-    // Check Damage photos requirement
     for (let i = 0; i < reportForm.damageItems.length; i++) {
       const dItem = reportForm.damageItems[i]
       const hasData = dItem.quantity && parseFloat(dItem.quantity) > 0
@@ -201,8 +198,9 @@ function SupervisorDashboard() {
     })
   }
 
-  const confirmAndSave = async () => {
+const confirmAndSave = async () => {
     setLoading(true)
+    setError('')
     try {
       const supervisorEmail = user?.email || 'Supervisor'
 
@@ -216,7 +214,6 @@ function SupervisorDashboard() {
         sitePhotoUrls.push(publicUrl)
       }
 
-      // Damage photos upload
       for (let i = 0; i < reportForm.damageItems.length; i++) {
         let dItem = reportForm.damageItems[i]
         let damageUrls = []
@@ -263,16 +260,19 @@ function SupervisorDashboard() {
             materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
           }))
 
-          await supabase.from('material_movements').insert([{
+          const { error: inError } = await supabase.from('material_movements').insert([{
             site_name: reportForm.siteName,
             movement_type: 'inward',
             items: formattedItems,
             source_destination: actualSourceName,
+            dc_number: src.dcNumber,
+            vehicle_number: src.vehicleNumber,
             description: reportForm.description,
             bill_urls: srcBillUrls,
             entry_date: reportForm.reportDate,
             created_by: supervisorEmail
           }])
+          if (inError) throw inError
         }
       }
 
@@ -295,16 +295,19 @@ function SupervisorDashboard() {
             materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
           }))
 
-          await supabase.from('material_movements').insert([{
+          const { error: outError } = await supabase.from('material_movements').insert([{
             site_name: reportForm.siteName,
             movement_type: 'outward',
             items: formattedOutItems,
             source_destination: actualDestName,
+            dc_number: dest.dcNumber,
+            vehicle_number: dest.vehicleNumber,
             description: reportForm.description,
             bill_urls: destBillUrls,
             entry_date: reportForm.reportDate,
             created_by: supervisorEmail
           }])
+          if (outError) throw outError
         }
       }
 
@@ -313,8 +316,8 @@ function SupervisorDashboard() {
       setReportForm({
         siteName: '',
         reportDate: new Date().toISOString().split('T')[0],
-        inwardSources: [{ sourceName: '', customSourceName: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
-        palingWorkRows: [{ contractorName: '', runningFeet: '', height: '', description: '' }],
+        inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
+        palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
         contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
         finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
         damageItems: [],
@@ -326,6 +329,7 @@ function SupervisorDashboard() {
       alert('Complete Site Report saved successfully!')
     } catch (err) {
       alert('Failed to save: ' + err.message)
+      setError(err.message)
     } finally {
       setLoading(false)
     }
@@ -391,7 +395,32 @@ function SupervisorDashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Select Site *</label>
-                  <select value={reportForm.siteName} onChange={(e) => setReportForm({...reportForm, siteName: e.target.value})} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#fff', fontSize: '12px', boxSizing: 'border-box', fontWeight: 'bold' }}>
+                 <select 
+                    value={reportForm.siteName} 
+                    onChange={(e) => {
+                      const newSite = e.target.value;
+                      if (!newSite) return;
+                      
+                      // જો પહેલેથી કોઈ સાઇટ સિલેક્ટ કરેલી હોય અને બદલવા જઈએ તો જ એલર્ટ આપો
+                      if (reportForm.siteName !== '') {
+                        const confirmChange = window.confirm("ચેતવણી: સાઇટ બદલવાથી અત્યારે ભરેલો બધો ડેટા રિસેટ થઈ જશે. શું તમે સાઇટ બદલવા માંગો છો?");
+                        if (!confirmChange) return;
+                      }
+
+                      setReportForm({
+                        siteName: newSite,
+                        reportDate: reportForm.reportDate,
+                        inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
+                        palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
+                        contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
+                        finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
+                        damageItems: [],
+                        outwardDestinations: [],
+                        description: ''
+                      });
+                    }} 
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#fff', fontSize: '12px', boxSizing: 'border-box', fontWeight: 'bold' }}
+                  >
                     <option value="">-- Please Select Site First --</option>
                     {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
                   </select>
@@ -439,8 +468,21 @@ function SupervisorDashboard() {
                             const updated = [...reportForm.inwardSources]
                             updated[sIndex].customSourceName = e.target.value
                             setReportForm({...reportForm, inwardSources: updated})
-                          }} style={{ width: '100%', padding: '6px', marginBottom: '8px', borderRadius: '4px', border: '1px solid #16a34a', fontSize: '11px', boxSizing: 'border-box' }} />
+                          }} style={{ width: '100%', padding: '6px', marginBottom: '6px', borderRadius: '4px', border: '1px solid #16a34a', fontSize: '11px', boxSizing: 'border-box' }} />
                         )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                          <input type="text" placeholder="DC Number" value={src.dcNumber} onChange={(e) => {
+                            const updated = [...reportForm.inwardSources]
+                            updated[sIndex].dcNumber = e.target.value
+                            setReportForm({...reportForm, inwardSources: updated})
+                          }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                          <input type="text" placeholder="Vehicle Number" value={src.vehicleNumber} onChange={(e) => {
+                            const updated = [...reportForm.inwardSources]
+                            updated[sIndex].vehicleNumber = e.target.value
+                            setReportForm({...reportForm, inwardSources: updated})
+                          }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                        </div>
 
                         {src.items.map((itRow, mIndex) => (
                           <div key={mIndex} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px', backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px' }}>
@@ -486,7 +528,7 @@ function SupervisorDashboard() {
                         <button type="button" onClick={() => addMaterialToInward(sIndex)} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '2px 6px', borderRadius: '3px', fontSize: '9px', cursor: 'pointer', marginTop: '4px' }}>+ Add Item</button>
 
                         <div style={{ marginTop: '8px', backgroundColor: '#f9fafb', padding: '6px', borderRadius: '6px', border: '1px dashed #16a34a', boxSizing: 'border-box' }}>
-                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#166534' }}>📎 Upload Bill / PDF</label>
+                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#166534' }}>📎 Upload Bill / PDF *</label>
                           <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => {
                             if (e.target.files.length > 0) {
                               const updated = [...reportForm.inwardSources]
@@ -538,11 +580,12 @@ function SupervisorDashboard() {
                         </select>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px', boxSizing: 'border-box' }}>
-                          <input type="number" placeholder="Qty" value={pRow.Qty} onChange={(e) => {
+                          <input type="number" placeholder="Qty" value={pRow.qty} onChange={(e) => {
                             const updated = [...reportForm.palingWorkRows]
-                            updated[pIndex].Qty = e.target.value
+                            updated[pIndex].qty = e.target.value
                             setReportForm({...reportForm, palingWorkRows: updated})
                           }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                          
                           <div style={{ backgroundColor: '#f1f5f9', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', color: '#475569' }}>
                             NOS
                           </div>
@@ -557,7 +600,7 @@ function SupervisorDashboard() {
                     ))}
                   </div>
 
-                  {/* 3. MATERIAL USAGE (Contractor Wise Labour & Material Usage) */}
+                  {/* 3. MATERIAL USAGE */}
                   <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '12px', boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#1e40af' }}>3. Material Usage (કોન્ટ્રાક્ટર વાઇઝ વપરાશ)</span>
@@ -644,7 +687,7 @@ function SupervisorDashboard() {
                     ))}
                   </div>
 
-                  {/* 4. FINAL WORK (ફાઇનલ વર્ક) */}
+                  {/* 4. FINAL WORK */}
                   <div style={{ backgroundColor: '#eff6ff', padding: '10px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '12px', boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#1e40af' }}>4. Final Work (ફાઇનલ વર્ક)</span>
@@ -704,7 +747,7 @@ function SupervisorDashboard() {
                     ))}
                   </div>
 
-                  {/* 5. MATERIAL DAMAGE (ડેમેજ મટીરિયલ - Hidden initially until clicked) */}
+                  {/* 5. MATERIAL DAMAGE */}
                   <div style={{ backgroundColor: '#fef2f2', padding: '10px', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '12px', boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: reportForm.damageItems.length > 0 ? '8px' : '0' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#991b1b' }}>5. Material Damage (મટીરિયલ ડેમેજ)</span>
@@ -760,9 +803,8 @@ function SupervisorDashboard() {
                           setReportForm({...reportForm, damageItems: updated})
                         }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', marginBottom: '6px' }} />
 
-                        {/* Damage Photo Upload */}
                         <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '6px', border: '1px dashed #dc2626', boxSizing: 'border-box' }}>
-                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#991b1b' }}>📎 Upload Damage Photo</label>
+                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#991b1b' }}>📎 Upload Damage Photo *</label>
                           <input type="file" multiple accept="image/*" onChange={(e) => {
                             if (e.target.files.length > 0) {
                               const updated = [...reportForm.damageItems]
@@ -788,7 +830,7 @@ function SupervisorDashboard() {
                     ))}
                   </div>
 
-                  {/* 6. MATERIAL OUTWARD (મટીરિયલ આઉટવર્ડ - Hidden initially until clicked) */}
+                  {/* 6. MATERIAL OUTWARD */}
                   <div style={{ backgroundColor: '#fff7ed', padding: '10px', borderRadius: '8px', border: '1px solid #fed7aa', marginBottom: '12px', boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: reportForm.outwardDestinations.length > 0 ? '8px' : '0' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#9a3412' }}>6. Material Outward (મટીરિયલ ગયું)</span>
@@ -817,8 +859,21 @@ function SupervisorDashboard() {
                             const updated = [...reportForm.outwardDestinations]
                             updated[dIndex].customDestName = e.target.value
                             setReportForm({...reportForm, outwardDestinations: updated})
-                          }} style={{ width: '100%', padding: '6px', marginBottom: '8px', borderRadius: '4px', border: '1px solid #ea580c', fontSize: '11px', boxSizing: 'border-box' }} />
+                          }} style={{ width: '100%', padding: '6px', marginBottom: '6px', borderRadius: '4px', border: '1px solid #ea580c', fontSize: '11px', boxSizing: 'border-box' }} />
                         )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                          <input type="text" placeholder="DC Number" value={dest.dcNumber} onChange={(e) => {
+                            const updated = [...reportForm.outwardDestinations]
+                            updated[dIndex].dcNumber = e.target.value
+                            setReportForm({...reportForm, outwardDestinations: updated})
+                          }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                          <input type="text" placeholder="Vehicle Number" value={dest.vehicleNumber} onChange={(e) => {
+                            const updated = [...reportForm.outwardDestinations]
+                            updated[dIndex].vehicleNumber = e.target.value
+                            setReportForm({...reportForm, outwardDestinations: updated})
+                          }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                        </div>
 
                         {dest.items.map((itRow, mIndex) => (
                           <div key={mIndex} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px', backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px' }}>
@@ -864,7 +919,7 @@ function SupervisorDashboard() {
                         <button type="button" onClick={() => addMaterialToOutward(dIndex)} style={{ backgroundColor: '#ea580c', color: '#fff', border: 'none', padding: '2px 6px', borderRadius: '3px', fontSize: '9px', cursor: 'pointer', marginTop: '4px' }}>+ Add Item</button>
 
                         <div style={{ marginTop: '8px', backgroundColor: '#f9fafb', padding: '6px', borderRadius: '6px', border: '1px dashed #ea580c', boxSizing: 'border-box' }}>
-                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#9a3412' }}>📎 Upload Slip / PDF</label>
+                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#9a3412' }}>📎 Upload Slip / PDF *</label>
                           <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => {
                             if (e.target.files.length > 0) {
                               const updated = [...reportForm.outwardDestinations]
@@ -896,7 +951,7 @@ function SupervisorDashboard() {
                     <textarea rows="2" value={reportForm.description} onChange={(e) => setReportForm({...reportForm, description: e.target.value})} placeholder="Any extra notes..." style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
                   </div>
 
-                  {/* Site Progress Photos (Multiple with Remove Option) */}
+                  {/* Site Progress Photos */}
                   <div style={{ marginBottom: '12px', backgroundColor: '#f1f5f9', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}>
                     <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#0f172a' }}>📸 Site Progress Photos (Multiple)</label>
                     <input type="file" multiple accept="image/*" capture="environment" onChange={(e) => {
@@ -924,14 +979,21 @@ function SupervisorDashboard() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
             {filteredReports.map(r => (
               <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', alignItems: 'center' }}>
                   <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '13px' }}>{r.site_name}</span>
-                  <span style={{ fontSize: '10px', color: '#64748b' }}>{r.report_date}</span>
+                  <span style={{ fontSize: '10px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>📅 {r.report_date}</span>
                 </div>
+                
                 {r.description && <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0' }}>📝 {r.description}</p>}
+
+                {/* Added: Created By and Timestamp Details */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f1f5f9', fontSize: '10px', color: '#64748b' }}>
+                  <span>👤 {r.user_id || 'N/A'}</span>
+                  <span>🕒 {r.created_at ? new Date(r.created_at).toLocaleString() : ''}</span>
+                </div>
               </div>
             ))}
           </div>
@@ -952,12 +1014,13 @@ function SupervisorDashboard() {
         </div>
       )}
 
-     {/* EXPENSES / TRANSACTIONS TAB */}
-{activeTab === 'transactions' && (
-  <div>
-    <ExpensesPage />
-  </div>
-)}
+      {/* EXPENSES / TRANSACTIONS TAB */}
+      {activeTab === 'transactions' && (
+        <div>
+          <ExpensesPage />
+        </div>
+      )}
+
       {/* FULL PREVIEW / CONFIRMATION MODAL */}
       {previewData && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: '0', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box' }}>
@@ -976,7 +1039,7 @@ function SupervisorDashboard() {
                   <strong style={{ color: '#166534', display: 'block', marginBottom: '2px' }}>📥 Material Inward:</strong>
                   {previewData.details.inwardSources.map((src, si) => (
                     <div key={si} style={{ marginLeft: '6px', marginBottom: '4px' }}>
-                      • <strong>{src.sourceName === 'Other' ? src.customSourceName : src.sourceName}</strong>:
+                      • <strong>{src.sourceName === 'Other' ? src.customSourceName : src.sourceName}</strong> {src.dcNumber ? `(DC: ${src.dcNumber})` : ''} {src.vehicleNumber ? `[Veh: ${src.vehicleNumber}]` : ''}:
                       {src.items.map((it, ii) => {
                         const matDisplay = it.materialName === 'Other' ? it.customMaterialName : it.materialName;
                         return (
@@ -1001,7 +1064,7 @@ function SupervisorDashboard() {
                   <strong style={{ color: '#86198f', display: 'block', marginBottom: '2px' }}>🪵 Paling Work:</strong>
                   {previewData.details.palingWorkRows.map((p, pi) => (
                     <div key={pi} style={{ marginLeft: '6px', marginBottom: '4px', color: '#334155' }}>
-                      • <strong>{p.contractorName}</strong> (Running Feet: {p.runningFeet || 0}, Height: {p.height || 0}) - {p.description || ''}
+                      • <strong>{p.contractorName}</strong> (Qty: {p.qty || 0} NOS) - {p.description || ''}
                     </div>
                   ))}
                 </div>
@@ -1068,7 +1131,7 @@ function SupervisorDashboard() {
                   <strong style={{ color: '#9a3412', display: 'block', marginBottom: '2px' }}>📤 Material Outward:</strong>
                   {previewData.details.outwardDestinations.map((dest, di) => (
                     <div key={di} style={{ marginLeft: '6px', marginBottom: '4px' }}>
-                      • <strong>{dest.destName === 'Other' ? dest.customDestName : dest.destName}</strong>:
+                      • <strong>{dest.destName === 'Other' ? dest.customDestName : dest.destName}</strong> {dest.dcNumber ? `(DC: ${dest.dcNumber})` : ''} {dest.vehicleNumber ? `[Veh: ${dest.vehicleNumber}]` : ''}:
                       {dest.items.map((it, ii) => {
                         const matDisplay = it.materialName === 'Other' ? it.customMaterialName : it.materialName;
                         return (
