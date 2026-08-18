@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, AlertCircle, X, Filter } from 'lucide-react'
 import ExpensesPage from './SupervisorExpenses';
+import AttendancePage from './AttendancePage';
 
 function SupervisorDashboard() {
   const { user } = useAuth()
@@ -198,29 +199,78 @@ function SupervisorDashboard() {
     })
   }
 
-const confirmAndSave = async () => {
+  // Helper Function to Compress Images before upload
+  const compressImage = (file) => {
+    return new Promise((resolve) => {
+      if (file.type === 'application/pdf') {
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          }, 'image/jpeg', 0.7);
+        };
+      };
+    });
+  };
+
+  const confirmAndSave = async () => {
     setLoading(true)
     setError('')
     try {
       const supervisorEmail = user?.email || 'Supervisor'
 
+      // 1. Site Progress Photos (Folder: site_progress)
       let sitePhotoUrls = []
       for (let file of siteProgressPhotos) {
-        const fileExt = file.name.split('.').pop()
-        const fileName = `site_prog_${Math.random()}.${fileExt}`
-        const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, file)
+        const compressedFile = await compressImage(file)
+        const fileExt = compressedFile.name.split('.').pop()
+        const fileName = `site_progress/site_prog_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+        const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
         if (uploadError) throw uploadError
         const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
         sitePhotoUrls.push(publicUrl)
       }
 
+      // 2. Damage Items Photos (Folder: damage)
       for (let i = 0; i < reportForm.damageItems.length; i++) {
         let dItem = reportForm.damageItems[i]
         let damageUrls = []
         for (let file of dItem.files) {
-          const fileExt = file.name.split('.').pop()
-          const fileName = `damage_${Math.random()}.${fileExt}`
-          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, file)
+          const compressedFile = await compressImage(file)
+          const fileExt = compressedFile.name.split('.').pop()
+          const fileName = `damage/damage_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
           if (uploadError) throw uploadError
           const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
           damageUrls.push(publicUrl)
@@ -241,14 +291,15 @@ const confirmAndSave = async () => {
       }])
       if (repError) throw repError
 
-      // Inward Save
+      // 3. Inward Save (Folder: inward)
       for (const src of reportForm.inwardSources) {
         if (src.items.length > 0 && src.items[0].quantity) {
           let srcBillUrls = []
           for (let file of src.files) {
-            const fileExt = file.name.split('.').pop()
-            const fileName = `inward_${Math.random()}.${fileExt}`
-            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, file)
+            const compressedFile = await compressImage(file)
+            const fileExt = compressedFile.name.split('.').pop()
+            const fileName = `inward/inward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
             if (uploadError) throw uploadError
             const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
             srcBillUrls.push(publicUrl)
@@ -276,14 +327,15 @@ const confirmAndSave = async () => {
         }
       }
 
-      // Outward Save
+      // 4. Outward Save (Folder: outward)
       for (const dest of reportForm.outwardDestinations) {
         if (dest.items.length > 0 && dest.items[0].quantity) {
           let destBillUrls = []
           for (let file of dest.files) {
-            const fileExt = file.name.split('.').pop()
-            const fileName = `outward_${Math.random()}.${fileExt}`
-            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, file)
+            const compressedFile = await compressImage(file)
+            const fileExt = compressedFile.name.split('.').pop()
+            const fileName = `outward/outward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
             if (uploadError) throw uploadError
             const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
             destBillUrls.push(publicUrl)
@@ -401,7 +453,6 @@ const confirmAndSave = async () => {
                       const newSite = e.target.value;
                       if (!newSite) return;
                       
-                      // જો પહેલેથી કોઈ સાઇટ સિલેક્ટ કરેલી હોય અને બદલવા જઈએ તો જ એલર્ટ આપો
                       if (reportForm.siteName !== '') {
                         const confirmChange = window.confirm("ચેતવણી: સાઇટ બદલવાથી અત્યારે ભરેલો બધો ડેટા રિસેટ થઈ જશે. શું તમે સાઇટ બદલવા માંગો છો?");
                         if (!confirmChange) return;
@@ -989,7 +1040,6 @@ const confirmAndSave = async () => {
                 
                 {r.description && <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0' }}>📝 {r.description}</p>}
 
-                {/* Added: Created By and Timestamp Details */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f1f5f9', fontSize: '10px', color: '#64748b' }}>
                   <span>👤 {r.user_id || 'N/A'}</span>
                   <span>🕒 {r.created_at ? new Date(r.created_at).toLocaleString() : ''}</span>
@@ -999,20 +1049,11 @@ const confirmAndSave = async () => {
           </div>
         </div>
       )}
-
-      {/* ATTENDANCE TAB */}
-      {activeTab === 'attendance' && (
-        <div style={{ backgroundColor: '#0f172a', color: '#fff', borderRadius: '12px', padding: '14px' }}>
-          <h2 style={{ fontSize: '15px', fontWeight: 'bold', marginBottom: '12px' }}>GPS Attendance</h2>
-          <select value={attendanceSite} onChange={(e) => setAttendanceSite(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#1e293b', color: '#fff', fontSize: '12px', marginBottom: '10px' }}>
-            <option value="">-- Select Site --</option>
-            {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
-          </select>
-          <button onClick={() => alert('Attendance Punch Preview')} style={{ backgroundColor: punchStatus ? '#dc2626' : '#059669', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: '600', fontSize: '12px', width: '100%', cursor: 'pointer' }}>
-            {punchStatus ? 'Punch Out' : 'Punch In with GPS'}
-          </button>
-        </div>
-      )}
+   
+    
+{activeTab === 'attendance' && (
+  <AttendancePage sites={sites} /> 
+)}
 
       {/* EXPENSES / TRANSACTIONS TAB */}
       {activeTab === 'transactions' && (
