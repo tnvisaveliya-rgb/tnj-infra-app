@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { History, Camera, MapPin, Calendar, FileText, X } from 'lucide-react';
 
-// અહીં `user` પ્રોપ સીધો રીસીવ કરવાનો છે
 function AttendancePage({ sites, user }) {
   const [attendanceSite, setAttendanceSite] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,10 +18,21 @@ function AttendancePage({ sites, user }) {
   const [showReportPopup, setShowReportPopup] = useState(false);
   const [reportData, setReportData] = useState([]);
 
-  useEffect(() => {
-    // જો ઉપરથી `user` પ્રોપ આવતો હોય તો તેનું ઈમેઈલ લો, નહિતર લોકલ સ્ટોરેજ ચેક કરો
-    const activeEmail = user?.email || user?.id || localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || "infra.tnj@gmail.com";
-    setSupervisorEmail(activeEmail);
+ useEffect(() => {
+    // 1. સૌથી પહેલા Supabase નો હાલનો એક્ટિવ યુઝર ચેક કરો
+    const getActiveUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const authEmail = session?.user?.email;
+
+      // 2. જો Supabase માંથી ન મળે તો લોકલ સ્ટોરેજ અથવા પ્રોપમાંથી લો
+      const activeEmail = authEmail || user?.email || localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || '';
+      
+      if (activeEmail) {
+        setSupervisorEmail(activeEmail.trim().toLowerCase());
+      }
+    };
+
+    getActiveUser();
   }, [user]);
 
   useEffect(() => {
@@ -47,7 +57,7 @@ function AttendancePage({ sites, user }) {
     let query = supabase
       .from('site_attendance')
       .select('*')
-      .eq('employee_name', email) // હવે જે યુઝર લોગિન હશે તેની જ આઈડી મુજબ ડેટા આવશે
+      .eq('employee_name', email)
       .order('created_at', { ascending: false });
 
     if (fromDate) {
@@ -203,9 +213,16 @@ function AttendancePage({ sites, user }) {
       if (!confirmIn) return;
     }
 
+    const finalEmail = supervisorEmail || user?.email || localStorage.getItem('userEmail') || "infra.tnj@gmail.com";
+
+    if (!finalEmail) {
+      alert("એરર: યુઝરની ઓળખ થઈ શકી નથી. કૃપા કરીને ફરી લોગિન કરો.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const folderName = supervisorEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
+      const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
       const fileName = `attendance/${folderName}/${Date.now()}.jpg`;
       
       const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
@@ -220,7 +237,7 @@ function AttendancePage({ sites, user }) {
         const { latitude, longitude } = position.coords;
 
         const payload = {
-          employee_name: supervisorEmail, 
+          employee_name: finalEmail, 
           site_name: attendanceSite,
           punch_type: targetType, 
           latitude: latitude.toString(),
@@ -238,7 +255,7 @@ function AttendancePage({ sites, user }) {
           alert(`Successfully Punched ${targetType}!`);
           setPhoto(null);
           setPhotoPreview(null);
-          await loadAttendanceHistory(supervisorEmail); 
+          await loadAttendanceHistory(finalEmail); 
         }
         setLoading(false);
       }, (geoErr) => {
