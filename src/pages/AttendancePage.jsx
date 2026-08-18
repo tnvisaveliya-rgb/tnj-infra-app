@@ -11,18 +11,27 @@ function AttendancePage({ sites }) {
   const [locationStatus, setLocationStatus] = useState('Fetching GPS...');
   const [currentStatus, setCurrentStatus] = useState('OUT');
 
+  // Dynamic Supervisor Email based on Login / LocalStorage
+  const [supervisorEmail, setSupervisorEmail] = useState('');
+
   // Date to Date Report & Popup State
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [showReportPopup, setShowReportPopup] = useState(false);
   const [reportData, setReportData] = useState([]);
 
-  const supervisorEmail = "infra.tnj@gmail.com"; 
+  useEffect(() => {
+    // લોકલ સ્ટોરેજ કે સેશનમાં જે એક્ટિવ યુઝર હોય તેનું ID/Email મેળવવું
+    const loggedUser = localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || "infra.tnj@gmail.com";
+    setSupervisorEmail(loggedUser);
+  }, []);
 
   useEffect(() => {
-    loadAttendanceHistory();
-    checkLocation();
-  }, []);
+    if (supervisorEmail) {
+      loadAttendanceHistory(supervisorEmail);
+      checkLocation();
+    }
+  }, [supervisorEmail]);
 
   const checkLocation = () => {
     if (navigator.geolocation) {
@@ -35,12 +44,12 @@ function AttendancePage({ sites }) {
     }
   };
 
- const loadAttendanceHistory = async () => {
+  const loadAttendanceHistory = async (email) => {
     let query = supabase
       .from('site_attendance')
       .select('*')
-      .eq('employee_name', supervisorEmail)
-      .order('created_at', { ascending: false }); // ID ની જગ્યાએ created_at થી લેટેસ્ટ એન્ટ્રી લેવી
+      .eq('employee_name', email) // ફક્ત આ જ યુઝરનો ડેટા ફેચ થશે
+      .order('created_at', { ascending: false });
 
     if (fromDate) {
       query = query.gte('created_at', `${fromDate}T00:00:00`);
@@ -56,14 +65,13 @@ function AttendancePage({ sites }) {
     } else if (data && data.length > 0) {
       setHistory(data);
       
-      // જો ફિલ્ટર ન હોય તો જ કરંટ સ્ટેટસ નક્કી કરવું
       if (!fromDate && !toDate) {
-        const latestPunch = data[0].punch_type; // સૌથી પહેલી (લેટેસ્ટ) એન્ટ્રી
+        const latestPunch = data[0].punch_type; 
         setCurrentStatus(latestPunch);
         if (latestPunch === 'IN') {
           setAttendanceSite(data[0].site_name);
         } else {
-          setAttendanceSite(''); // જો OUT હોય તો સાઇટ ખાલી કરી દેવી જેથી નવી સિલેક્ટ થઈ શકે
+          setAttendanceSite(''); 
         }
       }
     } else {
@@ -72,6 +80,7 @@ function AttendancePage({ sites }) {
       setAttendanceSite('');
     }
   };
+
   // Date to Date મુજબ રિપોર્ટ પ્રોસેસ કરીને પૉપઅપ ખોલવાનું ફંક્શન
   const handleGenerateReport = () => {
     if (!fromDate || !toDate) {
@@ -79,7 +88,6 @@ function AttendancePage({ sites }) {
       return;
     }
 
-    // ડેટા ફિલ્ટર કરવો
     const filtered = history.filter(item => {
       if (!item.created_at) return false;
       const itemDate = item.created_at.split('T')[0];
@@ -91,8 +99,6 @@ function AttendancePage({ sites }) {
       return;
     }
 
-    // IN અને OUT ને જોડીને વર્કિંગ અવર્સ ગણવા માટેનું લોજિક
-    // તારીખ મુજબ ગ્રુપિંગ કરવું
     const groupedByDate = {};
     filtered.forEach(item => {
       const dateKey = item.created_at.split('T')[0];
@@ -106,7 +112,6 @@ function AttendancePage({ sites }) {
       }
     });
 
-    // વર્કિંગ અવર્સ કેલ્ક્યુલેટ કરવા
     const finalReport = Object.values(groupedByDate).map(row => {
       if (row.inTime !== '-' && row.outTime !== '-') {
         const inDate = new Date(`${row.date} ${row.inTime}`);
@@ -202,7 +207,7 @@ function AttendancePage({ sites }) {
 
     setLoading(true);
     try {
-    const folderName = supervisorEmail.replace(/[^a-zA-Z0-9]/g, '_'); // ઈમેઈલમાંથી સેફ ફોલ્ડર નામ બનાવવું
+      const folderName = supervisorEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
       const fileName = `attendance/${folderName}/${Date.now()}.jpg`;
       
       const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
@@ -217,7 +222,7 @@ function AttendancePage({ sites }) {
         const { latitude, longitude } = position.coords;
 
         const payload = {
-          employee_name: supervisorEmail,
+          employee_name: supervisorEmail, // હાલના લોગિન યુઝરનું ID/Email
           site_name: attendanceSite,
           punch_type: targetType, 
           latitude: latitude.toString(),
@@ -235,7 +240,7 @@ function AttendancePage({ sites }) {
           alert(`Successfully Punched ${targetType}!`);
           setPhoto(null);
           setPhotoPreview(null);
-          await loadAttendanceHistory(); 
+          await loadAttendanceHistory(supervisorEmail); 
         }
         setLoading(false);
       }, (geoErr) => {
@@ -253,7 +258,7 @@ function AttendancePage({ sites }) {
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e2e8f0', maxWidth: '600px', margin: '0 auto', position: 'relative' }}>
       <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Camera size={20} color="#2563eb" /> GPS & Selfie Attendance
+        <Camera size={20} color="#2563eb" /> GPS & Selfie Attendance ({supervisorEmail})
       </h2>
       
       <div style={{ fontSize: '11px', color: '#059669', backgroundColor: '#ecfdf5', padding: '6px 10px', borderRadius: '6px', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -275,7 +280,7 @@ function AttendancePage({ sites }) {
         </p>
       )}
 
-     {/* ડાયરેક્ટ કેમેરા ઓપન કરવા માટેનું સેક્શન */}
+      {/* ડાયરેક્ટ કેમેરા ઓપન કરવા માટેનું સેક્શન */}
       <div style={{ marginBottom: '15px', textAlign: 'center' }}>
         <input 
           type="file" 
@@ -341,7 +346,7 @@ function AttendancePage({ sites }) {
         </div>
       </div>
 
-     {/* Report Popup Modal with PDF Download & Grand Total */}
+      {/* Report Popup Modal */}
       {showReportPopup && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '20px', width: '90%', maxWidth: '650px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
@@ -413,6 +418,7 @@ function AttendancePage({ sites }) {
           </div>
         </div>
       )}
+
       {/* History List */}
       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
