@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { History, Camera, MapPin, Calendar, FileText, X } from 'lucide-react';
 
-function AttendancePage({ sites }) {
+function AttendancePage({ sites, user }) {
   const [attendanceSite, setAttendanceSite] = useState('');
   const [loading, setLoading] = useState(false);
   const [photo, setPhoto] = useState(null);
@@ -11,7 +11,7 @@ function AttendancePage({ sites }) {
   const [locationStatus, setLocationStatus] = useState('Fetching GPS...');
   const [currentStatus, setCurrentStatus] = useState('OUT');
 
-  // Dynamic Supervisor Email based on Login / LocalStorage
+  // Dynamic Supervisor Email: જો પ્રોપમાં user મળતો હોય તો તે, નહિતર LocalStorage અથવા Default
   const [supervisorEmail, setSupervisorEmail] = useState('');
 
   // Date to Date Report & Popup State
@@ -21,10 +21,10 @@ function AttendancePage({ sites }) {
   const [reportData, setReportData] = useState([]);
 
   useEffect(() => {
-    // લોકલ સ્ટોરેજ કે સેશનમાં જે એક્ટિવ યુઝર હોય તેનું ID/Email મેળવવું
-    const loggedUser = localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || "infra.tnj@gmail.com";
-    setSupervisorEmail(loggedUser);
-  }, []);
+    // પેરેન્ટ કોમ્પોનન્ટમાંથી મળેલ user prop અથવા localStorage માંથી સાચું ઈમેઈલ મેળવવું
+    const activeEmail = user?.email || user?.id || localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || "infra.tnj@gmail.com";
+    setSupervisorEmail(activeEmail);
+  }, [user]);
 
   useEffect(() => {
     if (supervisorEmail) {
@@ -48,7 +48,7 @@ function AttendancePage({ sites }) {
     let query = supabase
       .from('site_attendance')
       .select('*')
-      .eq('employee_name', email) // ફક્ત આ જ યુઝરનો ડેટા ફેચ થશે
+      .eq('employee_name', email) // ફક્ત આ જ લોગ્ડ-ઇન યુઝરનો ડેટા ફેચ થશે
       .order('created_at', { ascending: false });
 
     if (fromDate) {
@@ -81,7 +81,6 @@ function AttendancePage({ sites }) {
     }
   };
 
-  // Date to Date મુજબ રિપોર્ટ પ્રોસેસ કરીને પૉપઅપ ખોલવાનું ફંક્શન
   const handleGenerateReport = () => {
     if (!fromDate || !toDate) {
       alert("કૃપા કરીને 'From Date' અને 'To Date' બંને સિલેક્ટ કરો!");
@@ -222,7 +221,7 @@ function AttendancePage({ sites }) {
         const { latitude, longitude } = position.coords;
 
         const payload = {
-          employee_name: supervisorEmail, // હાલના લોગિન યુઝરનું ID/Email
+          employee_name: supervisorEmail, // ચોક્કસ લોગ્ડ-ઇન યુઝરનું ID/Email
           site_name: attendanceSite,
           punch_type: targetType, 
           latitude: latitude.toString(),
@@ -394,7 +393,7 @@ function AttendancePage({ sites }) {
                     {(() => {
                       let totalMinutes = reportData.reduce((acc, row) => {
                         if (row.workingHours !== '-') {
-                          const parts = row.workingHours.split(' ');
+                      const parts = row.workingHours.split(' ');
                           const hrs = parseInt(parts[0]) || 0;
                           const mins = parseInt(parts[2]) || 0;
                           return acc + (hrs * 60) + mins;
