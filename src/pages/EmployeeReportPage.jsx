@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Filter, FileSpreadsheet, FileText } from 'lucide-react';
+import { Filter, FileSpreadsheet, FileText, MapPin } from 'lucide-react';
 
 const DateFormatter = (dateStr) => {
   if (!dateStr) return '';
@@ -81,6 +81,10 @@ function EmployeeReportPage() {
           site: item.site_name,
           inTime: '-',
           outTime: '-',
+          inLat: item.latitude || '',
+          inLng: item.longitude || '',
+          outLat: '',
+          outLng: '',
           workingHours: '-'
         };
       }
@@ -88,8 +92,12 @@ function EmployeeReportPage() {
       const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       if (item.punch_type === 'IN') {
         grouped[uniqueKey].inTime = timeStr;
+        grouped[uniqueKey].inLat = item.latitude || '';
+        grouped[uniqueKey].inLng = item.longitude || '';
       } else if (item.punch_type === 'OUT') {
         grouped[uniqueKey].outTime = timeStr;
+        grouped[uniqueKey].outLat = item.latitude || '';
+        grouped[uniqueKey].outLng = item.longitude || '';
       }
     });
 
@@ -133,13 +141,13 @@ function EmployeeReportPage() {
 
     let csvContent = `data:text/csv;charset=utf-8,Company: T&J Infra | Employee: ${selectedEmployee || 'All'} | Site: ${selectedSite || 'All'}\n`;
     csvContent += `Period: ${fromDate || 'All'} to ${toDate || 'All'}\n\n`;
-    csvContent += `Date,Employee,Site Name,Punch In,Punch Out,Working Hours\n`;
+    csvContent += `Date,Employee,Site Name,Punch In,Punch Out,Working Hours,In Location,Out Location\n`;
 
     processedReport.forEach(row => {
-      csvContent += `"${row.date}","${row.employee}","${row.site}","${row.inTime}","${row.outTime}","${row.workingHours}"\n`;
+      csvContent += `"${row.date}","${row.employee}","${row.site}","${row.inTime}","${row.outTime}","${row.workingHours}","${row.inLat}, ${row.inLng}","${row.outLat}, ${row.outLng}"\n`;
     });
 
-    csvContent += `\n,,,,,Total Working Hours: "${calculateTotalWorkingHours()}"\n`;
+    csvContent += `\n,,,,,,Total Working Hours: "${calculateTotalWorkingHours()}"\n`;
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -158,11 +166,11 @@ function EmployeeReportPage() {
   };
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto', fontFamily: 'Inter, sans-serif', backgroundColor: '#f8fafc', borderRadius: '12px' }}>
+    <div style={{ padding: '24px', maxWidth: '1050px', margin: '0 auto', fontFamily: 'Inter, sans-serif', backgroundColor: '#f8fafc', borderRadius: '12px' }}>
       
       {/* Print Header */}
       <div className="print-header" style={{ display: 'none', textAlign: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '20px', margin: '0 0 5px 0', color: '#000' }}>T&J Infra - Master Attendance Report</h1>
+        <h1 style={{ fontSize: '20px', margin: '0 0 5px 0', color: '#000' }}>T&J Infra - Master Attendance & Location Report</h1>
         <p style={{ fontSize: '12px', margin: 2, color: '#333' }}>
           <strong>Employee:</strong> {selectedEmployee || 'All'} | <strong>Site:</strong> {selectedSite || 'All'}
         </p>
@@ -174,7 +182,7 @@ function EmployeeReportPage() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }} className="no-print">
         <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
-          👥 Master Employee & Attendance Report
+          👥 Master Employee & Location Report
         </h2>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={exportToExcel} style={{ padding: '8px 12px', backgroundColor: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -231,46 +239,72 @@ function EmployeeReportPage() {
         </div>
       </div>
 
-      {/* Attendance Summary Table */}
+      {/* Attendance Summary Table with Location */}
       <div style={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', fontSize: '13px', fontWeight: 'bold', color: '#1e293b' }} className="no-print">
-          Attendance Summary & Working Hours ({processedReport.length} Records)
+          Attendance Summary, Working Hours & GPS Locations ({processedReport.length} Records)
         </div>
         
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left' }}>
             <thead>
               <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1', color: '#475569' }} className="report-th">
-                <th style={{ padding: '10px' }}>Date</th>
-                <th style={{ padding: '10px' }}>Employee</th>
-                <th style={{ padding: '10px' }}>Site Name</th>
-                <th style={{ padding: '10px', textAlign: 'center' }}>Punch In</th>
-                <th style={{ padding: '10px', textAlign: 'center' }}>Punch Out</th>
-                <th style={{ padding: '10px', textAlign: 'center' }}>Working Hours</th>
+                <th style={{ padding: '8px' }}>Date</th>
+                <th style={{ padding: '8px' }}>Employee</th>
+                <th style={{ padding: '8px' }}>Site Name</th>
+                <th style={{ padding: '8px', textAlign: 'center' }}>Punch In</th>
+                <th style={{ padding: '8px', textAlign: 'center' }}>Punch Out</th>
+                <th style={{ padding: '8px', textAlign: 'center' }}>Working Hours</th>
+                <th style={{ padding: '8px', textAlign: 'center' }}>GPS Location (In / Out)</th>
               </tr>
             </thead>
             <tbody>
               {processedReport.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No records found.</td>
+                  <td colSpan="7" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>No records found.</td>
                 </tr>
               ) : (
                 processedReport.map((row, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '10px', color: '#334155' }}>{row.date}</td>
-                    <td style={{ padding: '10px', fontWeight: '600', color: '#0f172a' }}>{row.employee}</td>
-                    <td style={{ padding: '10px', color: '#47556px' }}>{row.site}</td>
-                    <td style={{ padding: '10px', textAlign: 'center', color: '#166534', fontWeight: 'bold' }}>{row.inTime}</td>
-                    <td style={{ padding: '10px', textAlign: 'center', color: '#991b1b', fontWeight: 'bold' }}>{row.outTime}</td>
-                    <td style={{ padding: '10px', textAlign: 'center', color: '#2563eb', fontWeight: 'bold' }}>{row.workingHours}</td>
+                    <td style={{ padding: '8px', color: '#334155' }}>{row.date}</td>
+                    <td style={{ padding: '8px', fontWeight: '600', color: '#0f172a' }}>{row.employee}</td>
+                    <td style={{ padding: '8px', color: '#475569' }}>{row.site}</td>
+                    <td style={{ padding: '8px', textAlign: 'center', color: '#166534', fontWeight: 'bold' }}>{row.inTime}</td>
+                    <td style={{ padding: '8px', textAlign: 'center', color: '#991b1b', fontWeight: 'bold' }}>{row.outTime}</td>
+                    <td style={{ padding: '8px', textAlign: 'center', color: '#2563eb', fontWeight: 'bold' }}>{row.workingHours}</td>
+                    <td style={{ padding: '8px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+                        {row.inLat && row.inLng ? (
+                          <a 
+                            href={`https://www.google.com/maps?q=${row.inLat},${row.inLng}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            style={{ color: '#059669', textDecoration: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '3px' }}
+                          >
+                            <MapPin size={12} /> In: {Number(row.inLat).toFixed(4)}, {Number(row.inLng).toFixed(4)}
+                          </a>
+                        ) : 'In: -'}
+
+                        {row.outLat && row.outLng ? (
+                          <a 
+                            href={`https://www.google.com/maps?q=${row.outLat},${row.outLng}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            style={{ color: '#dc2626', textDecoration: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '3px' }}
+                          >
+                            <MapPin size={12} /> Out: {Number(row.outLat).toFixed(4)}, {Number(row.outLng).toFixed(4)}
+                          </a>
+                        ) : (row.outTime !== '-' ? 'Out GPS: -' : '')}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
             <tfoot>
               <tr style={{ backgroundColor: '#f8fafc', fontWeight: 'bold', borderTop: '2px solid #cbd5e1' }} className="report-tf">
-                <td colSpan="5" style={{ padding: '12px', textAlign: 'right', color: '#1e293b' }}>Total Working Hours:</td>
-                <td style={{ padding: '12px', textAlign: 'center', color: '#047857' }}>
+                <td colSpan="5" style={{ padding: '10px', textAlign: 'right', color: '#1e293b' }}>Total Working Hours:</td>
+                <td colSpan="2" style={{ padding: '10px', textAlign: 'left', color: '#047857' }}>
                   {calculateTotalWorkingHours()}
                 </td>
               </tr>
@@ -279,14 +313,12 @@ function EmployeeReportPage() {
         </div>
       </div>
 
-      {/* Print CSS to completely remove background colors and hide navigation/layout headers */}
+      {/* Print CSS */}
       <style>{`
         @media print {
-          /* App level navbar/sidebar hide કરવા માટે */
           header, nav, aside, .no-print, [role="navigation"] {
             display: none !important;
           }
-          /* માત્ર રિપોર્ટ સેક્શન પ્રિન્ટ થાય તે માટે */
           body {
             background-color: #ffffff !important;
             color: #000000 !important;

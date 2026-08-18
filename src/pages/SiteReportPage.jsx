@@ -82,19 +82,18 @@ function SiteReportPage() {
   const filteredData = useMemo(() => {
     let processed = []
 
-    // Helper to extract attachment URL from array or string
-    const getAttachmentUrl = (urls) => {
-      if (!urls) return '';
-      if (Array.isArray(urls) && urls.length > 0) return urls[0];
+    const getAttachmentUrls = (urls) => {
+      if (!urls) return [];
+      if (Array.isArray(urls)) return urls.filter(Boolean);
       if (typeof urls === 'string') {
         try {
           const parsed = JSON.parse(urls);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
+          if (Array.isArray(parsed)) return parsed.filter(Boolean);
         } catch {
-          return urls;
+          return [urls];
         }
       }
-      return '';
+      return [];
     };
 
     // 1. Material Inward
@@ -111,12 +110,14 @@ function SiteReportPage() {
               date: m.entry_date,
               userId: m.created_by || 'Supervisor',
               name: srcName,
+              dcNumber: m.dc_number || 'N/A',
+              vehicleNo: m.vehicle_number || 'N/A',
               detail: `${matName} (DC: ${m.dc_number || 'N/A'}, Veh: ${m.vehicle_number || 'N/A'})`,
               materialKey: matName,
               qty: parseFloat(it.quantity || 0),
               unit: it.unit || 'Bags',
               remarks: m.description || '',
-              attachment: getAttachmentUrl(m.bill_urls || m.attachment || m.image_url)
+              attachments: getAttachmentUrls(m.bill_urls || m.attachment || m.image_url)
             })
           }
         })
@@ -135,12 +136,14 @@ function SiteReportPage() {
               date: r.report_date,
               userId: r.user_id || 'Supervisor',
               name: cName,
+              dcNumber: 'N/A',
+              vehicleNo: 'N/A',
               detail: 'Paling Work',
               materialKey: 'Paling Work',
               qty: parseFloat(p.qty || 0),
               unit: 'NOS',
               remarks: p.description || '',
-              attachment: getAttachmentUrl(r.photo_urls || r.attachment || p.attachment)
+              attachments: getAttachmentUrls(r.photo_urls || r.attachment || p.attachment)
             })
           }
         })
@@ -161,12 +164,14 @@ function SiteReportPage() {
                 date: r.report_date,
                 userId: r.user_id || 'Supervisor',
                 name: cName,
+                dcNumber: 'N/A',
+                vehicleNo: 'N/A',
                 detail: matName || 'Material',
                 materialKey: matName || 'Material',
                 qty: parseFloat(mat.quantity || 0),
                 unit: mat.unit || 'NOS',
                 remarks: `Labour: ${c.labourCount || 0}`,
-                attachment: getAttachmentUrl(r.photo_urls || r.attachment)
+                attachments: getAttachmentUrls(r.photo_urls || r.attachment)
               })
             })
           }
@@ -181,19 +186,23 @@ function SiteReportPage() {
           const cName = f.contractorName || 'N/A'
           if (isMatchParty(cName)) {
             const wName = f.workDesc === 'Other' ? f.customWorkDesc : f.workDesc
-            processed.push({
-              category: '4. Final Work',
-              site: r.site_name,
-              date: r.report_date,
-              userId: r.user_id || 'Supervisor',
-              name: cName,
-              detail: wName || 'Final Work',
-              materialKey: wName || 'Final Work',
-              qty: parseFloat(f.runningFeet || 0),
-              unit: 'Running Feet',
-              remarks: `Height: ${f.height || 0}`,
-              attachment: getAttachmentUrl(r.photo_urls || r.attachment)
-            })
+            if (wName && wName !== 'Final Work') {
+              processed.push({
+                category: '4. Final Work',
+                site: r.site_name,
+                date: r.report_date,
+                userId: r.user_id || 'Supervisor',
+                name: cName,
+                dcNumber: 'N/A',
+                vehicleNo: 'N/A',
+                detail: wName,
+                materialKey: wName,
+                qty: parseFloat(f.runningFeet || 0),
+                unit: 'Running Feet',
+                remarks: `Height: ${f.height || 0}`,
+                attachments: getAttachmentUrls(r.photo_urls || r.attachment)
+              })
+            }
           }
         })
       })
@@ -210,12 +219,14 @@ function SiteReportPage() {
             date: r.report_date,
             userId: r.user_id || 'Supervisor',
             name: 'N/A',
+            dcNumber: 'N/A',
+            vehicleNo: 'N/A',
             detail: dName || 'Damaged Item',
             materialKey: dName || 'Damaged Item',
             qty: parseFloat(d.quantity || 0),
             unit: d.unit || 'Bags',
             remarks: d.reason || '',
-            attachment: getAttachmentUrl(d.bill_urls || r.attachment)
+            attachments: getAttachmentUrls(d.bill_urls || r.attachment)
           })
         })
       })
@@ -235,12 +246,14 @@ function SiteReportPage() {
               date: m.entry_date,
               userId: m.created_by || 'Supervisor',
               name: destName,
+              dcNumber: m.dc_number || 'N/A',
+              vehicleNo: m.vehicle_number || 'N/A',
               detail: `${matName} (DC: ${m.dc_number || 'N/A'}, Veh: ${m.vehicle_number || 'N/A'})`,
               materialKey: matName,
               qty: parseFloat(it.quantity || 0),
               unit: it.unit || 'Bags',
               remarks: m.description || '',
-              attachment: getAttachmentUrl(m.bill_urls || m.attachment || m.image_url)
+              attachments: getAttachmentUrls(m.bill_urls || m.attachment || m.image_url)
             })
           }
         })
@@ -249,10 +262,6 @@ function SiteReportPage() {
 
     return processed
   }, [reports, movements, reportType, selectedParty])
-
-  const totalQty = useMemo(() => {
-    return filteredData.reduce((sum, item) => sum + (item.qty || 0), 0)
-  }, [filteredData])
 
   const materialSummary = useMemo(() => {
     const summary = {}
@@ -281,68 +290,133 @@ function SiteReportPage() {
     filteredData.forEach(item => {
       if (item.category === '2. Paling Work' || item.category === '4. Final Work') {
         const cName = item.name || 'Unknown'
-        if (!summary[cName]) summary[cName] = { name: cName, totalQty: 0, unit: item.unit, category: item.category }
-        summary[cName].totalQty += item.qty
+        const workDesc = item.materialKey || item.detail || item.category
+        const uniqueKey = `${cName}_${workDesc}`
+        if (!summary[uniqueKey]) {
+          summary[uniqueKey] = { name: cName, totalQty: 0, unit: item.unit, category: workDesc }
+        }
+        summary[uniqueKey].totalQty += item.qty
       }
     })
     return summary
   }, [filteredData])
 
-const exportToExcel = () => {
+  const exportToExcel = () => {
     if (filteredData.length === 0) { alert("No data to export!"); return; }
 
-    // 1. બધી જ યુનિક પ્રોડક્ટ્સ
-    const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))];
-    
-    let csvContent = `data:text/csv;charset=utf-8,"Report: ${selectedSite} | Type: ${reportType}",,,,,\n`;
-    csvContent += `"Party: ${selectedParty}",,,,,,,\n`;
-    csvContent += `date,dc no,${allMaterials.join(',')},uom,vehichale number,user id,remarks,attachment\n`;
+    let csvContent = `data:text/csv;charset=utf-8,"T&J Infra - Report: ${selectedSite} | Section: ${reportType}",,,,,\n`;
+    csvContent += `"Party: ${selectedParty} | From: ${fromDate || 'All'} To: ${toDate || 'All'}",,,,,,,\n`;
 
-    let lastDate = ""; // તારીખ રિપીટ ન થાય તે માટેનું વેરિએબલ
+    let lastDate = "";
+    let lastVendor = "";
 
-    // 2. ડેટા લૂપ
-    filteredData.forEach(item => {
-      const dcMatch = item.detail.match(/DC: ([^,)]+)/);
-      const vehMatch = item.detail.match(/Veh: ([^,)]+)/);
-      const dc = dcMatch ? dcMatch[1].trim() : 'N/A';
-      const veh = vehMatch ? vehMatch[1].trim() : 'N/A';
-      
-      // પ્રોડક્ટ પ્રમાણે ક્વોન્ટિટી સેટ કરવી
-      let rowValues = allMaterials.map(mat => (item.materialKey === mat ? item.qty : ""));
-      
-      // જો સમાન તારીખ હોય તો ખાલી રાખવી, અલગ હોય તો પ્રિન્ટ કરવી
-      const dateToPrint = (item.date === lastDate) ? "" : item.date;
-      lastDate = item.date;
+    if (reportType === 'inward' || reportType === 'outward') {
+      const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))];
+      csvContent += `date,vendor/party,dc no,${allMaterials.join(',')},uom,vehicle number,user id,remarks,attachments\n`;
 
-      const cleanRemark = (item.remarks || "").replace(/,/g, " ");
-      
-      let rowString = `"${dateToPrint}","${dc}",${rowValues.map(v => `"${v}"`).join(',')},"${item.unit}","${veh}","${item.userId}","${cleanRemark}","${item.attachment || ''}"\n`;
-      csvContent += rowString;
-    });
+      filteredData.forEach(item => {
+        let rowValues = allMaterials.map(mat => (item.materialKey === mat ? item.qty : ""));
+        
+        const dateToPrint = (item.date === lastDate) ? "" : item.date;
+        lastDate = item.date;
+
+        const vendorToPrint = (item.name === lastVendor && item.date === lastDate) ? "" : item.name;
+        lastVendor = item.name;
+
+        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
+        const atts = (item.attachments || []).join(' | ');
+        
+        csvContent += `"${dateToPrint}","${vendorToPrint}","${item.dcNumber}",${rowValues.map(v => `"${v}"`).join(',')},"${item.unit}","${item.vehicleNo}","${item.userId}","${cleanRemark}","${atts}"\n`;
+      });
+
+    } else if (reportType === 'usage' || reportType === 'paling' || reportType === 'final' || reportType === 'damage') {
+      const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))].filter(m => m !== 'Final Work');
+      csvContent += `date,party/contractor,${allMaterials.join(',')},uom,user id,remarks,attachments\n`;
+
+      filteredData.forEach(item => {
+        let rowValues = allMaterials.map(mat => (item.materialKey === mat ? item.qty : ""));
+        
+        const dateToPrint = (item.date === lastDate) ? "" : item.date;
+        lastDate = item.date;
+
+        const vendorToPrint = (item.name === lastVendor && item.date === lastDate) ? "" : item.name;
+        lastVendor = item.name;
+
+        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
+        const atts = (item.attachments || []).join(' | ');
+        
+        csvContent += `"${dateToPrint}","${vendorToPrint}",${rowValues.map(v => `"${v}"`).join(',')},"${item.unit}","${item.userId}","${cleanRemark}","${atts}"\n`;
+      });
+
+    } else {
+      csvContent += `date,category,party name,detail / material,quantity,unit,user id,remarks,attachments\n`;
+      filteredData.forEach(item => {
+        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
+        const atts = (item.attachments || []).join(' | ');
+        csvContent += `"${item.date}","${item.category}","${item.name}","${item.detail}","${item.qty}","${item.unit}","${item.userId}","${cleanRemark}","${atts}"\n`;
+      });
+    }
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Report_Perfect_${selectedSite}.csv`);
+    link.setAttribute("download", `T&J_Infra_Report_${reportType}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   }
+
   return (
-    <div style={{ padding: '24px', fontFamily: 'Inter, sans-serif', maxWidth: '1200px', margin: '0 auto', backgroundColor: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box' }}>
+    <div style={{ padding: '10px', fontFamily: 'Inter, sans-serif', maxWidth: '1200px', margin: '0 auto', backgroundColor: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box' }}>
       
-      <style>{`
+<style>{`
         @media print {
-          .no-print { display: none !important; }
-          body { background: #fff !important; color: #000 !important; }
-          .print-table-container { display: block !important; width: 100%; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #000 !important; padding: 8px; font-size: 11px; text-align: left; }
-          th { background-color: #f1f5f9 !important; }
+          /* ૧. બ્રાઉઝરના ડિફોલ્ટ માર્જિનને દૂર કરો */
+          @page {
+            size: A4 landscape;
+            margin: 5mm;
+          }
+
+          /* ૨. જે ક્લાસમાં no-print લખ્યું છે તે બધું પ્રિન્ટ વખતે ગાયબ થઈ જશે */
+          .no-print, header, nav, aside, footer {
+            display: none !important;
+          }
+
+          /* ૩. ફક્ત પ્રિન્ટ માટેનું કન્ટેનર જ દેખાવું જોઈએ */
+          .print-table-container {
+            display: block !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+          }
+
+          /* ૪. ટેબલના અક્ષરો અને સ્ટાઈલ */
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+
+          th, td {
+            border: 1px solid #000 !important;
+            padding: 3px !important;
+            font-size: 8px !important;
+            text-align: center !important;
+            color: #000 !important;
+            background-color: #ffffff !important;
+          }
+
+          th { background-color: #f1f5f9 !important; font-weight: bold !important; }
+          
+          /* બ્લેન્ક પેજ અટકાવવા માટે */
+          tr { page-break-inside: avoid !important; }
         }
+
+        /* નોર્મલ સ્ક્રીન માટે - આ ડેટા એપ્લિકેશનમાં દેખાય તે માટે જરૂરી છે */
         .print-table-container { display: none; }
       `}</style>
-
       {/* Header & Buttons */}
       <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px' }}>
         <div>
@@ -404,75 +478,279 @@ const exportToExcel = () => {
         )}
       </div>
 
- 
-  <div className="print-table-container">
-        <h2 style={{ textAlign: 'center', fontSize: '16px' }}>Comprehensive Site & Material Report</h2>
-        <div style={{ fontSize: '12px', marginBottom: '10px' }}>
-          <strong>Report:</strong> {reportType} | <strong>Site:</strong> {selectedSite} | <strong>Party:</strong> {selectedParty}
+      {/* PDF / Print Hidden Table Format */}
+      <div className="print-table-container">
+        <h2 style={{ textAlign: 'center', fontSize: '16px', fontWeight: 'bold', margin: '0 0 4px 0' }}>T&J Infra</h2>
+        <h3 style={{ textAlign: 'center', fontSize: '13px', margin: '0 0 5px 0' }}>Comprehensive Report ({reportType.toUpperCase()})</h3>
+        <div style={{ fontSize: '11px', marginBottom: '10px', textAlign: 'center' }}>
+          <strong>Site:</strong> {selectedSite} | <strong>Party:</strong> {selectedParty}
+          {(fromDate || toDate) && (
+            <span> | <strong>Period:</strong> {fromDate || 'Start'} to {toDate || 'Present'}</span>
+          )}
         </div>
         
         {(() => {
-          // 1. પ્રોસેસિંગ: ડેટાને ગ્રુપ કરવા માટે
-          const groupedData = {};
-          filteredData.forEach(item => {
-            if (!groupedData[item.date]) groupedData[item.date] = [];
-            groupedData[item.date].push(item);
-          });
+          if (filteredData.length === 0) {
+            return <div style={{ textAlign: 'center', fontSize: '12px', padding: '20px' }}>No records found for the selected filters.</div>;
+          }
 
-          return (
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>DC No</th>
-                  <th>Material</th> {/* અહીં હવે ડાયનેમિક નામ આવશે */}
-                  <th>Qty</th>
-                  <th>UOM</th> {/* UOM કોલમ ઉમેરી */}
-                  <th>Vehicle</th>
-                  <th>Remarks</th>
-                  <th>Attachment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(groupedData).map(([date, entries], dIdx) => (
-                  entries.map((item, eIdx) => {
-                    const dcMatch = item.detail.match(/DC: ([^,)]+)/);
-                    const vehMatch = item.detail.match(/Veh: ([^,)]+)/);
+          if (reportType === 'inward' || reportType === 'outward') {
+            const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))];
+            const totals = {};
+            allMaterials.forEach(mat => {
+              totals[mat] = filteredData.reduce((sum, item) => sum + (item.materialKey === mat ? (item.qty || 0) : 0), 0);
+            });
 
-                    return (
-                      <tr key={`${dIdx}-${eIdx}`}>
-                        {eIdx === 0 && (
-                          <td rowSpan={entries.length} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: 'bold' }}>
-                            {date}
+            const groupedByDateAndVendor = {};
+            filteredData.forEach(item => {
+              const dKey = item.date || 'N/A';
+              const vKey = item.name || 'N/A';
+              const compKey = `${dKey}_${vKey}`;
+              if (!groupedByDateAndVendor[compKey]) {
+                groupedByDateAndVendor[compKey] = { date: dKey, vendor: vKey, items: [] };
+              }
+              groupedByDateAndVendor[compKey].items.push(item);
+            });
+
+            let currentDateTrack = {};
+            let currentVendorTrack = {};
+
+            return (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Vendor / Party</th>
+                    <th>DC No</th>
+                    {allMaterials.map(mat => (<th key={mat}>{mat}</th>))}
+                    <th>UOM</th>
+                    <th>Vehicle</th>
+                    <th>User ID</th>
+                    <th>Remarks</th>
+                    <th>Attachment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.values(groupedByDateAndVendor).map((group, gIdx) => {
+                    const dateVal = group.date;
+                    const vendorVal = group.vendor;
+
+                    return group.items.map((item, idx) => {
+                      let showDate = false;
+                      let dateSpan = 0;
+                      if (!currentDateTrack[dateVal]) {
+                        currentDateTrack[dateVal] = true;
+                        showDate = true;
+                        dateSpan = filteredData.filter(i => i.date === dateVal).length;
+                      }
+
+                      let showVendor = false;
+                      let vendorSpan = 0;
+                      const vendorCompKey = `${dateVal}_${vendorVal}`;
+                      if (!currentVendorTrack[vendorCompKey]) {
+                        currentVendorTrack[vendorCompKey] = true;
+                        showVendor = true;
+                        vendorSpan = group.items.length;
+                      }
+
+                      return (
+                        <tr key={`${gIdx}-${idx}`}>
+                          {showDate && (
+                            <td rowSpan={dateSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: 'bold' }}>
+                              {dateVal}
+                            </td>
+                          )}
+                          {showVendor && (
+                            <td rowSpan={vendorSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: '600' }}>
+                              {vendorVal}
+                            </td>
+                          )}
+                          <td>{item.dcNumber}</td>
+                          {allMaterials.map(mat => (
+                            <td key={mat}>{item.materialKey === mat ? item.qty : ''}</td>
+                          ))}
+                          <td>{item.unit}</td>
+                          <td>{item.vehicleNo}</td>
+                          <td>{item.userId}</td>
+                          <td>{item.remarks}</td>
+                          <td>
+                            {item.attachments && item.attachments.length > 0 ? (
+                              item.attachments.map((att, aIdx) => (
+                                <div key={aIdx}>
+                                  <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
+                                </div>
+                              ))
+                            ) : '-'}
                           </td>
-                        )}
-                        <td>{dcMatch ? dcMatch[1].trim() : 'N/A'}</td>
-                        {/* અહીં Material Name ડાયનેમિકલી આવશે */}
-                        <td style={{ fontWeight: 'bold' }}>{item.materialKey}</td>
-                        <td>{item.qty}</td>
-                        <td>{item.unit}</td> {/* અહીં UOM આવશે */}
-                        <td>{vehMatch ? vehMatch[1].trim() : 'N/A'}</td>
-                        <td>{item.remarks}</td>
-                        <td>{item.attachment ? <a href={item.attachment} target="_blank" rel="noopener noreferrer">View</a> : '-'}</td>
-                      </tr>
-                    );
-                  })
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
-                  <td colSpan="3" style={{ textAlign: 'right' }}>Grand Total:</td>
-                  <td>{filteredData.reduce((sum, item) => sum + (item.qty || 0), 0)}</td>
-                  <td colSpan="4"></td>
-                </tr>
-              </tfoot>
-            </table>
-          );
+                        </tr>
+                      );
+                    });
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
+                    <td colSpan="3" style={{ textAlign: 'right' }}>Total:</td>
+                    {allMaterials.map(mat => (
+                      <td key={mat}>{totals[mat] > 0 ? totals[mat] : ''}</td>
+                    ))}
+                    <td colSpan="5"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            );
+          } else if (reportType === 'usage' || reportType === 'paling' || reportType === 'final' || reportType === 'damage') {
+            const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))].filter(m => m !== 'Final Work');
+            const totals = {};
+            allMaterials.forEach(mat => {
+              totals[mat] = filteredData.reduce((sum, item) => sum + (item.materialKey === mat ? (item.qty || 0) : 0), 0);
+            });
+
+            const groupedByDateAndVendor = {};
+            filteredData.forEach(item => {
+              const dKey = item.date || 'N/A';
+              const vKey = item.name || 'N/A';
+              const compKey = `${dKey}_${vKey}`;
+              if (!groupedByDateAndVendor[compKey]) {
+                groupedByDateAndVendor[compKey] = { date: dKey, vendor: vKey, items: [] };
+              }
+              groupedByDateAndVendor[compKey].items.push(item);
+            });
+
+            let currentDateTrack = {};
+            let currentVendorTrack = {};
+
+            return (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Party / Contractor</th>
+                    {allMaterials.map(mat => (<th key={mat}>{mat}</th>))}
+                    <th>UOM</th>
+                    <th>User ID</th>
+                    <th>Remarks</th>
+                    <th>Attachment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.values(groupedByDateAndVendor).map((group, gIdx) => {
+                    const dateVal = group.date;
+                    const vendorVal = group.vendor;
+
+                    return group.items.map((item, idx) => {
+                      let showDate = false;
+                      let dateSpan = 0;
+                      if (!currentDateTrack[dateVal]) {
+                        currentDateTrack[dateVal] = true;
+                        showDate = true;
+                        dateSpan = filteredData.filter(i => i.date === dateVal).length;
+                      }
+
+                      let showVendor = false;
+                      let vendorSpan = 0;
+                      const vendorCompKey = `${dateVal}_${vendorVal}`;
+                      if (!currentVendorTrack[vendorCompKey]) {
+                        currentVendorTrack[vendorCompKey] = true;
+                        showVendor = true;
+                        vendorSpan = group.items.length;
+                      }
+
+                      return (
+                        <tr key={`${gIdx}-${idx}`}>
+                          {showDate && (
+                            <td rowSpan={dateSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: 'bold' }}>
+                              {dateVal}
+                            </td>
+                          )}
+                          {showVendor && (
+                            <td rowSpan={vendorSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: '600' }}>
+                              {vendorVal}
+                            </td>
+                          )}
+                          {allMaterials.map(mat => (
+                            <td key={mat}>{item.materialKey === mat ? item.qty : ''}</td>
+                          ))}
+                          <td>{item.unit}</td>
+                          <td>{item.userId}</td>
+                          <td>{item.remarks}</td>
+                          <td>
+                            {item.attachments && item.attachments.length > 0 ? (
+                              item.attachments.map((att, aIdx) => (
+                                <div key={aIdx}>
+                                  <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
+                                </div>
+                              ))
+                            ) : '-'}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
+                    <td colSpan="2" style={{ textAlign: 'right' }}>Total:</td>
+                    {allMaterials.map(mat => (
+                      <td key={mat}>{totals[mat] > 0 ? totals[mat] : ''}</td>
+                    ))}
+                    <td colSpan="4"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            );
+          } else {
+            const totalQty = filteredData.reduce((sum, item) => sum + (item.qty || 0), 0);
+            return (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Party Name</th>
+                    <th>Detail / Material</th>
+                    <th>Quantity</th>
+                    <th>Unit</th>
+                    <th>User ID</th>
+                    <th>Remarks</th>
+                    <th>Attachment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredData.map((item, idx) => (
+                    <tr key={idx}>
+                      <td>{item.date}</td>
+                      <td>{item.category}</td>
+                      <td>{item.name}</td>
+                      <td style={{ fontWeight: 'bold' }}>{item.detail}</td>
+                      <td>{item.qty}</td>
+                      <td>{item.unit}</td>
+                      <td>{item.userId}</td>
+                      <td>{item.remarks}</td>
+                      <td>
+                        {item.attachments && item.attachments.length > 0 ? (
+                          item.attachments.map((att, aIdx) => (
+                            <div key={aIdx}>
+                              <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
+                            </div>
+                          ))
+                        ) : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
+                    <td colSpan="4" style={{ textAlign: 'right' }}>Total Qty:</td>
+                    <td>{totalQty}</td>
+                    <td colSpan="4"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            );
+          }
         })()}
       </div>
 
-
-      
       {/* 1. MATERIAL-WISE STOCK SUMMARY BOX */}
       <div className="no-print">
         {Object.keys(materialSummary).length > 0 && (
@@ -567,16 +845,17 @@ const exportToExcel = () => {
                     </div>
                     {item.remarks && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Note: {item.remarks}</div>}
                     
-                    {/* UI કાર્ડમાં અટેચમેન્ટ લિંક */}
-                    {item.attachment && (
-                      <div style={{ marginTop: '6px' }}>
-                        <a href={item.attachment} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <ExternalLink size={12} /> View Attached File / Photo
-                        </a>
+                    {item.attachments && item.attachments.length > 0 && (
+                      <div style={{ marginTop: '6px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {item.attachments.map((att, aIdx) => (
+                          <a key={aIdx} href={att} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <ExternalLink size={12} /> View File {aIdx + 1}
+                          </a>
+                        ))}
                       </div>
                     )}
                   </div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb', backgroundColor: '#eff6ff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb', backgroundColor: '#eff6ff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
                     {item.qty} {item.unit}
                   </div>
                 </div>
