@@ -42,14 +42,13 @@ function AppRoutes() {
         </>
       )}
 
-      {/* 2. વરુણ માટે ફક્ત /transactions */}
+      {/* 2. વરુણ માટે /transactions (અથવા જ્યાં Attendance પેજ ખુલે છે) */}
       {userEmail === 'patelvarun61961@gmail.com' && (
         <>
-          <Route path="/transactions" element={<SupervisorDashboard />} />
+          <Route path="/transactions" element={<SupervisorDashboard user={user} />} />
           <Route path="*" element={<Navigate to="/transactions" replace />} />
         </>
       )}
-
       {/* 3. મૌલિક માટે ફક્ત /crm */}
       {userEmail === 'patelvarun1961@gmail.com' && (
         <>

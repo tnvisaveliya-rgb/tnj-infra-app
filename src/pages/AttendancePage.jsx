@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { History, Camera, MapPin, Calendar, FileText, X } from 'lucide-react';
 
+// અહીં `user` પ્રોપ સીધો રીસીવ કરવાનો છે
 function AttendancePage({ sites, user }) {
   const [attendanceSite, setAttendanceSite] = useState('');
   const [loading, setLoading] = useState(false);
@@ -11,17 +12,15 @@ function AttendancePage({ sites, user }) {
   const [locationStatus, setLocationStatus] = useState('Fetching GPS...');
   const [currentStatus, setCurrentStatus] = useState('OUT');
 
-  // Dynamic Supervisor Email: જો પ્રોપમાં user મળતો હોય તો તે, નહિતર LocalStorage અથવા Default
   const [supervisorEmail, setSupervisorEmail] = useState('');
 
-  // Date to Date Report & Popup State
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [showReportPopup, setShowReportPopup] = useState(false);
   const [reportData, setReportData] = useState([]);
 
   useEffect(() => {
-    // પેરેન્ટ કોમ્પોનન્ટમાંથી મળેલ user prop અથવા localStorage માંથી સાચું ઈમેઈલ મેળવવું
+    // જો ઉપરથી `user` પ્રોપ આવતો હોય તો તેનું ઈમેઈલ લો, નહિતર લોકલ સ્ટોરેજ ચેક કરો
     const activeEmail = user?.email || user?.id || localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || "infra.tnj@gmail.com";
     setSupervisorEmail(activeEmail);
   }, [user]);
@@ -48,7 +47,7 @@ function AttendancePage({ sites, user }) {
     let query = supabase
       .from('site_attendance')
       .select('*')
-      .eq('employee_name', email) // ફક્ત આ જ લોગ્ડ-ઇન યુઝરનો ડેટા ફેચ થશે
+      .eq('employee_name', email) // હવે જે યુઝર લોગિન હશે તેની જ આઈડી મુજબ ડેટા આવશે
       .order('created_at', { ascending: false });
 
     if (fromDate) {
@@ -221,7 +220,7 @@ function AttendancePage({ sites, user }) {
         const { latitude, longitude } = position.coords;
 
         const payload = {
-          employee_name: supervisorEmail, // ચોક્કસ લોગ્ડ-ઇન યુઝરનું ID/Email
+          employee_name: supervisorEmail, 
           site_name: attendanceSite,
           punch_type: targetType, 
           latitude: latitude.toString(),
@@ -279,7 +278,6 @@ function AttendancePage({ sites, user }) {
         </p>
       )}
 
-      {/* ડાયરેક્ટ કેમેરા ઓપન કરવા માટેનું સેક્શન */}
       <div style={{ marginBottom: '15px', textAlign: 'center' }}>
         <input 
           type="file" 
@@ -323,7 +321,6 @@ function AttendancePage({ sites, user }) {
         </button>
       </div>
 
-      {/* Date to Date Report Filter Section */}
       <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
         <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
           <Calendar size={14} /> Generate Attendance Report (Date to Date):
@@ -345,7 +342,6 @@ function AttendancePage({ sites, user }) {
         </div>
       </div>
 
-      {/* Report Popup Modal */}
       {showReportPopup && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '20px', width: '90%', maxWidth: '650px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
@@ -393,7 +389,7 @@ function AttendancePage({ sites, user }) {
                     {(() => {
                       let totalMinutes = reportData.reduce((acc, row) => {
                         if (row.workingHours !== '-') {
-                      const parts = row.workingHours.split(' ');
+                          const parts = row.workingHours.split(' ');
                           const hrs = parseInt(parts[0]) || 0;
                           const mins = parseInt(parts[2]) || 0;
                           return acc + (hrs * 60) + mins;
@@ -418,7 +414,6 @@ function AttendancePage({ sites, user }) {
         </div>
       )}
 
-      {/* History List */}
       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
           <History size={16} /> Recent Punch History ({history.length}):
