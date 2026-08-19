@@ -26,8 +26,9 @@ function Dashboard() {
     {
       title: "📊 Reports & Analytics",
       items: [
-        { id: 'employee_report', label: '7. Employee Report', icon: Users, color: '#db2777', path: '/employee-report' },
-        { id: 'crm_report', label: '8. CRM Report', icon: Briefcase, color: '#d97706', path: '/crm-report' },
+        { id: 'staff_management', label: '7. Staff Management', icon: Users, color: '#db2777', path: '/staff-management' },
+        { id: 'employee_report', label: '8. Employee Report', icon: Users, color: '#db2777', path: '/employee-report' },
+        { id: 'crm_report', label: '9. CRM Report', icon: Briefcase, color: '#d97706', path: '/crm-report' },
       ]
     }
   ]

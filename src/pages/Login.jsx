@@ -3,8 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 
 function Login() {
-  const [email, setEmail] = useState('infra.tnj@gmail.com')
-  const [password, setPassword] = useState('Infra@2026')
+  const [email, setEmail] = useState('') // અહીંથી ડિફોલ્ટ ઈમેલ કાઢી નાખ્યો છે
+  const [password, setPassword] = useState('') // અહીંથી ડિફોલ્ਟ પાસવર્ડ કાઢી નાખ્યો છે
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -74,6 +74,7 @@ function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="off"
                 required
                 style={{
                   width: '100%',
@@ -86,7 +87,7 @@ function Login() {
                   color: '#0f172a',
                   boxSizing: 'border-box'
                 }}
-                placeholder="infra.tnj@gmail.com"
+                placeholder="Enter your email"
               />
             </div>
 
@@ -100,6 +101,7 @@ function Login() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
                 required
                 style={{
                   width: '100%',
