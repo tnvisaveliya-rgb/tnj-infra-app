@@ -27,10 +27,47 @@ function SupervisorExpenses() {
     loadContractors()
     loadTransactions()
   }, [user]) // user બદલાય એટલે ડેટા ફરી લોડ થાય
+const loadSites = async () => {
+    try {
+      const userEmail = user?.email;
+      const userId = user?.id;
+      
+      // ૧. જો એડમિન હોય તો બધી સાઇટ્સ બતાવો
+      if (userEmail === 'infra.tnj@gmail.com') {
+        const { data } = await supabase.from('sites').select('*');
+        setSites(data || []);
+        return;
+      }
 
-  const loadSites = async () => {
-    const { data } = await supabase.from('sites').select('*')
-    setSites(data || [])
+      // ૨. user_id ના આધારે user_permissions ટેબલમાંથી અસાઈન સાઇટ્સ મેળવો
+      const { data: permData, error: permError } = await supabase
+        .from('user_permissions')
+        .select('assigned_sites')
+        .eq('user_id', userId)
+        .single();
+
+      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
+        setSites([]); 
+        return;
+      }
+
+      const assignedSiteNames = permData.assigned_sites;
+
+      // ૩. sites ટેબલમાંથી માત્ર તે જ સાઇટ્સ ખેંચી લાવો જે અસાઈન થયેલી છે
+      const { data: siteData, error: siteError } = await supabase
+        .from('sites')
+        .select('*')
+        .in('site_name', assignedSiteNames);
+
+      if (!siteError && siteData) {
+        setSites(siteData);
+      } else {
+        setSites([]);
+      }
+    } catch (err) {
+      console.error('Error loading assigned sites:', err);
+      setSites([]);
+    }
   }
 
   const loadVendors = async () => {

@@ -4,7 +4,7 @@ import { Filter, Printer, FileDown, Package, User, ExternalLink } from 'lucide-r
 
 function SiteReportPage() {
   const [sites, setSites] = useState([])
-  const [partyNamesList, setPartyNamesList] = useState([])
+  const [selectedState, setSelectedState] = useState('all') // રાજ્ય (State) ફિલ્ટર માટે
   const [selectedSite, setSelectedSite] = useState('all')
   const [reportType, setReportType] = useState('all') 
   const [selectedParty, setSelectedParty] = useState('all')
@@ -12,6 +12,7 @@ function SiteReportPage() {
   const [toDate, setToDate] = useState('')
   const [reports, setReports] = useState([])
   const [movements, setMovements] = useState([])
+  const [partyNamesList, setPartyNamesList] = useState([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -27,6 +28,14 @@ function SiteReportPage() {
     const { data } = await supabase.from('sites').select('*')
     setSites(data || [])
   }
+
+  // સાઇટ્સમાંથી યુનિક સ્ટેટ્સની યાદી કાઢવા માટે
+  const uniqueStates = ['all', ...new Set(sites.map(s => s.state).filter(Boolean))]
+
+  // સ્ટેટ મુજબ સાઇટ્સ ફિલ્ટર કરવા માટે
+  const filteredSites = selectedState === 'all' 
+    ? sites 
+    : sites.filter(s => s.state === selectedState)
 
   const loadAllMastersAndData = async () => {
     setLoading(true)
@@ -371,18 +380,13 @@ function SiteReportPage() {
       
 <style>{`
         @media print {
-          /* ૧. બ્રાઉઝરના ડિફોલ્ટ માર્જિનને દૂર કરો */
           @page {
             size: A4 landscape;
             margin: 5mm;
           }
-
-          /* ૨. જે ક્લાસમાં no-print લખ્યું છે તે બધું પ્રિન્ટ વખતે ગાયબ થઈ જશે */
           .no-print, header, nav, aside, footer {
             display: none !important;
           }
-
-          /* ૩. ફક્ત પ્રિન્ટ માટેનું કન્ટેનર જ દેખાવું જોઈએ */
           .print-table-container {
             display: block !important;
             width: 100% !important;
@@ -392,13 +396,10 @@ function SiteReportPage() {
             left: 0 !important;
             top: 0 !important;
           }
-
-          /* ૪. ટેબલના અક્ષરો અને સ્ટાઈલ */
           table {
             width: 100% !important;
             border-collapse: collapse !important;
           }
-
           th, td {
             border: 1px solid #000 !important;
             padding: 3px !important;
@@ -407,21 +408,17 @@ function SiteReportPage() {
             color: #000 !important;
             background-color: #ffffff !important;
           }
-
           th { background-color: #f1f5f9 !important; font-weight: bold !important; }
-          
-          /* બ્લેન્ક પેજ અટકાવવા માટે */
           tr { page-break-inside: avoid !important; }
         }
-
-        /* નોર્મલ સ્ક્રીન માટે - આ ડેટા એપ્લિકેશનમાં દેખાય તે માટે જરૂરી છે */
         .print-table-container { display: none; }
       `}</style>
+
       {/* Header & Buttons */}
       <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📋 Comprehensive Site & Material Reports</h1>
-          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>Filter all 6 report sections, vendors/parties, and date range.</p>
+          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>Filter by State, Site, 6 report sections, vendors/parties, and date range.</p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={exportToExcel} style={{ backgroundColor: '#16a34a', color: '#fff', padding: '10px 16px', borderRadius: '8px', border: 'none', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -439,9 +436,21 @@ function SiteReportPage() {
           <Filter size={16} /> Filters:
         </div>
 
+        {/* State Filter Dropdown */}
+        <select 
+          value={selectedState} 
+          onChange={(e) => { setSelectedState(e.target.value); setSelectedSite('all'); }} 
+          style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fdf4ff', color: '#a21caf', fontWeight: 'bold' }}
+        >
+          {uniqueStates.map(st => (
+            <option key={st} value={st}>{st === 'all' ? '🌐 All States' : st}</option>
+          ))}
+        </select>
+
+        {/* Site Filter Dropdown */}
         <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)} style={{ flex: '1 1 150px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', fontWeight: 'bold' }}>
-          <option value="all">🌐 All Sites</option>
-          {sites.map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
+          <option value="all">🌐 All Sites {selectedState !== 'all' ? `(${selectedState})` : ''}</option>
+          {filteredSites.map(s => <option key={s.id} value={s.site_name}>{s.site_name} {s.state ? `(${s.state})` : ''}</option>)}
         </select>
 
         <select value={reportType} onChange={(e) => setReportType(e.target.value)} style={{ flex: '1 1 170px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}>
@@ -471,8 +480,8 @@ function SiteReportPage() {
           <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
         </div>
 
-        {(selectedSite !== 'all' || reportType !== 'all' || selectedParty !== 'all' || fromDate || toDate) && (
-          <button onClick={() => { setSelectedSite('all'); setReportType('all'); setSelectedParty('all'); setFromDate(''); setToDate(''); }} style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}>
+        {(selectedState !== 'all' || selectedSite !== 'all' || reportType !== 'all' || selectedParty !== 'all' || fromDate || toDate) && (
+          <button onClick={() => { setSelectedState('all'); setSelectedSite('all'); setReportType('all'); setSelectedParty('all'); setFromDate(''); setToDate(''); }} style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}>
             Reset
           </button>
         )}
@@ -483,7 +492,7 @@ function SiteReportPage() {
         <h2 style={{ textAlign: 'center', fontSize: '16px', fontWeight: 'bold', margin: '0 0 4px 0' }}>T&J Infra</h2>
         <h3 style={{ textAlign: 'center', fontSize: '13px', margin: '0 0 5px 0' }}>Comprehensive Report ({reportType.toUpperCase()})</h3>
         <div style={{ fontSize: '11px', marginBottom: '10px', textAlign: 'center' }}>
-          <strong>Site:</strong> {selectedSite} | <strong>Party:</strong> {selectedParty}
+          <strong>State:</strong> {selectedState} | <strong>Site:</strong> {selectedSite} | <strong>Party:</strong> {selectedParty}
           {(fromDate || toDate) && (
             <span> | <strong>Period:</strong> {fromDate || 'Start'} to {toDate || 'Present'}</span>
           )}
@@ -751,13 +760,13 @@ function SiteReportPage() {
         })()}
       </div>
 
-      {/* 1. MATERIAL-WISE STOCK SUMMARY BOX */}
+      {/* Material Summary & Table */}
       <div className="no-print">
         {Object.keys(materialSummary).length > 0 && (
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '16px', marginBottom: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
               <Package size={18} color="#2563eb" />
-              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📊 Material Stock Summary (Inward - Usage - Outward - Damage = Stock)</h4>
+              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📊 Material Stock Summary</h4>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -791,12 +800,11 @@ function SiteReportPage() {
           </div>
         )}
 
-        {/* 2. CONTRACTOR-WISE WORK SUMMARY */}
         {Object.keys(contractorSummary).length > 0 && (
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '16px', marginBottom: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
               <User size={18} color="#86198f" />
-              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>👷 Contractor-wise Work Summary (કોન્ટ્રાક્ટર વાઇઝ કુલ કામ)</h4>
+              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>👷 Contractor-wise Work Summary</h4>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
               {Object.entries(contractorSummary).map(([cName, cData], idx) => (
@@ -814,7 +822,6 @@ function SiteReportPage() {
           </div>
         )}
 
-        {/* Results Container */}
         <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
@@ -855,7 +862,7 @@ function SiteReportPage() {
                       </div>
                     )}
                   </div>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb', backgroundColor: '#eff6ff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb', backgroundColor: '#eff6ff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
                     {item.qty} {item.unit}
                   </div>
                 </div>
