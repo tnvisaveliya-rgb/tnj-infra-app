@@ -59,23 +59,318 @@ function SupervisorDashboard() {
     loadTransactions()
   }, [])
 
-  // Auto-Save Draft (Conflict દૂર કરવા માટે onConflict ઉમેરેલ છે)
+  // Image Compression Function
+  const compressImage = (file) => {
+    return new Promise((resolve) => {
+      if (!file || typeof file !== 'object' || !(file instanceof Blob || file instanceof File)) {
+        resolve(file);
+        return;
+      }
+      if (file.type === 'application/pdf') {
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => resolve(file);
+      try {
+        reader.readAsDataURL(file);
+      } catch (e) {
+        resolve(file);
+        return;
+      }
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          if (width > height) {
+            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+          } else {
+            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              resolve(file);
+              return;
+            }
+            const compressedFile = new File([blob], file.name || 'image.jpg', {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          }, 'image/jpeg', 0.7);
+        };
+        img.onerror = () => resolve(file);
+      };
+    });
+  };
+
+  // Helper Function: જે ફોટા અપલોડ કરી URL પાછા આપશે
+  const uploadFilesToSupabase = async (fileArray, folderName) => {
+    if (!fileArray || !Array.isArray(fileArray)) return [];
+    let urls = [];
+    for (let file of fileArray) {
+      if (file instanceof File) {
+        const compressedFile = await compressImage(file);
+        const fileExt = compressedFile.name ? compressedFile.name.split('.').pop() : 'jpg';
+        const fileName = `${folderName}/${user.id}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const { data, error } = await supabase.storage.from('site-photos').upload(fileName, compressedFile);
+        if (!error && data) {
+          const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName);
+          urls.push(publicUrl);
+        }
+      } else if (typeof file === 'string') {
+        urls.push(file); // જો પહેલેથી URL હોય તો તે જ રાખો
+      }
+    }
+    return urls;
+  };
+
+  // ૧. Auto-Save Draft: ફાઈલ અપલોડ કરી URL ને સ્ટેટમાં સેવ કરશે
   useEffect(() => {
     if (!showReportForm || !reportForm.siteName || !user?.id) return;
 
     const timer = setTimeout(async () => {
-      await supabase
-        .from('site_drafts')
-        .upsert({
+      try {
+        const updatedInward = await Promise.all(reportForm.inwardSources.map(async (src) => ({
+          ...src,
+          files: await uploadFilesToSupabase(src.files, 'inward')
+        })));
+
+        const updatedOutward = await Promise.all(reportForm.outwardDestinations.map(async (dest) => ({
+          ...dest,
+          files: await uploadFilesToSupabase(dest.files, 'outward')
+        })));
+
+        const updatedDamage = await Promise.all(reportForm.damageItems.map(async (dItem) => ({
+          ...dItem,
+          files: await uploadFilesToSupabase(dItem.files, 'damage')
+        })));
+
+        const updatedProgressPhotos = await uploadFilesToSupabase(siteProgressPhotos, 'site_progress');
+
+        // ડ્રાફ્ટ ટેબલમાં અપડેટ કરો
+        await supabase.from('site_drafts').upsert({
           user_id: user.id,
           site_id: reportForm.siteName,
-          report_data: reportForm,
+          report_data: { 
+            ...reportForm, 
+            inwardSources: updatedInward,
+            outwardDestinations: updatedOutward,
+            damageItems: updatedDamage,
+            draftPhotoUrls: updatedProgressPhotos 
+          },
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id, site_id' });
+
+        // IMPORTANT: સ્ટેટ અપડેટ કરો જેથી ફાઈનલ સબમિટ વખતે URL મળે
+        setReportForm(prev => ({
+          ...prev,
+          inwardSources: updatedInward,
+          outwardDestinations: updatedOutward,
+          damageItems: updatedDamage
+        }));
+        setSiteProgressPhotos(updatedProgressPhotos);
+
+      } catch (err) {
+        console.error("Draft auto-save error:", err);
+      }
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [reportForm, showReportForm, user]);
+  }, [reportForm, showReportForm, siteProgressPhotos, user]);
+
+  // ૨. ConfirmAndSave: હવે તે URL ચેક કરશે
+  const confirmAndSave = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const supervisorEmail = user?.email || 'Supervisor'
+
+      // ૧. Progress Photos Upload
+      let sitePhotoUrls = []
+      for (let file of siteProgressPhotos) {
+        if (file instanceof File) {
+          const compressedFile = await compressImage(file)
+          const fileExt = compressedFile.name.split('.').pop()
+          const fileName = `site_progress/site_prog_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
+          if (uploadError) throw new Error("Progress photo upload failed: " + uploadError.message)
+          const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
+          sitePhotoUrls.push(publicUrl)
+        } else if (typeof file === 'string') {
+          sitePhotoUrls.push(file)
+        }
+      }
+
+      // ૨. Damage Items Photos Upload
+      let finalDamageItems = []
+      for (let i = 0; i < reportForm.damageItems.length; i++) {
+        let dItem = reportForm.damageItems[i]
+        let damageUrls = []
+        for (let file of dItem.files) {
+          if (file instanceof File) {
+            const compressedFile = await compressImage(file)
+            const fileExt = compressedFile.name.split('.').pop()
+            const fileName = `damage/damage_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
+            if (uploadError) throw new Error("Damage photo upload failed: " + uploadError.message)
+            const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
+            damageUrls.push(publicUrl)
+          } else if (typeof file === 'string') {
+            damageUrls.push(file)
+          }
+        }
+        finalDamageItems.push({
+          ...dItem,
+          bill_urls: damageUrls
+        })
+      }
+
+      // ૩. Insert Daily Report
+      const { error: repError } = await supabase.from('daily_reports').insert([{
+        site_name: reportForm.siteName,
+        contractor_details: reportForm.contractorRows,
+        paling_work: reportForm.palingWorkRows,
+        damage_items: finalDamageItems,
+        final_work: reportForm.finalWorkRows,
+        description: reportForm.description,
+        photo_urls: sitePhotoUrls,
+        report_date: reportForm.reportDate,
+        user_id: supervisorEmail
+      }])
+      if (repError) throw new Error("Daily report insert failed: " + repError.message)
+
+      // ૪. Inward Material Movements
+      for (const src of reportForm.inwardSources) {
+        if (src.items.length > 0 && src.items[0].quantity) {
+          let srcBillUrls = []
+          for (let file of src.files) {
+            if (file instanceof File) {
+              const compressedFile = await compressImage(file)
+              const fileExt = compressedFile.name.split('.').pop()
+              const fileName = `inward/inward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+              const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
+              if (uploadError) throw new Error("Inward bill upload failed: " + uploadError.message)
+              const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
+              srcBillUrls.push(publicUrl)
+            } else if (typeof file === 'string') {
+              srcBillUrls.push(file)
+            }
+          }
+
+          const actualSourceName = src.sourceName === 'Other' ? src.customSourceName : src.sourceName
+          const formattedItems = src.items.map(it => ({
+            ...it,
+            materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
+          }))
+
+          const { error: inError } = await supabase.from('material_movements').insert([{
+            site_name: reportForm.siteName,
+            movement_type: 'inward',
+            items: formattedItems,
+            source_destination: actualSourceName,
+            dc_number: src.dcNumber,
+            vehicle_number: src.vehicleNumber,
+            description: reportForm.description,
+            bill_urls: srcBillUrls,
+            entry_date: reportForm.reportDate,
+            created_by: supervisorEmail
+          }])
+          if (inError) throw new Error("Inward movement insert failed: " + inError.message)
+        }
+      }
+
+      // ૫. Outward Material Movements
+      for (const dest of reportForm.outwardDestinations) {
+        if (dest.items.length > 0 && dest.items[0].quantity) {
+          let destBillUrls = []
+          for (let file of dest.files) {
+            if (file instanceof File) {
+              const compressedFile = await compressImage(file)
+              const fileExt = compressedFile.name.split('.').pop()
+              const fileName = `outward/outward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+              const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
+              if (uploadError) throw new Error("Outward slip upload failed: " + uploadError.message)
+              const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
+              destBillUrls.push(publicUrl)
+            } else if (typeof file === 'string') {
+              destBillUrls.push(file)
+            }
+          }
+
+          const actualDestName = dest.destName === 'Other' ? dest.customDestName : dest.destName
+          const formattedOutItems = dest.items.map(it => ({
+            ...it,
+            materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
+          }))
+
+          const { error: outError } = await supabase.from('material_movements').insert([{
+            site_name: reportForm.siteName,
+            movement_type: 'outward',
+            items: formattedOutItems,
+            source_destination: actualDestName,
+            dc_number: dest.dcNumber,
+            vehicle_number: dest.vehicleNumber,
+            description: reportForm.description,
+            bill_urls: destBillUrls,
+            entry_date: reportForm.reportDate,
+            created_by: supervisorEmail
+          }])
+          if (outError) throw new Error("Outward movement insert failed: " + outError.message)
+        }
+      }
+
+      // ૬. Success & Clear Draft
+      await supabase
+        .from('site_drafts')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('site_id', reportForm.siteName);
+
+      await loadReports()
+      setShowReportForm(false)
+      setReportForm({
+        siteName: '',
+        reportDate: new Date().toISOString().split('T')[0],
+        inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
+        palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
+        contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
+        finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
+        damageItems: [],
+        outwardDestinations: [],
+        description: ''
+      })
+      setSiteProgressPhotos([])
+      setPreviewData(null)
+      
+      setModal({ 
+        isOpen: true, 
+        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been submitted successfully.`, 
+        onConfirm: () => setModal({ isOpen: false }) 
+      });
+
+    } catch (err) {
+      setLoading(false)
+      const errorMsg = err?.message || 'Unknown error occurred while saving.'
+      setModal({ 
+        isOpen: true, 
+        message: 'Failed to save: ' + errorMsg, 
+        onConfirm: () => setModal({ isOpen: false }) 
+      });
+      setError(errorMsg)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const loadSites = async () => {
     try {
@@ -302,200 +597,6 @@ function SupervisorDashboard() {
     })
   }
 
-  const compressImage = (file) => {
-    return new Promise((resolve) => {
-      if (file.type === 'application/pdf') {
-        resolve(file);
-        return;
-      }
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target.result;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const MAX_WIDTH = 1200;
-          const MAX_HEIGHT = 1200;
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob((blob) => {
-            const compressedFile = new File([blob], file.name, {
-              type: 'image/jpeg',
-              lastModified: Date.now(),
-            });
-            resolve(compressedFile);
-          }, 'image/jpeg', 0.7);
-        };
-      };
-    });
-  };
-
-  const confirmAndSave = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const supervisorEmail = user?.email || 'Supervisor'
-
-      let sitePhotoUrls = []
-      for (let file of siteProgressPhotos) {
-        const compressedFile = await compressImage(file)
-        const fileExt = compressedFile.name.split('.').pop()
-        const fileName = `site_progress/site_prog_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
-        const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
-        if (uploadError) throw uploadError
-        const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
-        sitePhotoUrls.push(publicUrl)
-      }
-
-      for (let i = 0; i < reportForm.damageItems.length; i++) {
-        let dItem = reportForm.damageItems[i]
-        let damageUrls = []
-        for (let file of dItem.files) {
-          const compressedFile = await compressImage(file)
-          const fileExt = compressedFile.name.split('.').pop()
-          const fileName = `damage/damage_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
-          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
-          if (uploadError) throw uploadError
-          const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
-          damageUrls.push(publicUrl)
-        }
-        reportForm.damageItems[i].bill_urls = damageUrls
-      }
-
-      const { error: repError } = await supabase.from('daily_reports').insert([{
-        site_name: reportForm.siteName,
-        contractor_details: reportForm.contractorRows,
-        paling_work: reportForm.palingWorkRows,
-        damage_items: reportForm.damageItems,
-        final_work: reportForm.finalWorkRows,
-        description: reportForm.description,
-        photo_urls: sitePhotoUrls,
-        report_date: reportForm.reportDate,
-        user_id: supervisorEmail
-      }])
-      if (repError) throw repError
-
-      for (const src of reportForm.inwardSources) {
-        if (src.items.length > 0 && src.items[0].quantity) {
-          let srcBillUrls = []
-          for (let file of src.files) {
-            const compressedFile = await compressImage(file)
-            const fileExt = compressedFile.name.split('.').pop()
-            const fileName = `inward/inward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
-            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
-            if (uploadError) throw uploadError
-            const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
-            srcBillUrls.push(publicUrl)
-          }
-
-          const actualSourceName = src.sourceName === 'Other' ? src.customSourceName : src.sourceName
-          const formattedItems = src.items.map(it => ({
-            ...it,
-            materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
-          }))
-
-          const { error: inError } = await supabase.from('material_movements').insert([{
-            site_name: reportForm.siteName,
-            movement_type: 'inward',
-            items: formattedItems,
-            source_destination: actualSourceName,
-            dc_number: src.dcNumber,
-            vehicle_number: src.vehicleNumber,
-            description: reportForm.description,
-            bill_urls: srcBillUrls,
-            entry_date: reportForm.reportDate,
-            created_by: supervisorEmail
-          }])
-          if (inError) throw inError
-        }
-      }
-
-      for (const dest of reportForm.outwardDestinations) {
-        if (dest.items.length > 0 && dest.items[0].quantity) {
-          let destBillUrls = []
-          for (let file of dest.files) {
-            const compressedFile = await compressImage(file)
-            const fileExt = compressedFile.name.split('.').pop()
-            const fileName = `outward/outward_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
-            const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
-            if (uploadError) throw uploadError
-            const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
-            destBillUrls.push(publicUrl)
-          }
-
-          const actualDestName = dest.destName === 'Other' ? dest.customDestName : dest.destName
-          const formattedOutItems = dest.items.map(it => ({
-            ...it,
-            materialName: it.materialName === 'Other' ? it.customMaterialName : it.materialName
-          }))
-
-          const { error: outError } = await supabase.from('material_movements').insert([{
-            site_name: reportForm.siteName,
-            movement_type: 'outward',
-            items: formattedOutItems,
-            source_destination: actualDestName,
-            dc_number: dest.dcNumber,
-            vehicle_number: dest.vehicleNumber,
-            description: reportForm.description,
-            bill_urls: destBillUrls,
-            entry_date: reportForm.reportDate,
-            created_by: supervisorEmail
-          }])
-          if (outError) throw outError
-        }
-      }
-
-      // Final Submit થાય એટલે ડ્રાફ્ટ ડિલીટ કરી નાખો
-      await supabase
-        .from('site_drafts')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('site_id', reportForm.siteName);
-
-      await loadReports()
-      setShowReportForm(false)
-      setReportForm({
-        siteName: '',
-        reportDate: new Date().toISOString().split('T')[0],
-        inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
-        palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
-        contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
-        finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
-        damageItems: [],
-        outwardDestinations: [],
-        description: ''
-      })
-      setSiteProgressPhotos([])
-      setPreviewData(null)
-      setModal({ 
-        isOpen: true, 
-        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been submitted successfully.`, 
-        onConfirm: () => setModal({ isOpen: false }) 
-      });
-    } catch (err) {
-      setModal({ isOpen: true, message: 'Failed to save: ' + err.message, onConfirm: () => setModal({ isOpen: false }) });
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const filteredReports = reports.filter(r => {
     const matchSite = filterSite === 'all' || r.site_name === filterSite
     const matchDate = !filterDate || r.report_date === filterDate
@@ -616,7 +717,7 @@ function SupervisorDashboard() {
                             await supabase.from('site_drafts').upsert({
                               user_id: user.id,
                               site_id: reportForm.siteName,
-                              report_data: reportForm
+                              report_data: { ...reportForm, draftPhotoUrls: siteProgressPhotos }
                             }, { onConflict: 'user_id, site_id' });
 
                             const { data } = await supabase
@@ -628,6 +729,7 @@ function SupervisorDashboard() {
 
                             if (data) {
                               setReportForm(data.report_data);
+                              setSiteProgressPhotos(data.report_data.draftPhotoUrls || []);
                             } else {
                               setReportForm({
                                 siteName: newSite,
@@ -640,6 +742,7 @@ function SupervisorDashboard() {
                                 outwardDestinations: [],
                                 description: ''
                               });
+                              setSiteProgressPhotos([]);
                             }
                             setModal({ isOpen: false });
                           },
@@ -659,6 +762,7 @@ function SupervisorDashboard() {
 
                             if (data) {
                               setReportForm(data.report_data);
+                              setSiteProgressPhotos(data.report_data.draftPhotoUrls || []);
                             } else {
                               setReportForm(prev => ({ ...prev, siteName: newSite }));
                             }
@@ -797,7 +901,7 @@ function SupervisorDashboard() {
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#166534' }}>
                               Selected Files: {src.files.map((f, fi) => (
                                 <span key={fi} style={{ display: 'inline-block', background: '#e6f4ea', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                  {f.name} <button type="button" onClick={() => {
+                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} <button type="button" onClick={() => {
                                     const updated = [...reportForm.inwardSources]
                                     updated[sIndex].files = updated[sIndex].files.filter((_, idx) => idx !== fi)
                                     setReportForm({...reportForm, inwardSources: updated})
@@ -1087,7 +1191,7 @@ function SupervisorDashboard() {
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#991b1b' }}>
                               Selected Files: {dItem.files.map((f, fi) => (
                                 <span key={fi} style={{ display: 'inline-block', background: '#fde8e8', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                  {f.name} <button type="button" onClick={() => {
+                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')}<button type="button" onClick={() => {
                                     const updated = [...reportForm.damageItems]
                                     updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
                                     setReportForm({...reportForm, damageItems: updated})
@@ -1207,7 +1311,7 @@ function SupervisorDashboard() {
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#9a3412' }}>
                               Selected Files: {dest.files.map((f, fi) => (
                                 <span key={fi} style={{ display: 'inline-block', background: '#fae1db', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                  {f.name} <button type="button" onClick={() => {
+                                 {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} <button type="button" onClick={() => {
                                     const updated = [...reportForm.outwardDestinations]
                                     updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
                                     setReportForm({...reportForm, outwardDestinations: updated})
@@ -1238,7 +1342,7 @@ function SupervisorDashboard() {
                         Selected Progress Photos:
                         {siteProgressPhotos.map((file, idx) => (
                           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', background: '#fff', padding: '4px 8px', margin: '4px 0', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
-                            <span>{file.name}</span>
+                            <span>{file.name || 'Progress Photo'}</span>
                             <button type="button" onClick={() => setSiteProgressPhotos(siteProgressPhotos.filter((_, i) => i !== idx))} style={{ color: 'red', border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer' }}>Remove</button>
                           </div>
                         ))}
@@ -1296,7 +1400,7 @@ function SupervisorDashboard() {
                       })}
                       {src.files.length > 0 && (
                         <div style={{ marginLeft: '12px', fontSize: '11px', color: '#166534' }}>
-                          📎 Files: {src.files.map(f => f.name).join(', ')}
+                          📎 Files: {src.files.length} attached
                         </div>
                       )}
                     </div>
@@ -1381,7 +1485,7 @@ function SupervisorDashboard() {
             </div>
 
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={confirmAndSave} style={{ flex: 1, padding: '10px', backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Confirm & Save</button>
+              <button onClick={() => { setPreviewData(null); confirmAndSave(); }} style={{ flex: 1, padding: '10px', backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Confirm & Save</button>
               <button onClick={() => setPreviewData(null)} style={{ flex: 1, padding: '10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
