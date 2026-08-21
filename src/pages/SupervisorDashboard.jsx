@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, AlertCircle, X, Filter } from 'lucide-react'
+import { Plus, Trash2, AlertCircle, Filter } from 'lucide-react'
 import ExpensesPage from './SupervisorExpenses';
 import AttendancePage from './AttendancePage';
 import ConfirmModal from '../components/ConfirmModal';
@@ -26,9 +26,16 @@ function SupervisorDashboard() {
   const [showReportForm, setShowReportForm] = useState(false)
   const [modal, setModal] = useState({ isOpen: false, message: '', onConfirm: null });
 
+  // આજની તારીખ કાઢવા માટેનું ફંક્શન (ભવિષ્યની તારીખ રોકવા)
+  const getTodayString = () => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().split('T')[0];
+  };
+
   const [reportForm, setReportForm] = useState({
     siteName: '',
-    reportDate: new Date().toISOString().split('T')[0],
+    reportDate: getTodayString(),
     inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
     palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }], 
     contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
@@ -42,6 +49,7 @@ function SupervisorDashboard() {
 
   const UOM_OPTIONS = ["NOS", "Bags", "KG", "Ton", "Ltr"]
 
+  // Note: These states are reserved for Attendance & Expenses logic
   const [punchStatus, setPunchStatus] = useState(false)
   const [attendanceSite, setAttendanceSite] = useState('')
   const [transactions, setTransactions] = useState([])
@@ -62,7 +70,7 @@ function SupervisorDashboard() {
   // Image Compression Function
   const compressImage = (file) => {
     return new Promise((resolve) => {
-      if (!file || typeof file !== 'object' || !(file instanceof Blob || file instanceof File)) {
+      if (!file || !(file instanceof Blob || file instanceof File)) {
         resolve(file);
         return;
       }
@@ -72,12 +80,7 @@ function SupervisorDashboard() {
       }
       const reader = new FileReader();
       reader.onerror = () => resolve(file);
-      try {
-        reader.readAsDataURL(file);
-      } catch (e) {
-        resolve(file);
-        return;
-      }
+      reader.readAsDataURL(file);
       reader.onload = (event) => {
         const img = new Image();
         img.src = event.target.result;
@@ -97,10 +100,7 @@ function SupervisorDashboard() {
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
           canvas.toBlob((blob) => {
-            if (!blob) {
-              resolve(file);
-              return;
-            }
+            if (!blob) { resolve(file); return; }
             const compressedFile = new File([blob], file.name || 'image.jpg', {
               type: 'image/jpeg',
               lastModified: Date.now(),
@@ -113,51 +113,93 @@ function SupervisorDashboard() {
     });
   };
 
-  // Helper Function: જે ફોટા અપલોડ કરી URL પાછા આપશે
+  const deleteFileFromStorage = async (fileUrl) => {
+    try {
+      if (!fileUrl || typeof fileUrl !== 'string') return;
+      
+      let filePath = '';
+      if (fileUrl.includes('/site-photos/')) {
+        filePath = fileUrl.split('/site-photos/')[1];
+      } else {
+        filePath = fileUrl;
+      }
+
+      // Remove query params if any
+      if (filePath.includes('?')) {
+        filePath = filePath.split('?')[0];
+      }
+
+      if (filePath) {
+        const { error } = await supabase.storage.from('site-photos').remove([filePath]);
+        if (error) {
+          console.error("Storage delete error:", error.message);
+        } else {
+          console.log("File successfully deleted from storage:", filePath);
+        }
+      }
+    } catch (err) {
+      console.error("Error deleting file from storage:", err);
+    }
+  };
+
   const uploadFilesToSupabase = async (fileArray, folderName) => {
     if (!fileArray || !Array.isArray(fileArray)) return [];
     let urls = [];
-    for (let file of fileArray) {
+    
+    const sitePrefix = reportForm.siteName ? reportForm.siteName.replace(/\s+/g, '_').toLowerCase() : 'unknown';
+    const datePrefix = reportForm.reportDate || 'date';
+
+    for (let i = 0; i < fileArray.length; i++) {
+      let file = fileArray[i];
+      
       if (file instanceof File) {
         const compressedFile = await compressImage(file);
         const fileExt = compressedFile.name ? compressedFile.name.split('.').pop() : 'jpg';
-        const fileName = `${folderName}/${user.id}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        
+        const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).substring(7)}_${i}`;
+        const fileName = `${folderName}/${sitePrefix}_${datePrefix}_${uniqueSuffix}.${fileExt}`;
+        
         const { data, error } = await supabase.storage.from('site-photos').upload(fileName, compressedFile);
         if (!error && data) {
           const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName);
           urls.push(publicUrl);
         }
       } else if (typeof file === 'string') {
-        urls.push(file); // જો પહેલેથી URL હોય તો તે જ રાખો
+        urls.push(file); 
       }
     }
     return urls;
   };
 
-  // ૧. Auto-Save Draft: ફાઈલ અપલોડ કરી URL ને સ્ટેટમાં સેવ કરશે
+  // 1. Auto-Save Draft
   useEffect(() => {
     if (!showReportForm || !reportForm.siteName || !user?.id) return;
 
     const timer = setTimeout(async () => {
       try {
-        const updatedInward = await Promise.all(reportForm.inwardSources.map(async (src) => ({
-          ...src,
-          files: await uploadFilesToSupabase(src.files, 'inward')
-        })));
+        let hasFileChanges = false; 
 
-        const updatedOutward = await Promise.all(reportForm.outwardDestinations.map(async (dest) => ({
-          ...dest,
-          files: await uploadFilesToSupabase(dest.files, 'outward')
-        })));
+        const updatedInward = await Promise.all(reportForm.inwardSources.map(async (src) => {
+          const newFiles = await uploadFilesToSupabase(src.files, 'inward');
+          if (JSON.stringify(newFiles) !== JSON.stringify(src.files)) hasFileChanges = true;
+          return { ...src, files: newFiles };
+        }));
 
-        const updatedDamage = await Promise.all(reportForm.damageItems.map(async (dItem) => ({
-          ...dItem,
-          files: await uploadFilesToSupabase(dItem.files, 'damage')
-        })));
+        const updatedOutward = await Promise.all(reportForm.outwardDestinations.map(async (dest) => {
+          const newFiles = await uploadFilesToSupabase(dest.files, 'outward');
+          if (JSON.stringify(newFiles) !== JSON.stringify(dest.files)) hasFileChanges = true;
+          return { ...dest, files: newFiles };
+        }));
+
+        const updatedDamage = await Promise.all(reportForm.damageItems.map(async (dItem) => {
+          const newFiles = await uploadFilesToSupabase(dItem.files, 'damage');
+          if (JSON.stringify(newFiles) !== JSON.stringify(dItem.files)) hasFileChanges = true;
+          return { ...dItem, files: newFiles };
+        }));
 
         const updatedProgressPhotos = await uploadFilesToSupabase(siteProgressPhotos, 'site_progress');
+        if (JSON.stringify(updatedProgressPhotos) !== JSON.stringify(siteProgressPhotos)) hasFileChanges = true;
 
-        // ડ્રાફ્ટ ટેબલમાં અપડેટ કરો
         await supabase.from('site_drafts').upsert({
           user_id: user.id,
           site_id: reportForm.siteName,
@@ -171,14 +213,15 @@ function SupervisorDashboard() {
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id, site_id' });
 
-        // IMPORTANT: સ્ટેટ અપડેટ કરો જેથી ફાઈનલ સબમિટ વખતે URL મળે
-        setReportForm(prev => ({
-          ...prev,
-          inwardSources: updatedInward,
-          outwardDestinations: updatedOutward,
-          damageItems: updatedDamage
-        }));
-        setSiteProgressPhotos(updatedProgressPhotos);
+        if (hasFileChanges) {
+          setReportForm(prev => ({
+            ...prev,
+            inwardSources: updatedInward,
+            outwardDestinations: updatedOutward,
+            damageItems: updatedDamage
+          }));
+          setSiteProgressPhotos(updatedProgressPhotos);
+        }
 
       } catch (err) {
         console.error("Draft auto-save error:", err);
@@ -188,14 +231,27 @@ function SupervisorDashboard() {
     return () => clearTimeout(timer);
   }, [reportForm, showReportForm, siteProgressPhotos, user]);
 
-  // ૨. ConfirmAndSave: હવે તે URL ચેક કરશે
+  // ફોર્મ સાવ ખાલી છે કે કેમ તે ચેક કરવા
+  const isFormEmpty = () => {
+    const hasInward = reportForm.inwardSources.some(src => src.items.some(it => it.quantity && parseFloat(it.quantity) > 0));
+    const hasPaling = reportForm.palingWorkRows.some(p => p.qty && parseFloat(p.qty) > 0);
+    const hasContractor = reportForm.contractorRows.some(c => (c.labourCount && parseFloat(c.labourCount) > 0) || c.materials.some(m => m.quantity && parseFloat(m.quantity) > 0));
+    const hasFinalWork = reportForm.finalWorkRows.some(f => (f.runningFeet && parseFloat(f.runningFeet) > 0) || (f.height && parseFloat(f.height) > 0));
+    const hasDamage = reportForm.damageItems.some(d => d.quantity && parseFloat(d.quantity) > 0);
+    const hasOutward = reportForm.outwardDestinations.some(dest => dest.items.some(it => it.quantity && parseFloat(it.quantity) > 0));
+    const hasPhotos = siteProgressPhotos.length > 0;
+    const hasDescription = reportForm.description.trim().length > 0;
+
+    return !(hasInward || hasPaling || hasContractor || hasFinalWork || hasDamage || hasOutward || hasPhotos || hasDescription);
+  };
+
+  // 2. ConfirmAndSave
   const confirmAndSave = async () => {
     setLoading(true)
     setError('')
     try {
       const supervisorEmail = user?.email || 'Supervisor'
 
-      // ૧. Progress Photos Upload
       let sitePhotoUrls = []
       for (let file of siteProgressPhotos) {
         if (file instanceof File) {
@@ -211,7 +267,6 @@ function SupervisorDashboard() {
         }
       }
 
-      // ૨. Damage Items Photos Upload
       let finalDamageItems = []
       for (let i = 0; i < reportForm.damageItems.length; i++) {
         let dItem = reportForm.damageItems[i]
@@ -235,7 +290,6 @@ function SupervisorDashboard() {
         })
       }
 
-      // ૩. Insert Daily Report
       const { error: repError } = await supabase.from('daily_reports').insert([{
         site_name: reportForm.siteName,
         contractor_details: reportForm.contractorRows,
@@ -249,8 +303,8 @@ function SupervisorDashboard() {
       }])
       if (repError) throw new Error("Daily report insert failed: " + repError.message)
 
-      // ૪. Inward Material Movements
       for (const src of reportForm.inwardSources) {
+        // તમારું જૂનું લોજીક: Quantity હોય તો જ સેવ થશે
         if (src.items.length > 0 && src.items[0].quantity) {
           let srcBillUrls = []
           for (let file of src.files) {
@@ -289,8 +343,8 @@ function SupervisorDashboard() {
         }
       }
 
-      // ૫. Outward Material Movements
       for (const dest of reportForm.outwardDestinations) {
+        // તમારું જૂનું લોજીક: Quantity હોય તો જ સેવ થશે
         if (dest.items.length > 0 && dest.items[0].quantity) {
           let destBillUrls = []
           for (let file of dest.files) {
@@ -329,7 +383,6 @@ function SupervisorDashboard() {
         }
       }
 
-      // ૬. Success & Clear Draft
       await supabase
         .from('site_drafts')
         .delete()
@@ -340,7 +393,7 @@ function SupervisorDashboard() {
       setShowReportForm(false)
       setReportForm({
         siteName: '',
-        reportDate: new Date().toISOString().split('T')[0],
+        reportDate: getTodayString(),
         inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
         palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
         contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
@@ -363,7 +416,7 @@ function SupervisorDashboard() {
       const errorMsg = err?.message || 'Unknown error occurred while saving.'
       setModal({ 
         isOpen: true, 
-        message: 'Failed to save: ' + errorMsg, 
+        message: 'Failed to save: ' + errorMsg + '. Your data is NOT lost, please try submitting again.', 
         onConfirm: () => setModal({ isOpen: false }) 
       });
       setError(errorMsg)
@@ -469,7 +522,8 @@ function SupervisorDashboard() {
         updated[sIndex].sourceName = newValue;
         setReportForm({...reportForm, inwardSources: updated});
         setModal({ isOpen: false, message: '', onConfirm: null });
-      }
+      },
+      onCancel: () => setModal({ isOpen: false })
     });
   };
 
@@ -482,7 +536,8 @@ function SupervisorDashboard() {
         updated[dIndex].destName = newValue;
         setReportForm({...reportForm, outwardDestinations: updated});
         setModal({ isOpen: false, message: '', onConfirm: null });
-      }
+      },
+      onCancel: () => setModal({ isOpen: false })
     });
   };
 
@@ -505,7 +560,8 @@ function SupervisorDashboard() {
           setReportForm({...reportForm, finalWorkRows: updated});
         }
         setModal({ isOpen: false, message: '', onConfirm: null });
-      }
+      },
+      onCancel: () => setModal({ isOpen: false })
     });
   };
   
@@ -559,6 +615,11 @@ function SupervisorDashboard() {
     if (!reportForm.siteName) {
       setModal({ isOpen: true, message: 'કૃપા કરીને સાઇટ સિલેક્ટ કરો!', onConfirm: () => setModal({ isOpen: false }) });
       return
+    }
+
+    if (isFormEmpty()) {
+      setModal({ isOpen: true, message: '⚠️ ફોર્મ ખાલી છે! સબમિટ કરવા માટે કૃપા કરીને કોઈ વિગત ભરો.', onConfirm: () => setModal({ isOpen: false }) });
+      return;
     }
 
     for (let i = 0; i < reportForm.inwardSources.length; i++) {
@@ -635,7 +696,7 @@ function SupervisorDashboard() {
         <div>
           {!showReportForm && (
             <>
-              {/* ફિલ્ટર ડ્રોપડાઉન */}
+              {/* Filter Dropdown */}
               <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <Filter size={14} color="#64748b" />
                 <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}>
@@ -652,7 +713,7 @@ function SupervisorDashboard() {
                   onClick={() => {
                     setReportForm({
                       siteName: '',
-                      reportDate: new Date().toISOString().split('T')[0],
+                      reportDate: getTodayString(),
                       inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
                       palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
                       contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
@@ -670,7 +731,7 @@ function SupervisorDashboard() {
                 </button>
               </div>
 
-              {/* જૂની રિપોર્ટ હિસ્ટ્રી */}
+              {/* Historical Reports */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
                 {filteredReports.map(r => (
                   <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
@@ -689,7 +750,7 @@ function SupervisorDashboard() {
             </>
           )}
 
-          {/* ફોર્મ સેક્શન */}
+          {/* Form Section */}
           {showReportForm && (
             <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '16px', boxSizing: 'border-box', width: '100%', overflowX: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -733,7 +794,7 @@ function SupervisorDashboard() {
                             } else {
                               setReportForm({
                                 siteName: newSite,
-                                reportDate: new Date().toISOString().split('T')[0],
+                                reportDate: getTodayString(),
                                 inwardSources: [{ sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }],
                                 palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
                                 contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
@@ -782,8 +843,9 @@ function SupervisorDashboard() {
                   </select>
                 </div>
                 <div>
+                  {/* Future Date blocked using 'max' attribute */}
                   <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Report Date *</label>
-                  <input type="date" value={reportForm.reportDate} onChange={(e) => setReportForm({...reportForm, reportDate: e.target.value})} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
+                  <input type="date" max={getTodayString()} value={reportForm.reportDate} onChange={(e) => setReportForm({...reportForm, reportDate: e.target.value})} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
                 </div>
               </div>
 
@@ -896,16 +958,29 @@ function SupervisorDashboard() {
                               updated[sIndex].files = [...updated[sIndex].files, ...Array.from(e.target.files)]
                               setReportForm({...reportForm, inwardSources: updated})
                             }
+                            e.target.value = null; // Input Reset Fix
                           }} style={{ fontSize: '10px', width: '100%', boxSizing: 'border-box' }} />
                           {src.files.length > 0 && (
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#166534' }}>
                               Selected Files: {src.files.map((f, fi) => (
-                                <span key={fi} style={{ display: 'inline-block', background: '#e6f4ea', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} <button type="button" onClick={() => {
-                                    const updated = [...reportForm.inwardSources]
-                                    updated[sIndex].files = updated[sIndex].files.filter((_, idx) => idx !== fi)
-                                    setReportForm({...reportForm, inwardSources: updated})
-                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>x</button>
+                                <span key={fi} style={{ display: 'inline-block', background: '#e6f4ea', padding: '2px 4px', margin: '2px', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} 
+                                  <button type="button" onClick={() => {
+                                    // Warning before delete
+                                    setModal({
+                                      isOpen: true,
+                                      message: 'શું તમે ખરેખર આ બિલ/ફોટો ડીલીટ કરવા માંગો છો?',
+                                      onConfirm: () => {
+                                        const fileToRemove = src.files[fi];
+                                        if (typeof fileToRemove === 'string') deleteFileFromStorage(fileToRemove);
+                                        const updated = [...reportForm.inwardSources]
+                                        updated[sIndex].files = updated[sIndex].files.filter((_, idx) => idx !== fi)
+                                        setReportForm({...reportForm, inwardSources: updated})
+                                        setModal({ isOpen: false });
+                                      },
+                                      onCancel: () => setModal({ isOpen: false })
+                                    });
+                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer', marginLeft: '4px', fontWeight: 'bold' }}>x</button>
                                 </span>
                               ))}
                             </div>
@@ -1172,11 +1247,11 @@ function SupervisorDashboard() {
                           </div>
                         </div>
 
-                        <input type="text" placeholder="Reason / Remarks (કેમ ડેમેજ થયું?)" value={dItem.reason} onChange={(e) => {
+                        <input type="text" placeholder="Reason / Remarks (કારણ લખવું ફરજિયાત છે)" value={dItem.reason} onChange={(e) => {
                           const updated = [...reportForm.damageItems]
                           updated[dIndex].reason = e.target.value
                           setReportForm({...reportForm, damageItems: updated})
-                        }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', marginBottom: '6px' }} />
+                        }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #f87171', fontSize: '11px', boxSizing: 'border-box', marginBottom: '6px' }} />
 
                         <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '6px', border: '1px dashed #dc2626', boxSizing: 'border-box' }}>
                           <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#991b1b' }}>📎 Upload Damage Photo *</label>
@@ -1186,16 +1261,29 @@ function SupervisorDashboard() {
                               updated[dIndex].files = [...updated[dIndex].files, ...Array.from(e.target.files)]
                               setReportForm({...reportForm, damageItems: updated})
                             }
+                            e.target.value = null; // Input Reset Fix
                           }} style={{ fontSize: '10px', width: '100%', boxSizing: 'border-box' }} />
                           {dItem.files.length > 0 && (
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#991b1b' }}>
                               Selected Files: {dItem.files.map((f, fi) => (
-                                <span key={fi} style={{ display: 'inline-block', background: '#fde8e8', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')}<button type="button" onClick={() => {
-                                    const updated = [...reportForm.damageItems]
-                                    updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
-                                    setReportForm({...reportForm, damageItems: updated})
-                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>x</button>
+                                <span key={fi} style={{ display: 'inline-block', background: '#fde8e8', padding: '2px 4px', margin: '2px', borderRadius: '4px', border: '1px solid #fecaca' }}>
+                                  {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')}
+                                  <button type="button" onClick={() => {
+                                    // Warning before delete
+                                    setModal({
+                                      isOpen: true,
+                                      message: 'શું તમે ખરેખર આ ડેમેજ ફોટો ડીલીટ કરવા માંગો છો?',
+                                      onConfirm: () => {
+                                        const fileToRemove = dItem.files[fi];
+                                        if (typeof fileToRemove === 'string') deleteFileFromStorage(fileToRemove);
+                                        const updated = [...reportForm.damageItems]
+                                        updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
+                                        setReportForm({...reportForm, damageItems: updated})
+                                        setModal({ isOpen: false });
+                                      },
+                                      onCancel: () => setModal({ isOpen: false })
+                                    });
+                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer', marginLeft: '4px', fontWeight: 'bold' }}>x</button>
                                 </span>
                               ))}
                             </div>
@@ -1306,16 +1394,29 @@ function SupervisorDashboard() {
                               updated[dIndex].files = [...updated[dIndex].files, ...Array.from(e.target.files)]
                               setReportForm({...reportForm, outwardDestinations: updated})
                             }
+                            e.target.value = null; // Input Reset Fix
                           }} style={{ fontSize: '10px', width: '100%', boxSizing: 'border-box' }} />
                           {dest.files.length > 0 && (
                             <div style={{ marginTop: '4px', fontSize: '10px', color: '#9a3412' }}>
                               Selected Files: {dest.files.map((f, fi) => (
-                                <span key={fi} style={{ display: 'inline-block', background: '#fae1db', padding: '2px 4px', margin: '2px', borderRadius: '4px' }}>
-                                 {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} <button type="button" onClick={() => {
-                                    const updated = [...reportForm.outwardDestinations]
-                                    updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
-                                    setReportForm({...reportForm, outwardDestinations: updated})
-                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>x</button>
+                                <span key={fi} style={{ display: 'inline-block', background: '#fae1db', padding: '2px 4px', margin: '2px', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                                 {f.name || (typeof f === 'string' ? f.split('/').pop() : 'File')} 
+                                 <button type="button" onClick={() => {
+                                    // Warning before delete
+                                    setModal({
+                                      isOpen: true,
+                                      message: 'શું તમે ખરેખર આ સ્લિપ/ફોટો ડીલીટ કરવા માંગો છો?',
+                                      onConfirm: () => {
+                                        const fileToRemove = dest.files[fi];
+                                        if (typeof fileToRemove === 'string') deleteFileFromStorage(fileToRemove);
+                                        const updated = [...reportForm.outwardDestinations]
+                                        updated[dIndex].files = updated[dIndex].files.filter((_, idx) => idx !== fi)
+                                        setReportForm({...reportForm, outwardDestinations: updated})
+                                        setModal({ isOpen: false });
+                                      },
+                                      onCancel: () => setModal({ isOpen: false })
+                                    });
+                                  }} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer', marginLeft: '4px', fontWeight: 'bold' }}>x</button>
                                 </span>
                               ))}
                             </div>
@@ -1336,14 +1437,27 @@ function SupervisorDashboard() {
                     <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#0f172a' }}>📸 Site Progress Photos (Multiple)</label>
                     <input type="file" multiple accept="image/*" capture="environment" onChange={(e) => {
                       if (e.target.files.length > 0) setSiteProgressPhotos([...siteProgressPhotos, ...Array.from(e.target.files)])
+                      e.target.value = null; // Input Reset Fix
                     }} style={{ fontSize: '11px', marginBottom: '6px', width: '100%', boxSizing: 'border-box' }} />
                     {siteProgressPhotos.length > 0 && (
                       <div style={{ marginTop: '6px', fontSize: '11px', color: '#0f172a' }}>
                         Selected Progress Photos:
                         {siteProgressPhotos.map((file, idx) => (
                           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', background: '#fff', padding: '4px 8px', margin: '4px 0', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
-                            <span>{file.name || 'Progress Photo'}</span>
-                            <button type="button" onClick={() => setSiteProgressPhotos(siteProgressPhotos.filter((_, i) => i !== idx))} style={{ color: 'red', border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer' }}>Remove</button>
+                            <span>{file.name || (typeof file === 'string' ? file.split('/').pop() : 'Photo')}</span>
+                            <button type="button" onClick={() => {
+                              // Warning before delete
+                              setModal({
+                                isOpen: true,
+                                message: 'શું તમે ખરેખર આ પ્રોગ્રેસ ફોટો ડીલીટ કરવા માંગો છો?',
+                                onConfirm: () => {
+                                  if (typeof file === 'string') deleteFileFromStorage(file);
+                                  setSiteProgressPhotos(siteProgressPhotos.filter((_, i) => i !== idx))
+                                  setModal({ isOpen: false });
+                                },
+                                onCancel: () => setModal({ isOpen: false })
+                              });
+                            }} style={{ color: 'red', border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer', marginLeft: '4px' }}>Remove</button>
                           </div>
                         ))}
                       </div>
@@ -1351,8 +1465,10 @@ function SupervisorDashboard() {
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', boxSizing: 'border-box' }}>
-                    <button type="button" onClick={handleCombinedReportPreview} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', flex: 1, fontSize: '12px' }}>Review & Submit Report</button>
-                    <button type="button" onClick={() => setShowReportForm(false)} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', flex: 1, fontSize: '12px' }}>Cancel</button>
+                    <button type="button" disabled={loading} onClick={handleCombinedReportPreview} style={{ backgroundColor: loading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', flex: 1, fontSize: '12px' }}>
+                      {loading ? 'Processing...' : 'Review & Submit Report'}
+                    </button>
+                    <button type="button" disabled={loading} onClick={() => setShowReportForm(false)} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', flex: 1, fontSize: '12px', color: '#334155' }}>Cancel</button>
                   </div>
                 </>
               )}
@@ -1371,112 +1487,158 @@ function SupervisorDashboard() {
         </div>
       )}
 
-      {/* FULL PREVIEW / CONFIRMATION MODAL */}
+      {/* FULL PREVIEW / CONFIRMATION MODAL (Clean & Organized) */}
       {previewData && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: '0', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box' }}>
-          <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '400px', maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 10px 0', color: '#0f172a' }}>🔍 Full Review Before Save</h3>
-            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 12px 0' }}>કૃપા કરીને બધી વિગતો ચકાસી લો:</p>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box', backdropFilter: 'blur(2px)' }}>
+          <div style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', width: '100%', maxWidth: '500px', maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
             
-            <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '8px', boxSizing: 'border-box' }}>
-              <div><strong>Site:</strong> {previewData.site}</div>
-              <div><strong>Date:</strong> {previewData.date}</div>
-              {previewData.details?.description && <div><strong>Description:</strong> {previewData.details.description}</div>}
+            <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 4px 0', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🔍 Final Report Preview
+              </h3>
+              <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Please verify all details carefully before submitting.</p>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              
+              {/* Site Info Box */}
+              <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
+                  <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Site Name</span><strong style={{ color: '#0f172a' }}>{previewData.site}</strong></div>
+                  <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Report Date</span><strong style={{ color: '#0f172a' }}>{previewData.date}</strong></div>
+                </div>
+                {previewData.details?.description && (
+                  <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#334155' }}>
+                    <strong>Remarks:</strong> {previewData.details.description}
+                  </div>
+                )}
+                {previewData.sitePhotosCount > 0 && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#2563eb', fontWeight: '600' }}>
+                    📸 {previewData.sitePhotosCount} Site Progress Photos Attached
+                  </div>
+                )}
+              </div>
               
               {/* Inward Sources Preview */}
-              {previewData.details?.inwardSources && previewData.details.inwardSources.length > 0 && previewData.details.inwardSources[0].items[0].quantity && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#166534', display: 'block', marginBottom: '2px' }}>📥 Material Inward:</strong>
-                  {previewData.details.inwardSources.map((src, si) => (
-                    <div key={si} style={{ marginLeft: '6px', marginBottom: '4px' }}>
-                      • <strong>{src.sourceName === 'Other' ? src.customSourceName : src.sourceName}</strong> {src.dcNumber ? `(DC: ${src.dcNumber})` : ''} {src.vehicleNumber ? `[Veh: ${src.vehicleNumber}]` : ''}:
-                      {src.items.map((it, ii) => {
-                        const matDisplay = it.materialName === 'Other' ? it.customMaterialName : it.materialName;
-                        return (
-                          <div key={ii} style={{ marginLeft: '12px', color: '#334155' }}>
-                            - {matDisplay || 'N/A'}: {it.quantity || 0} {it.unit}
+              {previewData.details?.inwardSources?.some(s => s.items[0]?.quantity) && (
+                <div style={{ backgroundColor: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                  <strong style={{ color: '#166534', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #bbf7d0', paddingBottom: '4px' }}>📥 1. Material Inward</strong>
+                  {previewData.details.inwardSources.filter(s => s.items[0]?.quantity).map((src, si) => (
+                    <div key={si} style={{ marginBottom: '8px', fontSize: '12px' }}>
+                      <div style={{ fontWeight: '600', color: '#14532d', marginBottom: '4px' }}>
+                        {si + 1}. {src.sourceName === 'Other' ? src.customSourceName : src.sourceName}
+                        <span style={{ fontWeight: 'normal', color: '#166534', fontSize: '11px', marginLeft: '4px' }}>
+                          {src.dcNumber ? `(DC: ${src.dcNumber})` : ''} {src.vehicleNumber ? `[Veh: ${src.vehicleNumber}]` : ''}
+                        </span>
+                      </div>
+                      <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #dcfce7' }}>
+                        {src.items.filter(it => it.quantity).map((it, ii) => (
+                          <div key={ii} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: ii !== src.items.length - 1 ? '1px dashed #bbf7d0' : 'none', paddingBottom: ii !== src.items.length - 1 ? '4px' : '0', marginBottom: ii !== src.items.length - 1 ? '4px' : '0' }}>
+                            <span style={{ color: '#334155' }}>{it.materialName === 'Other' ? it.customMaterialName : it.materialName}</span>
+                            <strong style={{ color: '#0f172a' }}>{it.quantity} {it.unit}</strong>
                           </div>
-                        );
-                      })}
-                      {src.files.length > 0 && (
-                        <div style={{ marginLeft: '12px', fontSize: '11px', color: '#166534' }}>
-                          📎 Files: {src.files.length} attached
-                        </div>
-                      )}
+                        ))}
+                      </div>
+                      {src.files.length > 0 && <div style={{ fontSize: '10px', color: '#16a34a', marginTop: '4px' }}>📎 {src.files.length} Bill/Photo Attached</div>}
                     </div>
                   ))}
                 </div>
               )}
 
               {/* Paling Work Preview */}
-              {previewData.details?.palingWorkRows && previewData.details.palingWorkRows.length > 0 && previewData.details.palingWorkRows[0].contractorName && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#86198f', display: 'block', marginBottom: '2px' }}>🪵 Paling Work:</strong>
-                  {previewData.details.palingWorkRows.map((p, pi) => (
-                    <div key={pi} style={{ marginLeft: '6px', marginBottom: '4px', color: '#334155' }}>
-                      • <strong>{p.contractorName}</strong> (Qty: {p.qty || 0} NOS) - {p.description || ''}
+              {previewData.details?.palingWorkRows?.some(p => p.contractorName) && (
+                <div style={{ backgroundColor: '#fdf4ff', padding: '12px', borderRadius: '8px', border: '1px solid #f5d0fe' }}>
+                  <strong style={{ color: '#86198f', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #f5d0fe', paddingBottom: '4px' }}>🪵 2. Paling Work</strong>
+                  {previewData.details.palingWorkRows.filter(p => p.contractorName).map((p, pi) => (
+                    <div key={pi} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #fae8ff', marginBottom: '4px' }}>
+                      <div>
+                        <strong style={{ color: '#701a75' }}>{p.contractorName}</strong>
+                        {p.description && <span style={{ display: 'block', fontSize: '10px', color: '#a21caf' }}>{p.description}</span>}
+                      </div>
+                      <strong style={{ color: '#0f172a' }}>{p.qty || 0} NOS</strong>
                     </div>
                   ))}
                 </div>
               )}
 
               {/* Contractor Work Preview (Material Usage) */}
-              {previewData.details?.contractorRows && previewData.details.contractorRows.length > 0 && previewData.details.contractorRows[0].contractorName && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#1e40af', display: 'block', marginBottom: '2px' }}>👷 Material Usage (Contractor):</strong>
-                  {previewData.details.contractorRows.map((c, ci) => (
-                    <div key={ci} style={{ marginLeft: '6px', marginBottom: '4px' }}>
-                      • <strong>{c.contractorName || 'Contractor'}</strong> (Labour: {c.labourCount || 0}):
-                      {c.materials?.map((m, mi) => {
-                        const matDisplay = m.material === 'Other' ? m.customMaterialName : m.material;
-                        return (
-                          <div key={mi} style={{ marginLeft: '12px', color: '#334155' }}>
-                            - {matDisplay || 'N/A'}: {m.quantity || 0} {m.unit}
+              {previewData.details?.contractorRows?.some(c => c.contractorName) && (
+                <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                  <strong style={{ color: '#1e40af', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #cbd5e1', paddingBottom: '4px' }}>👷 3. Material Usage</strong>
+                  {previewData.details.contractorRows.filter(c => c.contractorName).map((c, ci) => (
+                    <div key={ci} style={{ marginBottom: '8px', fontSize: '12px' }}>
+                      <div style={{ fontWeight: '600', color: '#1e3a8a', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{ci + 1}. {c.contractorName}</span>
+                        <span style={{ fontSize: '10px', backgroundColor: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>Labour: {c.labourCount || 0}</span>
+                      </div>
+                      <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                        {c.materials?.filter(m => m.quantity).map((m, mi) => (
+                          <div key={mi} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: mi !== c.materials.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: mi !== c.materials.length - 1 ? '4px' : '0', marginBottom: mi !== c.materials.length - 1 ? '4px' : '0' }}>
+                            <span style={{ color: '#334155' }}>{m.material === 'Other' ? m.customMaterialName : m.material}</span>
+                            <strong style={{ color: '#0f172a' }}>{m.quantity} {m.unit}</strong>
                           </div>
-                        );
-                      })}
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
 
               {/* Final Work Preview */}
-              {previewData.details?.finalWorkRows && previewData.details.finalWorkRows.length > 0 && previewData.details.finalWorkRows[0].contractorName && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#0284c7', display: 'block', marginBottom: '2px' }}>🏗️ Final Work:</strong>
-                  {previewData.details.finalWorkRows.map((f, fi) => {
-                    const workDisplay = f.workDesc === 'Other' ? f.customWorkDesc : f.workDesc;
-                    return (
-                      <div key={fi} style={{ marginLeft: '6px', marginBottom: '4px', color: '#334155' }}>
-                        • <strong>{f.contractorName}</strong> - {workDisplay || 'N/A'} (Running Feet: {f.runningFeet || 0}, Height: {f.height || 0})
+              {previewData.details?.finalWorkRows?.some(f => f.contractorName) && (
+                <div style={{ backgroundColor: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  <strong style={{ color: '#0369a1', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #bfdbfe', paddingBottom: '4px' }}>🏗️ 4. Final Work</strong>
+                  {previewData.details.finalWorkRows.filter(f => f.contractorName).map((f, fi) => (
+                    <div key={fi} style={{ fontSize: '12px', backgroundColor: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #dbeafe', marginBottom: '4px' }}>
+                      <div style={{ fontWeight: '600', color: '#075985', marginBottom: '2px' }}>{f.contractorName}</div>
+                      <div style={{ color: '#334155', marginBottom: '4px' }}>{f.workDesc === 'Other' ? f.customWorkDesc : f.workDesc}</div>
+                      <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#64748b' }}>
+                        <span>Run. Feet: <strong style={{ color: '#0f172a' }}>{f.runningFeet || 0}</strong></span>
+                        <span>Height: <strong style={{ color: '#0f172a' }}>{f.height || 0}</strong></span>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
 
               {/* Material Damage Preview */}
-              {previewData.details?.damageItems && previewData.details.damageItems.length > 0 && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#991b1b', display: 'block', marginBottom: '2px' }}>⚠️ Material Damage:</strong>
-                  {previewData.details.damageItems.map((d, di) => {
-                    const matDisplay = d.materialName === 'Other' ? d.customMaterialName : d.materialName;
-                    return (
-                      <div key={di} style={{ marginLeft: '6px', marginBottom: '4px', color: '#334155' }}>
-                        • {matDisplay || 'N/A'}: {d.quantity || 0} {d.unit} ({d.reason || 'No reason'})
+              {previewData.details?.damageItems?.some(d => d.quantity) && (
+                <div style={{ backgroundColor: '#fef2f2', padding: '12px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                  <strong style={{ color: '#b91c1c', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #fecaca', paddingBottom: '4px' }}>⚠️ 5. Material Damage</strong>
+                  {previewData.details.damageItems.filter(d => d.quantity).map((d, di) => (
+                    <div key={di} style={{ fontSize: '12px', backgroundColor: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #fee2e2', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                        <strong style={{ color: '#991b1b' }}>{d.materialName === 'Other' ? d.customMaterialName : d.materialName}</strong>
+                        <strong style={{ color: '#0f172a' }}>{d.quantity} {d.unit}</strong>
                       </div>
-                    );
-                  })}
+                      <div style={{ color: '#ef4444', fontSize: '11px' }}>Reason: {d.reason || 'N/A'}</div>
+                      {d.files.length > 0 && <div style={{ fontSize: '10px', color: '#dc2626', marginTop: '4px' }}>📎 {d.files.length} Photo Attached</div>}
+                    </div>
+                  ))}
                 </div>
               )}
 
               {/* Outward Destinations Preview */}
-              {previewData.details?.outwardDestinations && previewData.details.outwardDestinations.length > 0 && (
-                <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '4px' }}>
-                  <strong style={{ color: '#9a3412', display: 'block', marginBottom: '2px' }}>📤 Material Outward:</strong>
-                  {previewData.details.outwardDestinations.map((dest, di) => (
-                    <div key={di} style={{ marginLeft: '6px', marginBottom: '4px' }}>
-                      • <strong>{dest.destName === 'Other' ? dest.customDestName : dest.destName}</strong>
+              {previewData.details?.outwardDestinations?.some(d => d.items[0]?.quantity) && (
+                <div style={{ backgroundColor: '#fff7ed', padding: '12px', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+                  <strong style={{ color: '#c2410c', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #fed7aa', paddingBottom: '4px' }}>📤 6. Material Outward</strong>
+                  {previewData.details.outwardDestinations.filter(d => d.items[0]?.quantity).map((dest, di) => (
+                    <div key={di} style={{ marginBottom: '8px', fontSize: '12px' }}>
+                      <div style={{ fontWeight: '600', color: '#9a3412', marginBottom: '4px' }}>
+                        {di + 1}. {dest.destName === 'Other' ? dest.customDestName : dest.destName}
+                        <span style={{ fontWeight: 'normal', color: '#c2410c', fontSize: '11px', marginLeft: '4px' }}>
+                          {dest.dcNumber ? `(DC: ${dest.dcNumber})` : ''} {dest.vehicleNumber ? `[Veh: ${dest.vehicleNumber}]` : ''}
+                        </span>
+                      </div>
+                      <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #ffedd5' }}>
+                        {dest.items.filter(it => it.quantity).map((it, ii) => (
+                          <div key={ii} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: ii !== dest.items.length - 1 ? '1px dashed #fed7aa' : 'none', paddingBottom: ii !== dest.items.length - 1 ? '4px' : '0', marginBottom: ii !== dest.items.length - 1 ? '4px' : '0' }}>
+                            <span style={{ color: '#334155' }}>{it.materialName === 'Other' ? it.customMaterialName : it.materialName}</span>
+                            <strong style={{ color: '#0f172a' }}>{it.quantity} {it.unit}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      {dest.files.length > 0 && <div style={{ fontSize: '10px', color: '#ea580c', marginTop: '4px' }}>📎 {dest.files.length} Slip/Photo Attached</div>}
                     </div>
                   ))}
                 </div>
@@ -1484,9 +1646,13 @@ function SupervisorDashboard() {
 
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={() => { setPreviewData(null); confirmAndSave(); }} style={{ flex: 1, padding: '10px', backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Confirm & Save</button>
-              <button onClick={() => setPreviewData(null)} style={{ flex: 1, padding: '10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
+            <div style={{ display: 'flex', gap: '10px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <button disabled={loading} onClick={() => { confirmAndSave(); }} style={{ flex: 1, padding: '12px', backgroundColor: loading ? '#94a3b8' : '#059669', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px', boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.2)' }}>
+                {loading ? 'Saving Data...' : '✅ Confirm & Save'}
+              </button>
+              <button disabled={loading} onClick={() => setPreviewData(null)} style={{ flex: 1, padding: '12px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
+                Cancel & Edit
+              </button>
             </div>
           </div>
         </div>
@@ -1497,7 +1663,7 @@ function SupervisorDashboard() {
         isOpen={modal.isOpen} 
         message={modal.message} 
         onConfirm={modal.onConfirm || (() => setModal({ isOpen: false }))} 
-        onCancel={() => setModal({ isOpen: false })} 
+        onCancel={modal.onCancel || (() => setModal({ isOpen: false }))} 
       />
 
     </div>
