@@ -124,7 +124,7 @@ function SupervisorExpenses() {
     }
   };
 
-  // --- Auto-Save Draft (સાઇટ અને ફાઇલ સાથે) ---
+  // --- Auto-Save Draft ---
   useEffect(() => {
     if (!showForm || !txForm.siteName || !user?.id) return;
     const timer = setTimeout(async () => {
@@ -213,7 +213,7 @@ function SupervisorExpenses() {
   }
 
   const loadTransactions = async () => {
-    let query = supabase.from('site_transactions').select('*').order('transaction_date', { ascending: false })
+    let query = supabase.from('site_transactions').select('*').order('transaction_date', { ascending: false }).order('created_at', { ascending: false })
     const { data, error } = await query
     if (error) {
       console.error('Error loading transactions:', error.message)
@@ -289,7 +289,6 @@ function SupervisorExpenses() {
       return
     }
 
-    // 1. Validate Form is not blank
     const hasIncome = txForm.incomeSources.some(src => src.items.some(it => it.amount && parseFloat(it.amount) > 0));
     const hasExpense = txForm.expenseRows.some(exp => exp.amount && parseFloat(exp.amount) > 0);
     
@@ -298,7 +297,6 @@ function SupervisorExpenses() {
       return;
     }
 
-    // 2. Validate Future Date
     const today = new Date().toISOString().split('T')[0];
     if (txForm.transactionDate > today) {
       setModal({ isOpen: true, message: '⚠️ ભવિષ્યની તારીખની એન્ટ્રી કરી શકાતી નથી!', onConfirm: () => setModal({ isOpen: false }) });
@@ -430,6 +428,7 @@ function SupervisorExpenses() {
     .filter(tx => tx.transaction_type === 'expense')
     .reduce((sum, tx) => sum + parseFloat(tx.amount || 0), 0)
 
+  // સિલક હંમેશા આઈડી મુજબ ગ્લોબલ જ રહેશે, સાઇટ બદલવાથી બદલાશે નહીં
   const netBalance = globalTotalIncome - globalTotalExpense
 
   const siteTotalIncome = siteTransactions
@@ -439,8 +438,6 @@ function SupervisorExpenses() {
   const siteTotalExpense = siteTransactions
     .filter(tx => tx.transaction_type === 'expense')
     .reduce((sum, tx) => sum + parseFloat(tx.amount || 0), 0)
-
-  const siteNetBalance = siteTotalIncome - siteTotalExpense
 
   const filteredIncomeTransactions = siteTransactions.filter(tx => {
     if (tx.transaction_type !== 'income') return false;
@@ -551,12 +548,13 @@ function SupervisorExpenses() {
       {/* WORKING BALANCE & CARDS */}
       {!showForm && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '14px', boxSizing: 'border-box' }}>
+          {/* સિલક હંમેશા ગ્લોબલ (કુલ) જ રહેશે */}
           <div style={{ background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)', padding: '16px', borderRadius: '14px', textAlign: 'center', color: '#fff', boxShadow: '0 4px 12px rgba(37,99,235,0.2)', boxSizing: 'border-box' }}>
             <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', opacity: 0.9, letterSpacing: '0.5px' }}>
-              <Wallet size={16} /> {selectedViewSite !== 'all' ? `Net Balance for "${selectedViewSite}"` : 'My Working Balance (કુલ સિલક)'}
+              <Wallet size={16} /> My Working Balance (કુલ સિલક)
             </div>
             <div style={{ fontSize: '26px', fontWeight: '900', marginTop: '6px' }}>
-              ₹{(selectedViewSite !== 'all' ? siteNetBalance : netBalance).toLocaleString('en-IN')}
+              ₹{netBalance.toLocaleString('en-IN')}
             </div>
           </div>
 
@@ -590,12 +588,12 @@ function SupervisorExpenses() {
                     <option key={i} value={name}>{name}</option>
                   ))}
                 </select>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '6px', alignItems: 'center', boxSizing: 'border-box' }}>
-                  <input type="date" value={incomeStartDate} onChange={(e) => setIncomeStartDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #bbf7d0', boxSizing: 'border-box' }} />
-                  <input type="date" value={incomeEndDate} onChange={(e) => setIncomeEndDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #bbf7d0', boxSizing: 'border-box' }} />
-                  <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#059669', backgroundColor: '#f0fdf4', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bbf7d0', textAlign: 'center', boxSizing: 'border-box' }}>
-                    ₹{filteredIncomeTotal.toLocaleString('en-IN')}
-                  </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
+                  <input type="date" value={incomeStartDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setIncomeStartDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #bbf7d0', boxSizing: 'border-box' }} />
+                  <input type="date" value={incomeEndDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setIncomeEndDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #bbf7d0', boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#059669', backgroundColor: '#f0fdf4', padding: '8px 10px', borderRadius: '6px', border: '1px solid #bbf7d0', textAlign: 'center', boxSizing: 'border-box' }}>
+                  Filtered Total: ₹{filteredIncomeTotal.toLocaleString('en-IN')}
                 </div>
                 <button type="button" onClick={() => generatePDFReport('income')} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer', marginTop: '4px' }}>
                   <Printer size={14} /> Print / Download Income Report
@@ -622,8 +620,8 @@ function SupervisorExpenses() {
                   ))}
                 </select>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
-                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #d8b4fe', boxSizing: 'border-box' }} />
-                  <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #d8b4fe', boxSizing: 'border-box' }} />
+                  <input type="date" value={startDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setStartDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #d8b4fe', boxSizing: 'border-box' }} />
+                  <input type="date" value={endDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setEndDate(e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', borderRadius: '6px', border: '1px solid #d8b4fe', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
                   <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#7e22ce' }}>Filtered Total: ₹{filteredExpenseTotal.toLocaleString('en-IN')}</span>
@@ -644,13 +642,7 @@ function SupervisorExpenses() {
           
           <div style={{ marginBottom: '12px' }}>
             <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#475569' }}>Date *</label>
-           <input 
-  type="date" 
-  value={txForm.transactionDate} 
-  max={new Date().toISOString().split('T')[0]} 
-  onChange={(e) => setTxForm({...txForm, transactionDate: e.target.value})} 
-  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} 
-/>
+            <input type="date" value={txForm.transactionDate} max={new Date().toISOString().split('T')[0]} onChange={(e) => setTxForm({...txForm, transactionDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
           </div>
 
           {/* 1. INCOME SECTION */}
