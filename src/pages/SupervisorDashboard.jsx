@@ -708,7 +708,7 @@ function SupervisorDashboard() {
 
               {/* New Site Report Button */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0 }}>Site Daily Reports</h2>
+               <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0 }}>Recent Reports (Last {Math.min(filteredReports.length, 10)})</h2>
                 <button 
                   onClick={() => {
                     setReportForm({
@@ -731,24 +731,30 @@ function SupervisorDashboard() {
                 </button>
               </div>
 
-              {/* Historical Reports */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
-                {filteredReports.map(r => (
-                  <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '13px' }}>{r.site_name}</span>
-                      <span style={{ fontSize: '10px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>📅 {r.report_date}</span>
+                {/* Historical Reports */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
+               {filteredReports.slice(0, 10).map(r => (
+                    <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '13px' }}>{r.site_name}</span>
+                        {/* તારીખ ફોર્મેટ: DD/MM/YYYY */}
+                        <span style={{ fontSize: '10px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                          📅 {r.report_date ? r.report_date.split('-').reverse().join('/') : ''}
+                        </span>
+                      </div>
+                      {r.description && <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0' }}>📝 {r.description}</p>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f1f5f9', fontSize: '10px', color: '#64748b' }}>
+                        <span>👤 {r.user_id || 'N/A'}</span>
+                        {/* સમય અને તારીખ ફોર્મેટ: DD/MM/YYYY, HH:MM AM/PM */}
+                        <span>
+                          🕒 {r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : ''}
+                        </span>
+                      </div>
                     </div>
-                    {r.description && <p style={{ fontSize: '11px', color: '#475569', margin: '4px 0' }}>📝 {r.description}</p>}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #f1f5f9', fontSize: '10px', color: '#64748b' }}>
-                      <span>👤 {r.user_id || 'N/A'}</span>
-                      <span>🕒 {r.created_at ? new Date(r.created_at).toLocaleString() : ''}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+                  ))}
+                </div>
+              </>
+            )}
 
           {/* Form Section */}
           {showReportForm && (

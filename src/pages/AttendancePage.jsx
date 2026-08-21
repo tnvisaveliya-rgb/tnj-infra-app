@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { History, Camera, MapPin, Calendar, FileText, X } from 'lucide-react';
+import { History, Camera, MapPin, Calendar, FileText, X, CalendarDays, Clock } from 'lucide-react';
+import ConfirmModal from '../components/ConfirmModal';
 
 function AttendancePage({ sites, user }) {
   const [attendanceSite, setAttendanceSite] = useState('');
@@ -18,20 +19,19 @@ function AttendancePage({ sites, user }) {
   const [showReportPopup, setShowReportPopup] = useState(false);
   const [reportData, setReportData] = useState([]);
 
- useEffect(() => {
-    // 1. સૌથી પહેલા Supabase નો હાલનો એક્ટિવ યુઝર ચેક કરો
+  // Modal State
+  const [modal, setModal] = useState({ isOpen: false, message: '', onConfirm: null, onCancel: null });
+
+  useEffect(() => {
     const getActiveUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const authEmail = session?.user?.email;
-
-      // 2. જો Supabase માંથી ન મળે તો લોકલ સ્ટોરેજ અથવા પ્રોપમાંથી લો
       const activeEmail = authEmail || user?.email || localStorage.getItem('userEmail') || localStorage.getItem('loggedInSupervisor') || '';
       
       if (activeEmail) {
         setSupervisorEmail(activeEmail.trim().toLowerCase());
       }
     };
-
     getActiveUser();
   }, [user]);
 
@@ -60,12 +60,8 @@ function AttendancePage({ sites, user }) {
       .eq('employee_name', email)
       .order('created_at', { ascending: false });
 
-    if (fromDate) {
-      query = query.gte('created_at', `${fromDate}T00:00:00`);
-    }
-    if (toDate) {
-      query = query.lte('created_at', `${toDate}T23:59:59`);
-    }
+    if (fromDate) query = query.gte('created_at', `${fromDate}T00:00:00`);
+    if (toDate) query = query.lte('created_at', `${toDate}T23:59:59`);
 
     const { data, error } = await query;
     
@@ -90,9 +86,10 @@ function AttendancePage({ sites, user }) {
     }
   };
 
+  // MULTIPLE PUNCHES SUPPORT સાથે નવું REPORT LOGIC
   const handleGenerateReport = () => {
     if (!fromDate || !toDate) {
-      alert("કૃપા કરીને 'From Date' અને 'To Date' બંને સિલેક્ટ કરો!");
+      setModal({ isOpen: true, message: "કૃપા કરીને 'From Date' અને 'To Date' બંને સિલેક્ટ કરો!", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
 
@@ -103,38 +100,74 @@ function AttendancePage({ sites, user }) {
     });
 
     if (filtered.length === 0) {
-      alert("આ તારીખની વચ્ચે કોઈ ડેટા મળ્યો નથી.");
+      setModal({ isOpen: true, message: "આ તારીખની વચ્ચે કોઈ ડેટા મળ્યો નથી.", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
 
-    const groupedByDate = {};
-    filtered.forEach(item => {
-      const dateKey = item.created_at.split('T')[0];
-      if (!groupedByDate[dateKey]) {
-        groupedByDate[dateKey] = { date: dateKey, site: item.site_name, inTime: '-', outTime: '-', workingHours: '-' };
-      }
-      if (item.punch_type === 'IN') {
-        groupedByDate[dateKey].inTime = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      } else if (item.punch_type === 'OUT') {
-        groupedByDate[dateKey].outTime = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-    });
+    // ૧. સમય પ્રમાણે જૂનાથી નવો ડેટા (Chronological Order) માં ગોઠવીએ
+    const ascendingData = [...filtered].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-    const finalReport = Object.values(groupedByDate).map(row => {
-      if (row.inTime !== '-' && row.outTime !== '-') {
-        const inDate = new Date(`${row.date} ${row.inTime}`);
-        const outDate = new Date(`${row.date} ${row.outTime}`);
-        const diffMs = outDate - inDate;
+    let pairs = [];
+    let currentIn = null;
+    const timeOptions = { hour: '2-digit', minute: '2-digit', hour12: true };
+
+    // જોડી (Pair) બનાવવાનું ફંક્શન
+    const addPair = (inItem, outItem) => {
+      const refItem = inItem || outItem;
+      const rawDateStr = refItem.created_at;
+      const dateKey = rawDateStr.split('T')[0];
+      const displayDate = dateKey.split('-').reverse().join('/'); // DD/MM/YYYY
+
+      let inTime = '-';
+      let outTime = '-';
+      let workingHours = '-';
+      let diffMs = 0;
+
+      if (inItem) inTime = new Date(inItem.created_at).toLocaleTimeString('en-US', timeOptions);
+      if (outItem) outTime = new Date(outItem.created_at).toLocaleTimeString('en-US', timeOptions);
+
+      if (inItem && outItem) {
+        diffMs = new Date(outItem.created_at) - new Date(inItem.created_at);
         if (diffMs > 0) {
           const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
           const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-          row.workingHours = `${diffHrs} hrs ${diffMins} mins`;
+          workingHours = `${diffHrs} hrs ${diffMins} mins`;
         }
       }
-      return row;
+
+      pairs.push({
+        displayDate,
+        site: refItem.site_name,
+        inTime,
+        outTime,
+        workingHours,
+        diffMs,
+        rawDateForSort: new Date(rawDateStr)
+      });
+    };
+
+    // ૨. IN અને OUT ની જોડીઓ બનાવીએ (એક જ દિવસમાં બહુ બધા હોય તો પણ ચાલશે)
+    ascendingData.forEach(item => {
+      if (item.punch_type === 'IN') {
+        if (currentIn) addPair(currentIn, null); // જો ભૂલથી બે વાર IN હોય
+        currentIn = item;
+      } else if (item.punch_type === 'OUT') {
+        if (currentIn) {
+          addPair(currentIn, item); // પરફેક્ટ જોડી (IN + OUT)
+          currentIn = null;
+        } else {
+          addPair(null, item); // જો માત્ર OUT હોય (ભૂલથી)
+        }
+      }
     });
 
-    setReportData(finalReport);
+    // જો છેલ્લો માત્ર IN રહી ગયો હોય (હજી OUT ન કર્યું હોય)
+    if (currentIn) addPair(currentIn, null);
+
+    // ૩. નવી તારીખ ઉપર આવે તે રીતે ગોઠવો
+    pairs.sort((a, b) => b.rawDateForSort - a.rawDateForSort);
+
+    setReportData(pairs);
     setShowReportPopup(true);
   };
 
@@ -153,25 +186,16 @@ function AttendancePage({ sites, user }) {
           let height = img.height;
 
           if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
+            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
           } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
+            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
           }
 
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = width; canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
 
-          canvas.toBlob((blob) => {
-            resolve(blob);
-          }, 'image/jpeg', 0.7);
+          canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.7);
         };
       };
     });
@@ -189,85 +213,123 @@ function AttendancePage({ sites, user }) {
     }
   };
 
+  const handleSiteSelection = (e) => {
+    const selectedSite = e.target.value;
+    if (!selectedSite) {
+      setAttendanceSite('');
+      return;
+    }
+    
+    setModal({
+      isOpen: true,
+      message: `શું તમે ખાતરી કરો છો કે તમે '${selectedSite}' સાઇટ પસંદ કરવા માંગો છો?`,
+      onConfirm: () => {
+        setAttendanceSite(selectedSite);
+        setModal({ isOpen: false });
+      },
+      onCancel: () => {
+        setModal({ isOpen: false });
+      }
+    });
+  };
+
   const handlePunch = async (targetType) => {
     if (!attendanceSite) {
-      alert("કૃપા કરીને સાઇટ પસંદ કરો!");
+      setModal({ isOpen: true, message: "⚠️ કૃપા કરીને સાઇટ પસંદ કરો!", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
     if (!photo) {
-      alert("કૃપા કરીને સેલ્ફી લો!");
+      setModal({ isOpen: true, message: "📸 કૃપા કરીને સેલ્ફી લો!", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
 
     if (targetType === 'IN' && currentStatus === 'IN') {
-      alert("⚠️ તમે પહેલેથી જ Punch In કરેલ છે! પહેલા Punch Out કરો.");
+      setModal({ isOpen: true, message: "⚠️ તમે પહેલેથી જ Punch In કરેલ છે! પહેલા Punch Out કરો.", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
     if (targetType === 'OUT' && currentStatus === 'OUT') {
-      alert("⚠️ તમે પહેલાથી જ Punch Out કરેલ છે અથવા પંચ ઇન નથી કર્યું!");
+      setModal({ isOpen: true, message: "⚠️ તમે પહેલાથી જ Punch Out કરેલ છે અથવા પંચ ઇન નથી કર્યું!", onConfirm: () => setModal({ isOpen: false }) });
       return;
     }
 
-    if (targetType === 'IN') {
-      const confirmIn = window.confirm(`શું તમે ખાતરી કરો છો કે તમે '${attendanceSite}' સાઇટ પર જ હાજર છો?`);
-      if (!confirmIn) return;
-    }
+    const executePunch = async () => {
+      const finalEmail = supervisorEmail || user?.email || localStorage.getItem('userEmail') || "infra.tnj@gmail.com";
 
-    const finalEmail = supervisorEmail || user?.email || localStorage.getItem('userEmail') || "infra.tnj@gmail.com";
-
-    if (!finalEmail) {
-      alert("એરર: યુઝરની ઓળખ થઈ શકી નથી. કૃપા કરીને ફરી લોગિન કરો.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
-      const fileName = `attendance/${folderName}/${Date.now()}.jpg`;
-      
-      const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
-      
-      let publicUrl = '';
-      if (!uploadError) {
-        const { data: pubData } = supabase.storage.from('site-photos').getPublicUrl(fileName);
-        publicUrl = pubData.publicUrl;
+      if (!finalEmail) {
+        setModal({ isOpen: true, message: "એરર: યુઝરની ઓળખ થઈ શકી નથી. કૃપા કરીને ફરી લોગિન કરો.", onConfirm: () => setModal({ isOpen: false }) });
+        return;
       }
 
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude } = position.coords;
-
-        const payload = {
-          employee_name: finalEmail, 
-          site_name: attendanceSite,
-          punch_type: targetType, 
-          latitude: latitude.toString(),
-          longitude: longitude.toString(),
-          photo_url: publicUrl,
-          created_at: new Date().toISOString()
-        };
-
-        const { error: insertError } = await supabase.from('site_attendance').insert([payload]);
-
-        if (insertError) {
-          console.error("Supabase Insert Error:", insertError);
-          alert("ડેટાબેઝ એરર: " + insertError.message);
-        } else {
-          alert(`Successfully Punched ${targetType}!`);
-          setPhoto(null);
-          setPhotoPreview(null);
-          await loadAttendanceHistory(finalEmail); 
+      setLoading(true);
+      try {
+        const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
+        const todayDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-'); 
+        const fileName = `attendance/${folderName}/${targetType}_${todayDate}_${Date.now()}.jpg`;
+        
+        const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
+        
+        let publicUrl = '';
+        if (!uploadError) {
+          const { data: pubData } = supabase.storage.from('site-photos').getPublicUrl(fileName);
+          publicUrl = pubData.publicUrl;
         }
-        setLoading(false);
-      }, (geoErr) => {
-        alert("GPS લોકેશન એરર: " + geoErr.message);
-        setLoading(false);
-      });
 
-    } catch (err) {
-      console.error("Catch Error:", err);
-      alert("કંઈક ભૂલ થઈ: " + err.message);
-      setLoading(false);
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          const { latitude, longitude } = position.coords;
+
+          const payload = {
+            employee_name: finalEmail, 
+            site_name: attendanceSite,
+            punch_type: targetType, 
+            latitude: latitude.toString(),
+            longitude: longitude.toString(),
+            photo_url: publicUrl,
+            created_at: new Date().toISOString()
+          };
+
+          const { error: insertError } = await supabase.from('site_attendance').insert([payload]);
+
+          if (insertError) {
+            console.error("Supabase Insert Error:", insertError);
+            setModal({ isOpen: true, message: "ડેટાબેઝ એરર: " + insertError.message, onConfirm: () => setModal({ isOpen: false }) });
+          } else {
+            setModal({ isOpen: true, message: `✅ Successfully Punched ${targetType}!`, onConfirm: () => setModal({ isOpen: false }) });
+            setPhoto(null);
+            setPhotoPreview(null);
+            await loadAttendanceHistory(finalEmail); 
+          }
+          setLoading(false);
+        }, (geoErr) => {
+          setModal({ isOpen: true, message: "GPS લોકેશન એરર: " + geoErr.message, onConfirm: () => setModal({ isOpen: false }) });
+          setLoading(false);
+        });
+
+      } catch (err) {
+        console.error("Catch Error:", err);
+        setModal({ isOpen: true, message: "કંઈક ભૂલ થઈ: " + err.message, onConfirm: () => setModal({ isOpen: false }) });
+        setLoading(false);
+      }
+    };
+
+    if (targetType === 'IN') {
+      setModal({
+        isOpen: true,
+        message: `શું તમે ખાતરી કરો છો કે તમે '${attendanceSite}' સાઇટ પર જ હાજર છો?`,
+        onConfirm: () => {
+          setModal({ isOpen: false });
+          executePunch();
+        },
+        onCancel: () => setModal({ isOpen: false })
+      });
+    } else {
+      executePunch();
     }
+  };
+
+  const formatDateToDDMMYYYY = (dateString) => {
+    if (!dateString) return '';
+    const parts = dateString.split('-');
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
   return (
@@ -282,7 +344,7 @@ function AttendancePage({ sites, user }) {
 
       <select 
         value={attendanceSite} 
-        onChange={(e) => setAttendanceSite(e.target.value)} 
+        onChange={handleSiteSelection} 
         disabled={currentStatus === 'IN'}
         style={{ width: '100%', padding: '10px', borderRadius: '8px', marginBottom: '15px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: currentStatus === 'IN' ? '#f1f5f9' : '#fff' }}>
         <option value="">-- Select Site --</option>
@@ -372,7 +434,7 @@ function AttendancePage({ sites, user }) {
             </div>
 
             <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Period: <strong>{fromDate}</strong> to <strong>{toDate}</strong></span>
+              <span>Period: <strong>{formatDateToDDMMYYYY(fromDate)}</strong> to <strong>{formatDateToDDMMYYYY(toDate)}</strong></span>
               <button onClick={() => window.print()} style={{ padding: '4px 10px', backgroundColor: '#059669', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>
                 📥 Download PDF / Print
               </button>
@@ -391,7 +453,7 @@ function AttendancePage({ sites, user }) {
               <tbody>
                 {reportData.map((row, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '8px' }}>{row.date}</td>
+                    <td style={{ padding: '8px', fontWeight: '600', color: '#0f172a' }}>{row.displayDate}</td>
                     <td style={{ padding: '8px', fontWeight: '600' }}>{row.site}</td>
                     <td style={{ padding: '8px', textAlign: 'center', color: '#166534', fontWeight: 'bold' }}>{row.inTime}</td>
                     <td style={{ padding: '8px', textAlign: 'center', color: '#991b1b', fontWeight: 'bold' }}>{row.outTime}</td>
@@ -404,17 +466,9 @@ function AttendancePage({ sites, user }) {
                   <td colSpan="4" style={{ padding: '10px', textAlign: 'right' }}>Total Working Hours:</td>
                   <td style={{ padding: '10px', textAlign: 'center', color: '#047857' }}>
                     {(() => {
-                      let totalMinutes = reportData.reduce((acc, row) => {
-                        if (row.workingHours !== '-') {
-                          const parts = row.workingHours.split(' ');
-                          const hrs = parseInt(parts[0]) || 0;
-                          const mins = parseInt(parts[2]) || 0;
-                          return acc + (hrs * 60) + mins;
-                        }
-                        return acc;
-                      }, 0);
-                      const finalHrs = Math.floor(totalMinutes / 60);
-                      const finalMins = totalMinutes % 60;
+                      let totalMs = reportData.reduce((acc, row) => acc + (row.diffMs || 0), 0);
+                      const finalHrs = Math.floor(totalMs / (1000 * 60 * 60));
+                      const finalMins = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
                       return `${finalHrs} hrs ${finalMins} mins`;
                     })()}
                   </td>
@@ -433,12 +487,12 @@ function AttendancePage({ sites, user }) {
 
       <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '15px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <History size={16} /> Recent Punch History ({history.length}):
+          <History size={16} /> Recent Punch History (Last {Math.min(history.length, 10)}):
         </h3>
         {history.length === 0 ? (
           <p style={{ fontSize: '12px', color: '#64748b' }}>No records found.</p>
         ) : (
-          history.map(h => (
+          history.slice(0, 10).map(h => (
             <div key={h.id} style={{ fontSize: '11px', padding: '10px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
@@ -457,14 +511,29 @@ function AttendancePage({ sites, user }) {
                   👤 ID/Email: <span style={{ fontWeight: '600', color: '#475569' }}>{h.employee_name}</span>
                 </div>
               </div>
-              <div style={{ textAlign: 'right', color: '#64748b' }}>
-                <div>{h.created_at ? new Date(h.created_at).toLocaleDateString() : 'N/A'}</div>
-                <div style={{ fontWeight: '600', color: '#0f172a' }}>{h.created_at ? new Date(h.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontSize: '11px' }}>
+                  <CalendarDays size={12} color="#64748b" />
+                  <span>{h.created_at ? new Date(h.created_at).toLocaleDateString('en-GB') : 'N/A'}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '700', color: '#0f172a', fontSize: '12px' }}>
+                  <Clock size={12} color="#2563eb" />
+                  <span>
+                    {h.created_at ? new Date(h.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''}
+                  </span>
+                </div>
               </div>
             </div>
           ))
         )}
       </div>
+
+      <ConfirmModal 
+        isOpen={modal.isOpen} 
+        message={modal.message} 
+        onConfirm={modal.onConfirm || (() => setModal({ isOpen: false }))} 
+        onCancel={modal.onCancel || (() => setModal({ isOpen: false }))} 
+      />
     </div>
   );
 }

@@ -2,6 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Filter, FileSpreadsheet, FileText, MapPin } from 'lucide-react';
 
+// તારીખને DD/MM/YYYY માં ફેરવવાનું ફંક્શન
+const formatDateToDDMMYYYY = (dateStr) => {
+  if (!dateStr) return '';
+  const cleanDate = dateStr.split('T')[0];
+  const parts = cleanDate.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return cleanDate;
+};
+
 const DateFormatter = (dateStr) => {
   if (!dateStr) return '';
   return dateStr.split('T')[0];
@@ -65,71 +76,139 @@ function EmployeeReportPage() {
     processWorkingHours(temp);
   };
 
+  // MULTIPLE PUNCHES SUPPORT સાથે સુધારેલું પ્રોસેસિંગ લોજીક
   const processWorkingHours = (logs) => {
-    const grouped = {};
-    
-    logs.forEach(item => {
-      if (!item.created_at) return;
-      const dateKey = DateFormatter(item.created_at);
-      const empKey = item.employee_name || 'Unknown';
-      const uniqueKey = `${empKey}_${dateKey}_${item.site_name}`;
+    // જૂનાથી નવા ક્રમમાં ગોઠવો (Chronological)
+    const ascendingLogs = [...logs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-      if (!grouped[uniqueKey]) {
-        grouped[uniqueKey] = {
-          employee: empKey,
-          date: dateKey,
-          site: item.site_name,
-          inTime: '-',
+    const reportArray = [];
+    
+    // કર્મચારી અને સાઇટ મુજબ લોગ્સને અલગ પાડીએ
+    const groupedByEmpSite = {};
+    ascendingLogs.forEach(item => {
+      const empKey = item.employee_name || 'Unknown';
+      const siteKey = item.site_name || 'Unknown Site';
+      const mapKey = `${empKey}_${siteKey}`;
+
+      if (!groupedByEmpSite[mapKey]) {
+        groupedByEmpSite[mapKey] = [];
+      }
+      groupedByEmpSite[mapKey].push(item);
+    });
+
+    const timeOptions = { hour: '2-digit', minute: '2-digit', hour12: true };
+
+    Object.keys(groupedByEmpSite).forEach(mapKey => {
+      const empLogs = groupedByEmpSite[mapKey];
+      const partsKey = mapKey.split('_');
+      const empName = partsKey[0];
+      const siteName = partsKey.slice(1).join('_');
+
+      let currentIn = null;
+
+      empLogs.forEach(item => {
+        if (item.punch_type === 'IN') {
+          if (currentIn) {
+            // જો પહેલાથી IN હોય અને બીજો IN આવે તો પહેલા વાળાને અધૂરો ઉમેરી દો
+            reportArray.push({
+              employee: empName,
+              date: formatDateToDDMMYYYY(currentIn.created_at),
+              site: siteName,
+              inTime: new Date(currentIn.created_at).toLocaleTimeString('en-US', timeOptions),
+              outTime: '-',
+              inLat: currentIn.latitude || '',
+              inLng: currentIn.longitude || '',
+              outLat: '',
+              outLng: '',
+              workingHours: '-',
+              diffMs: 0,
+              rawDateForSort: new Date(currentIn.created_at)
+            });
+          }
+          currentIn = item;
+        } else if (item.punch_type === 'OUT') {
+          if (currentIn) {
+            // પરફેક્ટ IN અને OUT ની જોડી
+            const dateStr = formatDateToDDMMYYYY(currentIn.created_at);
+            const inTimeStr = new Date(currentIn.created_at).toLocaleTimeString('en-US', timeOptions);
+            const outTimeStr = new Date(item.created_at).toLocaleTimeString('en-US', timeOptions);
+            
+            const inDateObj = new Date(currentIn.created_at);
+            const outDateObj = new Date(item.created_at);
+            const diffMs = outDateObj - inDateObj;
+
+            let workingHours = '-';
+            if (diffMs > 0) {
+              const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+              const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+              workingHours = `${diffHrs} hrs ${diffMins} mins`;
+            }
+
+            reportArray.push({
+              employee: empName,
+              date: dateStr,
+              site: siteName,
+              inTime: inTimeStr,
+              outTime: outTimeStr,
+              inLat: currentIn.latitude || '',
+              inLng: currentIn.longitude || '',
+              outLat: item.latitude || '',
+              outLng: item.longitude || '',
+              workingHours,
+              diffMs: diffMs > 0 ? diffMs : 0,
+              rawDateForSort: inDateObj
+            });
+
+            currentIn = null;
+          } else {
+            // જો વગર IN એ સીધો OUT થયો હોય
+            reportArray.push({
+              employee: empName,
+              date: formatDateToDDMMYYYY(item.created_at),
+              site: siteName,
+              inTime: '-',
+              outTime: new Date(item.created_at).toLocaleTimeString('en-US', timeOptions),
+              inLat: '',
+              inLng: '',
+              outLat: item.latitude || '',
+              outLng: item.longitude || '',
+              workingHours: '-',
+              diffMs: 0,
+              rawDateForSort: new Date(item.created_at)
+            });
+          }
+        }
+      });
+
+      // જો લૂપ પૂરો થયા પછી પણ માત્ર IN બાકી રહી ગયો હોય
+      if (currentIn) {
+        reportArray.push({
+          employee: empName,
+          date: formatDateToDDMMYYYY(currentIn.created_at),
+          site: siteName,
+          inTime: new Date(currentIn.created_at).toLocaleTimeString('en-US', timeOptions),
           outTime: '-',
-          inLat: item.latitude || '',
-          inLng: item.longitude || '',
+          inLat: currentIn.latitude || '',
+          inLng: currentIn.longitude || '',
           outLat: '',
           outLng: '',
-          workingHours: '-'
-        };
-      }
-
-      const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      if (item.punch_type === 'IN') {
-        grouped[uniqueKey].inTime = timeStr;
-        grouped[uniqueKey].inLat = item.latitude || '';
-        grouped[uniqueKey].inLng = item.longitude || '';
-      } else if (item.punch_type === 'OUT') {
-        grouped[uniqueKey].outTime = timeStr;
-        grouped[uniqueKey].outLat = item.latitude || '';
-        grouped[uniqueKey].outLng = item.longitude || '';
+          workingHours: '-',
+          diffMs: 0,
+          rawDateForSort: new Date(currentIn.created_at)
+        });
       }
     });
 
-    const reportArray = Object.values(grouped).map(row => {
-      if (row.inTime !== '-' && row.outTime !== '-') {
-        const inDate = new Date(`${row.date} ${row.inTime}`);
-        const outDate = new Date(`${row.date} ${row.outTime}`);
-        const diffMs = outDate - inDate;
-        if (diffMs > 0) {
-          const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-          const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-          row.workingHours = `${diffHrs} hrs ${diffMins} mins`;
-        }
-      }
-      return row;
-    });
+    // તાજેતરનો ડેટા ઉપર આવે તે રીતે સોર્ટ (Sort) કરો
+    reportArray.sort((a, b) => b.rawDateForSort - a.rawDateForSort);
 
     setProcessedReport(reportArray);
   };
 
   const calculateTotalWorkingHours = () => {
-    let totalMinutes = processedReport.reduce((acc, row) => {
-      if (row.workingHours !== '-') {
-        const parts = row.workingHours.split(' ');
-        const hrs = parseInt(parts[0]) || 0;
-        const mins = parseInt(parts[2]) || 0;
-        return acc + (hrs * 60) + mins;
-      }
-      return acc;
-    }, 0);
-    const finalHrs = Math.floor(totalMinutes / 60);
-    const finalMins = totalMinutes % 60;
+    let totalMs = processedReport.reduce((acc, row) => acc + (row.diffMs || 0), 0);
+    const finalHrs = Math.floor(totalMs / (1000 * 60 * 60));
+    const finalMins = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
     return `${finalHrs} hrs ${finalMins} mins`;
   };
 
@@ -140,7 +219,7 @@ function EmployeeReportPage() {
     }
 
     let csvContent = `data:text/csv;charset=utf-8,Company: T&J Infra | Employee: ${selectedEmployee || 'All'} | Site: ${selectedSite || 'All'}\n`;
-    csvContent += `Period: ${fromDate || 'All'} to ${toDate || 'All'}\n\n`;
+    csvContent += `Period: ${fromDate ? formatDateToDDMMYYYY(fromDate) : 'All'} to ${toDate ? formatDateToDDMMYYYY(toDate) : 'All'}\n\n`;
     csvContent += `Date,Employee,Site Name,Punch In,Punch Out,Working Hours,In Location,Out Location\n`;
 
     processedReport.forEach(row => {
@@ -175,7 +254,7 @@ function EmployeeReportPage() {
           <strong>Employee:</strong> {selectedEmployee || 'All'} | <strong>Site:</strong> {selectedSite || 'All'}
         </p>
         <p style={{ fontSize: '12px', margin: 2, color: '#333' }}>
-          <strong>Period:</strong> {fromDate || 'N/A'} to {toDate || 'N/A'}
+          <strong>Period:</strong> {fromDate ? formatDateToDDMMYYYY(fromDate) : 'N/A'} to {toDate ? formatDateToDDMMYYYY(toDate) : 'N/A'}
         </p>
         <hr style={{ border: '0.5px solid #000', margin: '10px 0' }} />
       </div>
@@ -266,7 +345,7 @@ function EmployeeReportPage() {
               ) : (
                 processedReport.map((row, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '8px', color: '#334155' }}>{row.date}</td>
+                    <td style={{ padding: '8px', color: '#334155', fontWeight: '600' }}>{row.date}</td>
                     <td style={{ padding: '8px', fontWeight: '600', color: '#0f172a' }}>{row.employee}</td>
                     <td style={{ padding: '8px', color: '#475569' }}>{row.site}</td>
                     <td style={{ padding: '8px', textAlign: 'center', color: '#166534', fontWeight: 'bold' }}>{row.inTime}</td>
