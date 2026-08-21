@@ -16,10 +16,16 @@ export default function StaffManagement() {
   
   // Edit Modal States
   const [editingStaff, setEditingStaff] = useState(null)
+  const [editForm, setEditForm] = useState({
+    full_name: '',
+    mobile: '',
+    role: 'Staff',
+    password: ''
+  })
   const [editTabs, setEditTabs] = useState([])
   const [editSites, setEditSites] = useState([])
   const [updating, setUpdating] = useState(false)
-  const [editStateFilter, setEditStateFilter] = useState('All') // એડિટ મોડ માટે સ્ટેટ ફિલ્ટર
+  const [editStateFilter, setEditStateFilter] = useState('All')
 
   // Add Staff Modal States
   const [formData, setFormData] = useState({
@@ -31,7 +37,7 @@ export default function StaffManagement() {
     allowed_tabs: ['site_progress', 'plant_report'],
     assigned_sites: []
   })
-  const [addStateFilter, setAddStateFilter] = useState('All') // નવો સ્ટાફ એડ કરવા માટે સ્ટેટ ફિલ્ટર
+  const [addStateFilter, setAddStateFilter] = useState('All')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -51,7 +57,6 @@ export default function StaffManagement() {
     if (!error && data) setAllSites(data)
   }
 
-  // ઉપલબ્ધ બધા રાજ્યો (States) ની યુનિક યાદી કાઢવા માટે
   const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolean))]
 
   const deleteStaff = async (id) => {
@@ -67,9 +72,19 @@ export default function StaffManagement() {
 
   const openEditModal = (staff) => {
     setEditingStaff(staff)
+    setEditForm({
+      full_name: staff.full_name || '',
+      mobile: staff.mobile || '',
+      role: staff.role || 'Staff',
+      password: ''
+    })
     setEditTabs(staff.allowed_tabs || [])
     setEditSites(staff.assigned_sites || [])
     setEditStateFilter('All')
+  }
+
+  const handleEditChange = (e) => {
+    setEditForm({ ...editForm, [e.target.name]: e.target.value })
   }
 
   const handleEditCheckboxChange = (tabId) => {
@@ -96,22 +111,36 @@ export default function StaffManagement() {
     e.preventDefault()
     setUpdating(true)
 
-    const { error } = await supabase
-      .from('user_permissions')
-      .update({ 
-        allowed_tabs: editTabs,
-        assigned_sites: editSites 
-      })
-      .eq('user_id', editingStaff.user_id)
+    try {
+      const { error: updateError } = await supabase
+        .from('user_permissions')
+        .update({ 
+          full_name: editForm.full_name,
+          mobile: editForm.mobile,
+          role: editForm.role,
+          allowed_tabs: editTabs,
+          assigned_sites: editSites 
+        })
+        .eq('user_id', editingStaff.user_id)
 
-    setUpdating(false)
+      if (updateError) throw updateError;
 
-    if (error) {
-      alert("અપડેટ કરવામાં એરર આવી: " + error.message)
-    } else {
-      alert("પરમિશન અને સાઇટ્સ સફળતાપૂર્વક અપડેટ થઈ ગઈ!")
+      if (editForm.password && editForm.password.trim().length >= 6) {
+        const { error: pwdError } = await supabase.auth.updateUser({
+          password: editForm.password
+        })
+        if (pwdError) {
+          console.warn("Password update warning:", pwdError.message);
+        }
+      }
+
+      alert("સ્ટાફની વિગતો અને પરમિશન સફળતાપૂર્વક અપડેટ થઈ ગઈ!")
       setEditingStaff(null)
       fetchStaff()
+    } catch (err) {
+      alert("અપડેટ કરવામાં એરર આવી: " + err.message)
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -166,12 +195,14 @@ export default function StaffManagement() {
       const userId = authData.user?.id;
       if (!userId) throw new Error("યુઝર આઈડી જનરેટ થવામાં ભૂલ થઈ છે.");
 
+      // અહીં email પણ સેવ કર્યો છે જેથી ટેબલમાં દેખાઈ શકે
       const { error: permError } = await supabase
         .from('user_permissions')
         .insert([
           {
             user_id: userId,
             full_name: formData.full_name,
+            email: formData.email, 
             mobile: formData.mobile,
             role: formData.role,
             allowed_tabs: formData.allowed_tabs,
@@ -202,7 +233,6 @@ export default function StaffManagement() {
     }
   }
 
-  // ફિલ્ટર કર્યા પછીની સાઇટ્સ મેળવવા માટે
   const filteredEditSites = allSites.filter(site => editStateFilter === 'All' || site.state === editStateFilter)
   const filteredAddSites = allSites.filter(site => addStateFilter === 'All' || site.state === addStateFilter)
 
@@ -230,8 +260,8 @@ export default function StaffManagement() {
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '750px' }}>
           <thead>
             <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: '12px', textTransform: 'uppercase' }}>
-              <th style={{ padding: '14px 16px', width: '22%' }}>Name & Mobile</th>
-              <th style={{ padding: '14px 16px', width: '18%' }}>Role</th>
+              <th style={{ padding: '14px 16px', width: '25%' }}>Name, Login ID & Mobile</th>
+              <th style={{ padding: '14px 16px', width: '15%' }}>Role</th>
               <th style={{ padding: '14px 16px', width: '25%' }}>Allowed Tabs</th>
               <th style={{ padding: '14px 16px', width: '20%' }}>Assigned Sites</th>
               <th style={{ padding: '14px 16px', width: '15%', textAlign: 'right' }}>Actions</th>
@@ -249,7 +279,8 @@ export default function StaffManagement() {
                 <tr key={s.user_id} style={{ borderBottom: '1px solid #f1f5f9', fontSize: '14px' }}>
                   <td style={{ padding: '14px 16px' }}>
                     <div style={{ fontWeight: '600', color: '#1e293b' }}>{s.full_name}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{s.mobile || 'No Mobile'}</div>
+                    <div style={{ fontSize: '12px', color: '#2563eb', fontWeight: '500' }}>✉️ {s.email || 'N/A'}</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>📞 {s.mobile || 'No Mobile'}</div>
                   </td>
                   <td style={{ padding: '14px 16px', color: '#475569' }}>
                     <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>
@@ -279,13 +310,13 @@ export default function StaffManagement() {
         </table>
       </div>
 
-      {/* Edit Permissions & Sites Modal */}
+      {/* Edit Staff & Permissions Modal */}
       {editingStaff && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0, 0, 0, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '16px' }}>
           <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
-                Edit Access: {editingStaff.full_name}
+                Edit Staff: {editingStaff.full_name}
               </h2>
               <button onClick={() => setEditingStaff(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
                 <X size={22} />
@@ -293,6 +324,32 @@ export default function StaffManagement() {
             </div>
 
             <form onSubmit={handleUpdatePermissions} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Full Name *</label>
+                <input type="text" name="full_name" value={editForm.full_name} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} required />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Mobile Number *</label>
+                <input type="tel" name="mobile" value={editForm.mobile} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} required />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Role *</label>
+                <select name="role" value={editForm.role} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }} required>
+                  <option value="Staff">Staff</option>
+                  <option value="Supervisor">Supervisor</option>
+                  <option value="Plant Manager">Plant Manager</option>
+                  <option value="BDM">BDM</option>
+                  <option value="Manager">Manager</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>New Password (Optional)</label>
+                <input type="password" name="password" value={editForm.password} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Leave blank to keep old password" />
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0369a1', margin: 0 }}>Allowed Tabs</h3>
                 {AVAILABLE_TABS.map((tab) => (
@@ -303,12 +360,10 @@ export default function StaffManagement() {
                 ))}
               </div>
 
-              {/* Assign Sites with State Filter */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#fdf4ff', borderRadius: '8px', border: '1px solid #f5d0fe' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#a21caf', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}><MapPin size={16} /> Assign Sites</h3>
                   
-                  {/* State Filter Dropdown */}
                   <select 
                     value={editStateFilter} 
                     onChange={(e) => setEditStateFilter(e.target.value)}
@@ -353,29 +408,29 @@ export default function StaffManagement() {
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Full Name *</label>
-                <input type="text" name="full_name" value={formData.full_name} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} placeholder="Enter full name" required />
+                <input type="text" name="full_name" value={formData.full_name} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter full name" required />
               </div>
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Email (Login ID) *</label>
-                <input type="email" name="email" value={formData.email} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} placeholder="Enter email address" required />
+                <input type="email" name="email" value={formData.email} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter email address" required />
               </div>
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <Phone size={14} /> Mobile Number *
                 </label>
-                <input type="tel" name="mobile" value={formData.mobile} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} placeholder="Enter mobile number" required />
+                <input type="tel" name="mobile" value={formData.mobile} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter mobile number" required />
               </div>
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Password *</label>
-                <input type="password" name="password" value={formData.password} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} placeholder="Enter password (min 6 chars)" required />
+                <input type="password" name="password" value={formData.password} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter password (min 6 chars)" required />
               </div>
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Role *</label>
-                <select name="role" value={formData.role} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', backgroundColor: '#fff' }} required>
+                <select name="role" value={formData.role} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }} required>
                   <option value="Staff">Staff</option>
                   <option value="Supervisor">Supervisor</option>
                   <option value="Plant Manager">Plant Manager</option>
@@ -394,12 +449,10 @@ export default function StaffManagement() {
                 ))}
               </div>
 
-              {/* Add New Staff - Assign Sites with State Filter */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#fdf4ff', borderRadius: '8px', border: '1px solid #f5d0fe' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#a21caf', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}><MapPin size={16} /> Assign Sites</h3>
                   
-                  {/* State Filter Dropdown */}
                   <select 
                     value={addStateFilter} 
                     onChange={(e) => setAddStateFilter(e.target.value)}
