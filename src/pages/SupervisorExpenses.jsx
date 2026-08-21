@@ -91,14 +91,25 @@ function SupervisorExpenses() {
     });
   };
 
-  const uploadFilesToSupabase = async (fileArray, folderName) => {
+const uploadFilesToSupabase = async (fileArray, folderName) => {
     if (!fileArray || !Array.isArray(fileArray)) return [];
     let urls = [];
     for (let file of fileArray) {
       if (file instanceof File) {
         const compressedFile = await compressImage(file);
         const fileExt = compressedFile.name ? compressedFile.name.split('.').pop() : 'jpg';
-        const fileName = `${folderName}/${user?.id || 'user'}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        
+        const type = folderName.includes('income') ? 'INCOME' : 'EXPENSE';
+      // જૂની લાઇન હટાવીને આ મૂકો:
+const date = new Date();
+const d = String(date.getDate()).padStart(2, '0');
+const m = String(date.getMonth() + 1).padStart(2, '0');
+const y = date.getFullYear();
+const formattedDate = `${d}-${m}-${y}`; // 21-08-2026 ફોર્મેટ
+
+const username = user?.email ? user.email.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '_') : 'user';
+const fileName = `${folderName}/${type}_${username}_${formattedDate}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        
         const { data, error } = await supabase.storage.from('site-photos').upload(fileName, compressedFile);
         if (!error && data) {
           const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName);
@@ -110,7 +121,6 @@ function SupervisorExpenses() {
     }
     return urls;
   };
-
   const deleteFileFromStorage = async (fileUrl) => {
     try {
       if (!fileUrl || typeof fileUrl !== 'string') return;
@@ -213,7 +223,9 @@ function SupervisorExpenses() {
   }
 
   const loadTransactions = async () => {
-    let query = supabase.from('site_transactions').select('*').order('transaction_date', { ascending: false }).order('created_at', { ascending: false })
+    let query = supabase.from('site_transactions').select('*')
+      .order('transaction_date', { ascending: false })
+      .order('created_at', { ascending: false })
     const { data, error } = await query
     if (error) {
       console.error('Error loading transactions:', error.message)
@@ -328,8 +340,17 @@ function SupervisorExpenses() {
           for (let file of src.files) {
             if (file instanceof File) {
               const compressed = await compressImage(file)
-              const ext = compressed.name ? compressed.name.split('.').pop() : 'jpg'
-              const fileName = `inc_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`
+
+              
+      const date = new Date();
+const d = String(date.getDate()).padStart(2, '0');
+const m = String(date.getMonth() + 1).padStart(2, '0');
+const y = date.getFullYear();
+const formattedDate = `${d}-${m}-${y}`;
+
+const username = user?.email ? user.email.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '_') : 'user';
+const fileName = `income/INCOME_${username}_${formattedDate}_${Math.random().toString(36).substring(7)}.${ext}`;
+
               const { error: upErr } = await supabase.storage.from('site-photos').upload(fileName, compressed)
               if (upErr) throw upErr
               const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
@@ -365,7 +386,15 @@ function SupervisorExpenses() {
             if (file instanceof File) {
               const compressed = await compressImage(file)
               const ext = compressed.name ? compressed.name.split('.').pop() : 'jpg'
-              const fileName = `exp_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`
+           const date = new Date();
+const d = String(date.getDate()).padStart(2, '0');
+const m = String(date.getMonth() + 1).padStart(2, '0');
+const y = date.getFullYear();
+const formattedDate = `${d}-${m}-${y}`;
+
+const username = user?.email ? user.email.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '_') : 'user';
+const fileName = `expense/EXPENSE_${username}_${formattedDate}_${Math.random().toString(36).substring(7)}.${ext}`;
+
               const { error: upErr } = await supabase.storage.from('site-photos').upload(fileName, compressed)
               if (upErr) throw upErr
               const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
@@ -428,7 +457,6 @@ function SupervisorExpenses() {
     .filter(tx => tx.transaction_type === 'expense')
     .reduce((sum, tx) => sum + parseFloat(tx.amount || 0), 0)
 
-  // સિલક હંમેશા આઈડી મુજબ ગ્લોબલ જ રહેશે, સાઇટ બદલવાથી બદલાશે નહીં
   const netBalance = globalTotalIncome - globalTotalExpense
 
   const siteTotalIncome = siteTransactions
@@ -438,6 +466,11 @@ function SupervisorExpenses() {
   const siteTotalExpense = siteTransactions
     .filter(tx => tx.transaction_type === 'expense')
     .reduce((sum, tx) => sum + parseFloat(tx.amount || 0), 0)
+
+  const siteNetBalance = siteTotalIncome - siteTotalExpense
+
+  // સુપરવાઇઝર માટે બેલેન્સ હંમેશા આઈડી મુજબ ફિક્સ્ડ રહેશે, એડમિન માટે સાઇટ વાઇઝ બદલાશે
+  const displayBalance = !isAdmin ? netBalance : (selectedViewSite !== 'all' ? siteNetBalance : netBalance)
 
   const filteredIncomeTransactions = siteTransactions.filter(tx => {
     if (tx.transaction_type !== 'income') return false;
@@ -548,13 +581,12 @@ function SupervisorExpenses() {
       {/* WORKING BALANCE & CARDS */}
       {!showForm && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '14px', boxSizing: 'border-box' }}>
-          {/* સિલક હંમેશા ગ્લોબલ (કુલ) જ રહેશે */}
           <div style={{ background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)', padding: '16px', borderRadius: '14px', textAlign: 'center', color: '#fff', boxShadow: '0 4px 12px rgba(37,99,235,0.2)', boxSizing: 'border-box' }}>
             <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', opacity: 0.9, letterSpacing: '0.5px' }}>
-              <Wallet size={16} /> My Working Balance (કુલ સિલક)
+              <Wallet size={16} /> {!isAdmin ? 'My Working Balance (કુલ સિલક)' : (selectedViewSite !== 'all' ? `Net Balance for "${selectedViewSite}"` : 'Total Working Balance')}
             </div>
             <div style={{ fontSize: '26px', fontWeight: '900', marginTop: '6px' }}>
-              ₹{netBalance.toLocaleString('en-IN')}
+              ₹{displayBalance.toLocaleString('en-IN')}
             </div>
           </div>
 
