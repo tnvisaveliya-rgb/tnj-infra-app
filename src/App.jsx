@@ -1,8 +1,9 @@
-import React from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import React, { useEffect } from 'react' // useEffect import add karyu
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
+import { supabase } from './lib/supabase' // Supabase import karvu jaruri che
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import CRM from './pages/CRM'
@@ -15,6 +16,10 @@ import PlantReportPage from './pages/PlantReportPage'
 import CrmReportPage from './pages/CrmReportPage'
 import EmployeeReportPage from './pages/EmployeeReportPage'
 import StaffManagement from './pages/StaffManagement'
+import SiteTransactionPage from './pages/SiteTransactionPage'
+import PlantTransactionPage from './pages/PlantTransactionPage'
+import ForgotPassword from './pages/ForgotPassword';
+import UpdatePassword from './pages/UpdatePassword';
 
 function AppRoutes() {
   const { user } = useAuth()
@@ -37,6 +42,8 @@ function AppRoutes() {
           <Route path="/crm-report" element={<CrmReportPage />} />
           <Route path="/employee-report" element={<EmployeeReportPage />} />
           <Route path="/staff-management" element={<StaffManagement />} />
+          <Route path="/site-transaction" element={<SiteTransactionPage />} />
+          <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </>
@@ -47,6 +54,8 @@ function AppRoutes() {
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/PlantReports" element={<PlantReports />} />
+          <Route path="/site-transaction" element={<SiteTransactionPage />} />
+          <Route path="/plant-transaction" element={<PlantTransactionPage />} />
 
           <Route path="*" element={<Navigate to="/supervisor-dashboard" replace />} />
         </>
@@ -55,26 +64,51 @@ function AppRoutes() {
   )
 }
 
+// NAVO COMPONENT: Auth event pakadva mate
+function AuthListenerWrapper({ children }) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      // Aa aakhi app ma sauthi pehla check thashe
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/update-password', { replace: true });
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [navigate]);
+
+  return children;
+}
+
 function App() {
   return (
     <AuthProvider>
       <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/*"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <AppRoutes />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
+        {/* Router ni andar Wrapper mukyo che jethi useNavigate chali shake */}
+        <AuthListenerWrapper>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/update-password" element={<UpdatePassword />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <AppRoutes />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </AuthListenerWrapper>
       </Router>
     </AuthProvider>
   )
 }
 
-export default App
+export default App;

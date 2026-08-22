@@ -1,13 +1,16 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react' // useEffect add karyu
 import { supabase } from '../lib/supabase'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 
 function Login() {
   const [email, setEmail] = useState('') // અહીંથી ડિફોલ્ટ ઈમેલ કાઢી નાખ્યો છે
-  const [password, setPassword] = useState('') // અહીંથી ડિફોલ્ਟ પાસવર્ડ કાઢી નાખ્યો છે
+  const [password, setPassword] = useState('') // અહીંથી ડિફોલ્ટ પાસવર્ડ કાઢી નાખ્યો છે
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
+
+
+  
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -91,7 +94,7 @@ function Login() {
               />
             </div>
 
-            {/* Password Field */}
+          {/* Password Field */}
             <div>
               <label htmlFor="password" style={{ display: 'block', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: '#475569', marginBottom: '8px', letterSpacing: '0.5px' }}>
                 Password
@@ -117,6 +120,19 @@ function Login() {
                 placeholder="••••••••"
               />
             </div>
+
+            {/* AHI NAVO FORGOT PASSWORD LINK MUKELO CHE */}
+            <div style={{ textAlign: 'right', marginTop: '-10px' }}>
+              <Link 
+                to="/forgot-password" 
+                style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'none', fontWeight: '600' }}
+              >
+                Forgot password?
+              </Link>
+            </div>
+            {/* NAVO LINK AHI PURO THAY CHE */}
+
+          
 
             {/* Submit Button */}
             <button
