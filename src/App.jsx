@@ -101,7 +101,7 @@ function AuthListenerWrapper({ children }) {
           const permission = await Notification.requestPermission();
           if (permission === 'granted') {
             const currentToken = await getToken(messaging, { 
-              vapidKey: 'TAMARI_FIREBASE_WEB_PUSH_VAPID_KEY' 
+              vapidKey: 'BBHNzqWuJgQt9iAaTqY9OEELHdBxDt4M4vwpKuowEn0n_oZ3l5zdHzXY92jBlCub_BlaZU37iLy7QpcEz2tN0WA' 
             });
 
             if (currentToken) {
