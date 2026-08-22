@@ -16,18 +16,22 @@ function UpdatePassword() {
     setSuccess('')
 
     try {
-      // Aa code navo password save karshe
-      const { error } = await supabase.auth.updateUser({
+      // 1. Pehla navo password save karo
+      const { error: updateError } = await supabase.auth.updateUser({
         password: password
       })
 
-      if (error) throw error
+      if (updateError) throw updateError
 
-      setSuccess('Tamaro password successfully badlai gayo che! Tame have login kari shako cho.')
+      setSuccess('Tamaro password successfully badlai gayo che! Tame have nava password thi login kari shako cho.')
       
-      // 3 second pachi wapas login page par mokli deshe
+      // 2. PASSWORD BADLAYA PACHI TARAT LOGOUT KARI DO
+      // (Aa step badha juna sessions delete kari dese)
+      await supabase.auth.signOut();
+      
+      // 3. 3 second pachi wapas login page par mokli deshe
       setTimeout(() => {
-        navigate('/') 
+        navigate('/login', { replace: true }) 
       }, 3000)
 
     } catch (error) {

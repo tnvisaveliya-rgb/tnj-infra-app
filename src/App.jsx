@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react' // useEffect import add karyu
+import React, { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
-import { supabase } from './lib/supabase' // Supabase import karvu jaruri che
+import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import CRM from './pages/CRM'
@@ -20,6 +20,25 @@ import SiteTransactionPage from './pages/SiteTransactionPage'
 import PlantTransactionPage from './pages/PlantTransactionPage'
 import ForgotPassword from './pages/ForgotPassword';
 import UpdatePassword from './pages/UpdatePassword';
+import EmployeeDashboard from './pages/EmployeeDashboard';
+
+// Firebase messaging import karo (Tamari project ma firebase setup hovu joie)
+import { initializeApp } from "firebase/app";
+import { getMessaging, getToken } from "firebase/messaging";
+
+// Firebase Configuration (Tame tamari firebase config ahiya muki sako cho)
+const firebaseConfig = {
+   apiKey: "AIzaSyDvmvqC2ENI3Twx5JzVXS3VsiOAOthmIMI",
+  authDomain: "tnj-infra-app.firebaseapp.com",
+  projectId: "tnj-infra-app",
+  storageBucket: "tnj-infra-app.firebasestorage.app",
+  messagingSenderId: "294302478190",
+  appId: "1:294302478190:web:10c73c2cbd4b2d66d0db7f",
+  measurementId: "G-S9RV6WDD5C"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const messaging = getMessaging(firebaseApp);
 
 function AppRoutes() {
   const { user } = useAuth()
@@ -34,6 +53,7 @@ function AppRoutes() {
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/PlantReports" element={<PlantReports />} />
+          <Route path="/employee-dashboard" element={<EmployeeDashboard />} />
           
           <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
           <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
@@ -50,29 +70,54 @@ function AppRoutes() {
       ) : (
         /* ૨. સ્ટાફ અને સુપરવાઈઝર માટે ડાયનેમિક રાઉટ્સ */
         <>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<EmployeeDashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/PlantReports" element={<PlantReports />} />
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
 
-          <Route path="*" element={<Navigate to="/supervisor-dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/employee-dashboard" replace />} />
         </>
       )}
     </Routes>
   )
 }
 
-// NAVO COMPONENT: Auth event pakadva mate
+// Auth event ane FCM Token generate karva mate wrapper
 function AuthListenerWrapper({ children }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      // Aa aakhi app ma sauthi pehla check thashe
+    // 1. Password recovery event check
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         navigate('/update-password', { replace: true });
+      }
+
+      // 2. User login thay etle FCM Token generate karine Supabase ma save karo
+      if (event === 'SIGNED_IN' && session?.user) {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            const currentToken = await getToken(messaging, { 
+              vapidKey: 'TAMARI_FIREBASE_WEB_PUSH_VAPID_KEY' 
+            });
+
+            if (currentToken) {
+              await supabase
+                .from('fcm_tokens')
+                .upsert({ 
+                   user_id: session.user.id, 
+                   fcm_token: currentToken, 
+                   created_at: new Date() 
+                 }, { onConflict: 'user_id' });
+              console.log("FCM Token saved successfully on login!");
+            }
+          }
+        } catch (err) {
+          console.error("Error generating FCM token on login:", err);
+        }
       }
     });
 
@@ -88,7 +133,6 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        {/* Router ni andar Wrapper mukyo che jethi useNavigate chali shake */}
         <AuthListenerWrapper>
           <Routes>
             <Route path="/login" element={<Login />} />
