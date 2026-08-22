@@ -84,7 +84,7 @@ function AppRoutes() {
   )
 }
 
-// Auth event ane FCM Token generate karva mate wrapper
+// Auth event ane FCM Token generate karva mate wrapper (Updated)
 function AuthListenerWrapper({ children }) {
   const navigate = useNavigate();
 
@@ -94,10 +94,13 @@ function AuthListenerWrapper({ children }) {
       if (event === 'PASSWORD_RECOVERY') {
         navigate('/update-password', { replace: true });
       }
+    });
 
-      // 2. User login thay etle FCM Token generate karine Supabase ma save karo
-      if (event === 'SIGNED_IN' && session?.user) {
-        try {
+    // 2. Direct session check jethi login user no token hamesha update rahe
+    async function saveFcmToken() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
           const permission = await Notification.requestPermission();
           if (permission === 'granted') {
             const currentToken = await getToken(messaging, { 
@@ -105,21 +108,28 @@ function AuthListenerWrapper({ children }) {
             });
 
             if (currentToken) {
-              await supabase
+              const { error } = await supabase
                 .from('fcm_tokens')
                 .upsert({ 
                    user_id: session.user.id, 
                    fcm_token: currentToken, 
                    created_at: new Date() 
                  }, { onConflict: 'user_id' });
-              console.log("FCM Token saved successfully on login!");
+
+              if (error) {
+                console.error("Supabase Upsert Error:", error.message);
+              } else {
+                console.log("FCM Token successfully saved to Supabase!");
+              }
             }
           }
-        } catch (err) {
-          console.error("Error generating FCM token on login:", err);
         }
+      } catch (err) {
+        console.error("Error generating FCM token:", err);
       }
-    });
+    }
+
+    saveFcmToken();
 
     return () => {
       authListener.subscription.unsubscribe();
