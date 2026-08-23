@@ -3,6 +3,7 @@ name: Trigger Punch Reminder
 on:
   schedule:
     - cron: '*/5 * * * *'
+  workflow_dispatch: # Aa line add karvathi upar "Run workflow" button aavi jashe!
 
 jobs:
   ping-supabase:
