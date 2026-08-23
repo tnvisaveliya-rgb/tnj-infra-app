@@ -1,0 +1,18 @@
+name: Trigger Punch Reminder
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Supabase Edge Function
+        env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          curl -X POST \
+            "https://kfkqnujmzlnclawjwdf.supabase.co/functions/v1/send-punch-reminder" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Content-Type: application/json"
