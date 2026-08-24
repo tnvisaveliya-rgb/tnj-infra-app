@@ -8,10 +8,7 @@
   box-sizing: border-box;
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Force Helvetica on everything, overriding inline styles where possible */
+body, div, span, h1, h2, h3, h4, h5, h6, p, a, button, input, select, textarea {
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
 }

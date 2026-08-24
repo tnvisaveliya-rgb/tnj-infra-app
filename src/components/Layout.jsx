@@ -20,7 +20,7 @@ function Layout({ children }) {
       
       // એડમિન માટે બધા ટેબ્સ ફિક્સ
       if (userEmail === 'infra.tnj@gmail.com') {
-        setAllowedTabs(['dashboard', 'crm', 'site_progress', 'plant_report']);
+        setAllowedTabs(['dashboard', 'crm', 'site_progress', 'plant_report', 'employee_dashboard']);
         return;
       }
 
@@ -44,10 +44,11 @@ function Layout({ children }) {
 
   // બધા ઉપલબ્ધ નેવિગેશન ઓપ્શન્સ (આઈડી સાથે)
   const allNavItems = [
-    { id: 'dashboard', path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'dashboard', path: '/Dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'crm', path: '/crm', label: 'CRM', icon: Building2 },
-    { id: 'site_progress', path: '/supervisor-dashboard', label: 'Site Daily Progress Report', icon: Receipt },
+    { id: 'site_progress', path:  '/siteemployee-dashboard', label: 'Site Daily Progress Report', icon: Receipt },
     { id: 'plant_report', path: '/PlantReports', label: 'Plant Report', icon: FileText },
+   
   ]
 
   // ઈમેલ અથવા ડેટાબેઝ પરમિશન મુજબ મેનુ ફિલ્ટર કરવાનું પરફેક્ટ લોજિક
@@ -87,7 +88,9 @@ function Layout({ children }) {
         style={{
           position: 'fixed',
           top: 0,
-          bottom: 0,
+          bottom: 75,
+          borderBottomRightRadius: '14px',
+          borderTopRightRadius: '14px',
           left: 0,
           width: '280px',
           backgroundColor: '#0f172a',
@@ -193,10 +196,10 @@ function Layout({ children }) {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }} className="lg:pl-[280px]">
+    {/* Main Content */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflowY: 'auto', position: 'relative' }} className="lg:pl-[280px]">
         {/* Header */}
-        <header style={{ height: '64px', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 30 }}>
+        <header style={{ height: '64px', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               onClick={() => setSidebarOpen(true)}
@@ -220,9 +223,10 @@ function Layout({ children }) {
         </header>
 
         {/* Page Content */}
-        <div style={{ flex: 1, padding: '24px', maxWidth: '1200px', width: '100%', margin: '0 auto' }}>
+        <div style={{ flex: 1, padding: '12px 16px', maxWidth: '1200px', width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
           {children}
         </div>
+     
       </main>
     </div>
   )

@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
-import { supabase } from './lib/supabase'
+import { supabase } from "./lib/supabase"; // ✅ Aa barabar che (curly braces sathe ane ek dot `./`)
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import CRM from './pages/CRM'
@@ -20,7 +20,7 @@ import SiteTransactionPage from './pages/SiteTransactionPage'
 import PlantTransactionPage from './pages/PlantTransactionPage'
 import ForgotPassword from './pages/ForgotPassword';
 import UpdatePassword from './pages/UpdatePassword';
-import EmployeeDashboard from './pages/EmployeeDashboard';
+import SiteEmployeeDashboard from './pages/SiteEmployeeDashboard';
 
 // Firebase messaging import karo (Tamari project ma firebase setup hovu joie)
 import { initializeApp } from "firebase/app";
@@ -49,11 +49,11 @@ function AppRoutes() {
       {/* ૧. એડમિન માટે બધા જ પેજ ખુલ્લા રહેશે */}
       {userEmail === 'infra.tnj@gmail.com' ? (
         <>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/Dashboard" element={<Dashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/PlantReports" element={<PlantReports />} />
-          <Route path="/employee-dashboard" element={<EmployeeDashboard />} />
+          <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
           
           <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
           <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
@@ -70,14 +70,15 @@ function AppRoutes() {
       ) : (
         /* ૨. સ્ટાફ અને સુપરવાઈઝર માટે ડાયનેમિક રાઉટ્સ */
         <>
-          <Route path="/" element={<EmployeeDashboard />} />
+          <Route path="/Dashboard" element={<SiteEmployeeDashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/PlantReports" element={<PlantReports />} />
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
+          <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
 
-          <Route path="*" element={<Navigate to="/employee-dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/siteemployee-dashboard" replace />} />
         </>
       )}
     </Routes>

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { History, Camera, MapPin, Calendar, FileText, X, CalendarDays, Clock } from 'lucide-react';
 import ConfirmModal from '../components/ConfirmModal';
 
-function AttendancePage({ sites, user }) {
+function AttendancePage({ sites = [], user }) {
   const [attendanceSite, setAttendanceSite] = useState('');
   const [loading, setLoading] = useState(false);
   const [photo, setPhoto] = useState(null);
@@ -13,6 +13,7 @@ function AttendancePage({ sites, user }) {
   const [currentStatus, setCurrentStatus] = useState('OUT');
 
   const [supervisorEmail, setSupervisorEmail] = useState('');
+  const [fetchedSites, setFetchedSites] = useState([]);
 
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -39,8 +40,58 @@ function AttendancePage({ sites, user }) {
     if (supervisorEmail) {
       loadAttendanceHistory(supervisorEmail);
       checkLocation();
+      loadSites(); // 👈 અહીં fetchSitesData ની જગ્યાએ loadSites કોલ કરો
     }
+ 
   }, [supervisorEmail]);
+
+  // એડમિન માટે બધી સાઇટ્સ અને યુઝર માટે ફક્ત અસાઇન થયેલી સાઇટ્સ જ ફેચ કરવાનું લોજિક (કોઈ ફોલબેક વગર)
+ // એક્સપેન્સ પેજ જેવું જ સેમ પરફેક્ટ લોજિક (user_permissions અને assigned_sites મુજબ)
+  const loadSites = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
+      const userId = user?.id || session?.user?.id;
+      
+      if (userEmail === 'infra.tnj@gmail.com') {
+        const { data } = await supabase.from('sites').select('*');
+        setFetchedSites(data || []);
+        return;
+      }
+
+      // user_permissions ટેબલમાંથી assigned_sites મેળવો
+      let permQuery = supabase.from('user_permissions').select('assigned_sites');
+      if (userId) {
+        permQuery = permQuery.eq('user_id', userId);
+      } else {
+        permQuery = permQuery.eq('user_id', userEmail);
+      }
+
+      const { data: permData, error: permError } = await permQuery.single();
+
+      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
+        setFetchedSites([]); 
+        return;
+      }
+
+      const assignedSiteNames = permData.assigned_sites;
+      const { data: siteData, error: siteError } = await supabase
+        .from('sites')
+        .select('*')
+        .in('site_name', assignedSiteNames);
+
+      if (!siteError && siteData) {
+        setFetchedSites(siteData);
+      } else {
+        setFetchedSites([]);
+      }
+    } catch (err) {
+      console.error('Error loading assigned sites:', err);
+      setFetchedSites([]);
+    }
+  };
+  // પ્રોપમાં સાઇટ્સ આવી હોય તો તે વાપરવી, નહીંતર ફેચ કરેલી સાઇટ્સ વાપરવી
+  const availableSites = (sites && sites.length > 0) ? sites : fetchedSites;
 
   const checkLocation = () => {
     if (navigator.geolocation) {
@@ -104,14 +155,12 @@ function AttendancePage({ sites, user }) {
       return;
     }
 
-    // ૧. સમય પ્રમાણે જૂનાથી નવો ડેટા (Chronological Order) માં ગોઠવીએ
     const ascendingData = [...filtered].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
     let pairs = [];
     let currentIn = null;
     const timeOptions = { hour: '2-digit', minute: '2-digit', hour12: true };
 
-    // જોડી (Pair) બનાવવાનું ફંક્શન
     const addPair = (inItem, outItem) => {
       const refItem = inItem || outItem;
       const rawDateStr = refItem.created_at;
@@ -146,25 +195,22 @@ function AttendancePage({ sites, user }) {
       });
     };
 
-    // ૨. IN અને OUT ની જોડીઓ બનાવીએ (એક જ દિવસમાં બહુ બધા હોય તો પણ ચાલશે)
     ascendingData.forEach(item => {
       if (item.punch_type === 'IN') {
-        if (currentIn) addPair(currentIn, null); // જો ભૂલથી બે વાર IN હોય
+        if (currentIn) addPair(currentIn, null);
         currentIn = item;
       } else if (item.punch_type === 'OUT') {
         if (currentIn) {
-          addPair(currentIn, item); // પરફેક્ટ જોડી (IN + OUT)
+          addPair(currentIn, item);
           currentIn = null;
         } else {
-          addPair(null, item); // જો માત્ર OUT હોય (ભૂલથી)
+          addPair(null, item);
         }
       }
     });
 
-    // જો છેલ્લો માત્ર IN રહી ગયો હોય (હજી OUT ન કર્યું હોય)
     if (currentIn) addPair(currentIn, null);
 
-    // ૩. નવી તારીખ ઉપર આવે તે રીતે ગોઠવો
     pairs.sort((a, b) => b.rawDateForSort - a.rawDateForSort);
 
     setReportData(pairs);
@@ -261,21 +307,22 @@ function AttendancePage({ sites, user }) {
       }
 
       setLoading(true);
-      try {
-        const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
-        const todayDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-'); 
-        const fileName = `attendance/${folderName}/${targetType}_${todayDate}_${Date.now()}.jpg`;
-        
-        const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
-        
-        let publicUrl = '';
-        if (!uploadError) {
-          const { data: pubData } = supabase.storage.from('site-photos').getPublicUrl(fileName);
-          publicUrl = pubData.publicUrl;
-        }
 
-        navigator.geolocation.getCurrentPosition(async (position) => {
-          const { latitude, longitude } = position.coords;
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        try {
+          const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
+          const todayDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-'); 
+          const fileName = `attendance/${folderName}/${targetType}_${todayDate}_${Date.now()}.jpg`;
+          
+          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, photo);
+          
+          let publicUrl = '';
+          if (!uploadError) {
+            const { data: pubData } = supabase.storage.from('site-photos').getPublicUrl(fileName);
+            publicUrl = pubData.publicUrl;
+          }
 
           const payload = {
             employee_name: finalEmail, 
@@ -299,16 +346,15 @@ function AttendancePage({ sites, user }) {
             await loadAttendanceHistory(finalEmail); 
           }
           setLoading(false);
-        }, (geoErr) => {
-          setModal({ isOpen: true, message: "GPS લોકેશન એરર: " + geoErr.message, onConfirm: () => setModal({ isOpen: false }) });
+        } catch (err) {
+          console.error("Catch Error:", err);
+          setModal({ isOpen: true, message: "કંઈક ભૂલ થઈ: " + err.message, onConfirm: () => setModal({ isOpen: false }) });
           setLoading(false);
-        });
-
-      } catch (err) {
-        console.error("Catch Error:", err);
-        setModal({ isOpen: true, message: "કંઈક ભૂલ થઈ: " + err.message, onConfirm: () => setModal({ isOpen: false }) });
+        }
+      }, (geoErr) => {
+        setModal({ isOpen: true, message: "GPS લોકેશન એરર: " + geoErr.message, onConfirm: () => setModal({ isOpen: false }) });
         setLoading(false);
-      }
+      });
     };
 
     if (targetType === 'IN') {
@@ -348,7 +394,7 @@ function AttendancePage({ sites, user }) {
         disabled={currentStatus === 'IN'}
         style={{ width: '100%', padding: '10px', borderRadius: '8px', marginBottom: '15px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: currentStatus === 'IN' ? '#f1f5f9' : '#fff' }}>
         <option value="">-- Select Site --</option>
-        {sites.map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
+        {(availableSites || []).map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
       </select>
 
       {currentStatus === 'IN' && (
