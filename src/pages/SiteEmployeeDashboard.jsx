@@ -38,26 +38,33 @@ export default function SiteEmployeeDashboard() {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // ૧. ટ્રાન્ઝેક્શન્સ ફેચ કરીને બેલેન્સ અને આજનો ખર્ચ ગણવો
+      // ૧. ટ્રાન્ઝેક્શન્સ ફેચ કરીને સાચું વર્કિંગ બેલેન્સ અને આજનો ખર્ચ ગણવો
       const { data: txData, error: txError } = await supabase.from('site_transactions').select('*');
       
       if (!txError && txData && txData.length > 0) {
         const filteredData = (user?.email === 'infra.tnj@gmail.com') 
           ? txData 
-          : txData.filter(item => item.user_id === user?.email || item.created_by === user?.email);
+          : txData.filter(item => 
+              item.user_id === user?.email || 
+              item.created_by === user?.email || 
+              item.email === user?.email
+            );
 
         let totalIncome = 0;
         let totalExpense = 0;
         let todayExpSum = 0;
 
         filteredData.forEach(item => {
-          const amt = parseFloat(item.amount || item.net_amount || 0);
-          const itemDate = item.date || (item.created_at ? item.created_at.split('T')[0] : '');
-          const isExpense = item.type === 'Expense' || item.type === 'Debit' || item.transaction_type === 'Expense';
+          const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
+          const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
+          const typeStr = (item.type || item.transaction_type || '').toLowerCase();
 
-          if (item.type === 'Income' || item.type === 'Credit' || item.transaction_type === 'Income') {
+          // જો આવક કે ફંડ હોય તો પ્લસ કરો
+          if (typeStr.includes('income') || typeStr.includes('credit') || typeStr.includes('fund') || typeStr.includes('receive') || typeStr.includes('deposit')) {
             totalIncome += amt;
-          } else {
+          } 
+          // જો ખર્ચ કે ડેબિટ હોય તો જ માઇનસમાં ગણો
+          else if (typeStr.includes('expense') || typeStr.includes('debit') || typeStr.includes('payment') || typeStr.includes('cash')) {
             totalExpense += amt;
             if (itemDate === todayStr) {
               todayExpSum += amt;
@@ -130,7 +137,7 @@ export default function SiteEmployeeDashboard() {
             </div>
           </div>
 
-          {/* Balance Card */}
+          {/* Balance Card (સાચી સિલેક અથવા વર્કિંગ બેલેન્સ) */}
           <div style={{
             background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             borderRadius: '16px', padding: '16px 18px', color: 'white',
@@ -256,7 +263,7 @@ export default function SiteEmployeeDashboard() {
           <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: activeTab === 'home' ? '800' : '600' }}>Home</span>
         </div>
         <div onClick={() => setActiveTab('dpr')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'dpr' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <ClipboardEdit size={18} />
+          <ClipboardEdit size= {18} />
           <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: activeTab === 'dpr' ? '800' : '600' }}>DPR</span>
         </div>
         <div onClick={() => setActiveTab('expense')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
