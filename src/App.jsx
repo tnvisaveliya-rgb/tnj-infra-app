@@ -96,16 +96,20 @@ function AuthListenerWrapper({ children }) {
         navigate('/update-password', { replace: true });
       }
     });
-
-    // 2. Direct session check jethi login user no token hamesha update rahe
+// 2. Direct session check jethi login user no token hamesha update rahe
     async function saveFcmToken() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const permission = await Notification.requestPermission();
           if (permission === 'granted') {
+            
+            // Service worker ne explicitly register karo
+            const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+            
             const currentToken = await getToken(messaging, { 
-              vapidKey: 'BBHNzqWuJgQt9iAaTqY9OEELHdBxDt4M4vwpKuowEn0n_oZ3l5zdHzXY92jBlCub_BlaZU37iLy7QpcEz2tN0WA' 
+              vapidKey: 'BBHNzqWuJgQt9iAaTqY9OEELHdBxDt4M4vwpKuowEn0n_oZ3l5zdHzXY92jBlCub_BlaZU37iLy7QpcEz2tN0WA',
+              serviceWorkerRegistration: registration // Ahiya registration pass karvu farijiaat che
             });
 
             if (currentToken) {
@@ -131,7 +135,7 @@ function AuthListenerWrapper({ children }) {
     }
 
     saveFcmToken();
-
+    
     return () => {
       authListener.subscription.unsubscribe();
     };
