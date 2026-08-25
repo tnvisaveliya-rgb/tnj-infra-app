@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { X, Loader2, UserPlus, Trash2, Shield, Edit3, Phone, Users, MapPin } from 'lucide-react'
+import AdminLeaveRequests from './AdminLeaveRequests'; // 👈 તમારી ફાઇલનું સાચું નામ
 
 const AVAILABLE_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -13,6 +14,7 @@ export default function StaffManagement() {
   const [staffList, setStaffList] = useState([])
   const [allSites, setAllSites] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [showLeaveSection, setShowLeaveSection] = useState(false) // 👈 લીવ સેક્શન ઓપન/ક્લોઝ કરવા માટેનું સ્ટેટ
   
   // Edit Modal States
   const [editingStaff, setEditingStaff] = useState(null)
@@ -195,7 +197,6 @@ export default function StaffManagement() {
       const userId = authData.user?.id;
       if (!userId) throw new Error("યુઝર આઈડી જનરેટ થવામાં ભૂલ થઈ છે.");
 
-      // અહીં email પણ સેવ કર્યો છે જેથી ટેબલમાં દેખાઈ શકે
       const { error: permError } = await supabase
         .from('user_permissions')
         .insert([
@@ -248,13 +249,35 @@ export default function StaffManagement() {
           </div>
           <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>Manage staff members, page access, and assigned sites.</p>
         </div>
-        <button 
-          onClick={() => { setIsModalOpen(true); setAddStateFilter('All'); }}
-          style={{ backgroundColor: '#2563eb', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
-        >
-          <UserPlus size={18} /> Add New Staff
-        </button>
+
+        {/* બટનોનું ગ્રુપ */}
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          
+          {/* 📋 Leave & Attendance બટન (જે AdminAttenceLeave ઓપન કરશે) */}
+          <button 
+            onClick={() => setShowLeaveSection(!showLeaveSection)} 
+            style={{ backgroundColor: '#9333ea', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
+          >
+            📋 {showLeaveSection ? 'Hide Leave Requests' : 'Leave & Attendance'}
+          </button>
+
+          {/* Add New Staff બટન */}
+          <button 
+            onClick={() => { setIsModalOpen(true); setAddStateFilter('All'); }}
+            style={{ backgroundColor: '#2563eb', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
+          >
+            <UserPlus size5={18} /> Add New Staff
+          </button>
+
+        </div>
       </div>
+
+      {/* જો બટન દબાવ્યું હશે તો AdminAttenceLeave પેજ અહીં બતાવશે */}
+      {showLeaveSection && (
+        <div style={{ marginBottom: '25px' }}>
+          <AdminLeaveRequests />
+        </div>
+      )}
 
       <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', overflowX: 'auto', border: '1px solid #e2e8f0' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '750px' }}>
@@ -393,7 +416,7 @@ export default function StaffManagement() {
           </div>
         </div>
       )}
-
+      
       {/* Add Staff Modal Popup */}
       {isModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0, 0, 0, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '16px' }}>

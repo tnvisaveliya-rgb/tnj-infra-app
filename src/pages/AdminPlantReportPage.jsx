@@ -1,6 +1,6 @@
 import React from 'react'
 
-function PlantReportPage() {
+function AdminPlantReportPage() {
   return (
     <div style={{ padding: '24px', maxWidth: '800px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
       <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '12px', color: '#0f172a' }}>📊 Plant Operation Report</h2>
@@ -9,4 +9,4 @@ function PlantReportPage() {
   )
 }
 
-export default PlantReportPage;
+export default AdminPlantReportPage;

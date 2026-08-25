@@ -47,7 +47,7 @@ function Layout({ children }) {
     { id: 'dashboard', path: '/Dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'crm', path: '/crm', label: 'CRM', icon: Building2 },
     { id: 'site_progress', path:  '/siteemployee-dashboard', label: 'Site Daily Progress Report', icon: Receipt },
-    { id: 'plant_report', path: '/PlantReports', label: 'Plant Report', icon: FileText },
+    { id: 'plant_report', path: '/plantemployee-dashboard', label: 'Plant Report', icon: FileText },
    
   ]
 

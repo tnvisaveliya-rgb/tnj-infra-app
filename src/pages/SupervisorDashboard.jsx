@@ -704,8 +704,19 @@ return (
         <div>
           {!showReportForm && (
             <>
-           {/* + NEW SITE REPORT BUTTON (মોર્ડન એપ પિલ-ટૅબ અને યુનિક ગ્રેડિયન્ટ લુક સાથે) */}
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', boxSizing: 'border-box' }}>
+           {/* + NEW SITE REPORT BUTTON (મોર્ડન એપ પિલ-ટૅબ અને યુનિક ગ્રેડિયન્ટ લુક સાથે) */}
+              <div style={{ 
+                position: 'sticky', 
+                top: '180px', 
+                zIndex: 20, 
+                display: 'flex', 
+                justifyContent: 'center', 
+                marginBottom: '12px', 
+                boxSizing: 'border-box',
+                backgroundColor: '#f8f9fa', // <--- TAMARA APP NA BACKGROUND MUJAB COLOR NAKHI DIJO (e.g. rgb(255, 255, 255) white)
+                padding: '8px 0',          // <--- Upar niche thodi padding jethi text overlap na thay
+                width: '100%'
+              }}>
                 <button 
                   onClick={() => {
                     setReportForm({

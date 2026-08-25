@@ -8,11 +8,11 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import CRM from './pages/CRM'
 import SupervisorDashboard from './pages/SupervisorDashboard'
-import PlantReports from './pages/PlantReports'
+
 import AddSiteVendorPage from './pages/AddSiteVendorPage'
 import AddPlantVendorPage from './pages/AddPlantVendorPage'
 import SiteReportPage from './pages/SiteReportPage'
-import PlantReportPage from './pages/PlantReportPage'
+import AdminPlantReportPage from './pages/AdminPlantReportPage'
 import CrmReportPage from './pages/CrmReportPage'
 import EmployeeReportPage from './pages/EmployeeReportPage'
 import StaffManagement from './pages/StaffManagement'
@@ -21,6 +21,8 @@ import PlantTransactionPage from './pages/PlantTransactionPage'
 import ForgotPassword from './pages/ForgotPassword';
 import UpdatePassword from './pages/UpdatePassword';
 import SiteEmployeeDashboard from './pages/SiteEmployeeDashboard';
+import PlantEmployeeDashboard from './pages/PlantEmployeeDashboard';
+
 
 // Firebase messaging import karo (Tamari project ma firebase setup hovu joie)
 import { initializeApp } from "firebase/app";
@@ -52,13 +54,14 @@ function AppRoutes() {
           <Route path="/Dashboard" element={<Dashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
-          <Route path="/PlantReports" element={<PlantReports />} />
+          <Route path="/plantemployee-dashboard" element={<PlantEmployeeDashboard />} />
           <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
+         
           
           <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
           <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
           <Route path="/site-report" element={<SiteReportPage />} />
-          <Route path="/plant-report" element={<PlantReportPage />} />
+          <Route path="/Admin-plant-report" element={<AdminPlantReportPage />} />
           <Route path="/crm-report" element={<CrmReportPage />} />
           <Route path="/employee-report" element={<EmployeeReportPage />} />
           <Route path="/staff-management" element={<StaffManagement />} />
@@ -73,7 +76,7 @@ function AppRoutes() {
           <Route path="/Dashboard" element={<SiteEmployeeDashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
-          <Route path="/PlantReports" element={<PlantReports />} />
+          <Route path="/plantemployee-dashboard" element={<PlantEmployeeDashboard />} />
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
