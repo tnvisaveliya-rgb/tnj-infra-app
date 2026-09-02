@@ -20,7 +20,7 @@ function Dashboard() {
       items: [
         { id: 'add_plant_vendor', label: '4. Add Plant Vendor', icon: Factory, color: '#ea580c', path: '/add-plant-vendor' },
         { id: 'plant_Transaction', label: '5. Plant Transaction', icon: Receipt, color: '#0891b2', path: '/plant-transaction' },
-        { id: 'plant_report', label: '6. Plant Report', icon: FileText, color: '#4f46e5', path: '/plant-report' },
+        { id: 'Admin_plant_report', label: '6. Plant Report', icon: FileText, color: '#4f46e5', path: '/Admin-plant-report' },
       ]
     },
     {

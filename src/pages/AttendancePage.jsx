@@ -433,7 +433,7 @@ const handleLeaveSubmit = async () => {
   };
 
 return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '600px', margin: '0 auto', paddingBottom: '30px', backgroundColor: 'transparent' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '600px', margin: '0 auto', paddingBottom: '15px', backgroundColor: 'transparent' }}>
       
       {/* ========================================================================= */}
       {/* 1. STICKY CARDS (આ કાર્ડ્સ સ્ક્રોલ કરતી વખતે ઉપર ફ્રીઝ રહેશે) */}
@@ -469,11 +469,11 @@ return (
       {/* --- CARD 2: SITE SELECTION (Sticky - બેનરની બરાબર નીચે ચોંટેલું રહેશે) --- */}
       <div style={{ 
         position: 'sticky', 
-        top: '160px', // બેનરની અંદાજિત હાઈટ મુજબ
+        top: '165px', // બેનરની અંદાજિત હાઈટ મુજબ
         zIndex: 40, 
         backgroundColor: '#ffffff', 
         borderRadius: '16px', 
-        padding: '16px', 
+        padding: '12px', 
         border: '1px solid #e2e8f0', 
         boxShadow: '0 4px 12px rgba(0,0,0,0.05)', 
         marginTop: '-6px'
@@ -495,7 +495,7 @@ return (
       </div>
 
       {/* --- CARD 3: CAMERA & PUNCH ACTIONS (Normal Card - સ્ક્રોલ થશે) --- */}
-      <div style={{marginTop:'-6px', position: 'sticky',  top: '235px',  zIndex: 40,  backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+      <div style={{marginTop:'-6px', position: 'sticky',  top: '232px',  zIndex: 40,  backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
         <div style={{ marginBottom: '15px', textAlign: 'center' }}>
           <input 
             type="file" 
@@ -515,7 +515,7 @@ return (
             htmlFor={attendanceSite ? "selfieInput" : ""} 
             style={{ 
               display: 'block', 
-              padding: '14px', 
+              padding: '12px', 
               backgroundColor: attendanceSite ? '#2563eb' : '#94a3b8', 
               color: '#fff', 
               borderRadius: '10px', 
@@ -547,7 +547,7 @@ return (
       </div>
 
       {/* --- CARD 4: ACTIONS (Report & Leave Request) --- */}
-      <div style={{ marginTop: '-6px',position: 'sticky', top: '370px', zIndex: 40, backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ marginTop: '-6px', backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         
         <button 
           onClick={() => setShowReportBox(!showReportBox)} 
@@ -680,7 +680,7 @@ return (
       <div style={{ marginTop: '20px' }}>
         <div style={{ 
           position: 'sticky',
-          top: '540px',
+          top: '364px',
           width: '100%', 
           padding: '12px 16px', 
           backgroundColor: '#fff', // ડાર્ક સ્લેટ ગ્રે બટન કલર (તમે ઈચ્છો તો બદલી શકો છો)

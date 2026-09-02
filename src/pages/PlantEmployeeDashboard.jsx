@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText } from 'lucide-react';
+import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import SupervisorDashboard from './SupervisorDashboard';
 import AttendancePage from './AttendancePage';
 import SupervisorExpenses from './SupervisorExpenses';
 import PlantDprEntry from './PlantDprEntry';
-
+import PlantInwardPage from './PlantInwardPage';
+import PlantOutwardPage from './PlantOutwardPage';
 export default function PlantEmployeeDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [workingBalance, setWorkingBalance] = useState(0);
   const [todayExpense, setTodayExpense] = useState(0);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
   
   const [attendanceInfo, setAttendanceInfo] = useState({
     status: 'Punched In',
@@ -28,18 +30,29 @@ export default function PlantEmployeeDashboard() {
     workersCount: 14,
     notes: 'Production tracking completed.'
   });
-
+// 2. બીજો useEffect (URL માંથી approve_id પકડવા માટે)
+ // 2. બીજો useEffect (URL માંથી approve_id અને type પકડવા માટે)
   useEffect(() => {
-    if (user) {
-      fetchDashboardData();
+    const params = new URLSearchParams(window.location.search);
+    const approveId = params.get('approve_id');
+    const type = params.get('type'); // 👈 URL માંથી type પકડશે (dpr કે inward)
+    
+    if (approveId) {
+      if (type === 'dpr') {
+        localStorage.setItem('pending_dpr_approve_id', approveId);
+        setActiveTab('dpr'); // 👈 જો type=dpr હોય તો DPR ટેબ જ ખોલશે
+      } else {
+        localStorage.setItem('pending_approve_id', approveId);
+        setActiveTab('inward'); // 👈 બાકી ઇનવર્ડ ટેબ ખોલશે
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [user]);
+  }, []);
 
   const fetchDashboardData = async () => {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // ૧. ટ્રાન્ઝેક્શન્સ ફેચ કરીને સાચું વર્કિંગ બેલેન્સ અને આજનો ખર્ચ ગણવો
       const { data: txData, error: txError } = await supabase.from('site_transactions').select('*');
       
       if (!txError && txData && txData.length > 0) {
@@ -75,7 +88,6 @@ export default function PlantEmployeeDashboard() {
         setTodayExpense(todayExpSum);
       }
 
-      // ૨. એટેન્ડન્સ સ્ટેટસ ચેક કરવા માટેનું લોજિક
       const { data: attData, error: attError } = await supabase
         .from('site_attendance')
         .select('*');
@@ -112,13 +124,12 @@ export default function PlantEmployeeDashboard() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', paddingBottom: '90px', backgroundColor: '#f8fafc' }}>
+    <div style={{ minHeight: '100vh', paddingBottom: '100px', backgroundColor: '#f8fafc', position: 'relative' }}>
       
       {/* ================= ૧. HOME TAB ================= */}
       {activeTab === 'home' && (
         <div style={{ maxWidth: '480px', margin: '0 auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
-          {/* Top User Header */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: '10px 14px', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '15px' }}>
@@ -136,7 +147,6 @@ export default function PlantEmployeeDashboard() {
             </div>
           </div>
 
-          {/* Balance Card */}
           <div style={{
             background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             borderRadius: '16px', padding: '16px 18px', color: 'white',
@@ -157,7 +167,6 @@ export default function PlantEmployeeDashboard() {
             </div>
           </div>
 
-          {/* Recent DPR Status Card */}
           <div style={{ backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -181,7 +190,6 @@ export default function PlantEmployeeDashboard() {
             </div>
           </div>
 
-          {/* Activity Matrix */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div 
               onClick={() => setActiveTab('attendance')} 
@@ -214,7 +222,6 @@ export default function PlantEmployeeDashboard() {
             </div>
           </div>
 
-          {/* Quick Action Buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div onClick={() => setActiveTab('dpr')} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -245,33 +252,124 @@ export default function PlantEmployeeDashboard() {
       {activeTab === 'dpr' && <PlantDprEntry />}
       {activeTab === 'attendance' && <AttendancePage />}
       {activeTab === 'expense' && <SupervisorExpenses />}
+      {activeTab === 'inward' && <PlantInwardPage />}
+      {activeTab === 'outward' && <PlantOutwardPage />}
+ {/* ================= BOTTOM-UP SLIDE POPUP WITH VISIBLE BOTTOM BAR ================= */}
+      {isPopupOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)',
+          zIndex: 9999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          paddingBottom: '95px', // 👈 જેથી નીચેનું નેવિગેશન બાર દેખાતું રહે
+          animation: 'fadeIn 0.2s ease-out'
+        }} onClick={() => setIsPopupOpen(false)}>
+          
+          <div style={{
+            width: '92%', maxWidth: '400px', backgroundColor: '#ffffff',
+            borderRadius: '26px', padding: '18px',
+            boxShadow: '0 -10px 30px rgba(0,0,0,0.15)', border: '1px solid #e2e8f0',
+            display: 'flex', flexDirection: 'column', gap: '10px',
+            transformOrigin: 'bottom center',
+            animation: 'slideUpFromBottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+          }} onClick={(e) => e.stopPropagation()}>
+            
+            {/* Header with "SELECT OPERATION" and Close Button */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '900', color: '#475569', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                SELECT OPERATION
+              </span>
+              <button 
+                onClick={() => setIsPopupOpen(false)} 
+                style={{ 
+                  background: '#f1f5f9', border: 'none', borderRadius: '50%', 
+                  width: '28px', height: '28px', display: 'flex', alignItems: 'center', 
+                  justifyContent: 'center', cursor: 'pointer', color: '#475569'
+                }}
+              >
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
 
-      {/* ================= IPHONE 70% TRANSLUCENT BOTTOM NAVIGATION BAR ================= */}
+            {/* Option 1: Plant Inward */}
+            <div onClick={() => { setActiveTab('inward'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer' }}>
+              <span style={{ fontSize: '18px', backgroundColor: '#dcfce7', padding: '6px', borderRadius: '10px' }}>📥</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#15803d' }}>1. PLANT INWARD</span>
+                <span style={{ fontSize: '9px', color: '#166534', fontWeight: '600' }}>Receive raw materials or stock items</span>
+              </div>
+            </div>
+
+            {/* Option 2: Plant Outward */}
+            <div onClick={() => { setActiveTab('outward'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', cursor: 'pointer' }}>
+              <span style={{ fontSize: '18px', backgroundColor: '#ffedd5', padding: '6px', borderRadius: '10px' }}>📤</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#c2410c' }}>2. PLANT OUTWARD</span>
+                <span style={{ fontSize: '9px', color: '#9a3412', fontWeight: '600' }}>Dispatch finished goods to sites</span>
+              </div>
+            </div>
+
+            {/* Option 3: Issue & Return */}
+            <div onClick={() => { setActiveTab('dpr'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', cursor: 'pointer' }}>
+              <span style={{ fontSize: '18px', backgroundColor: '#dbeafe', padding: '6px', borderRadius: '10px' }}>🛠️</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#1d4ed8' }}>3. ISSUE & RETURN</span>
+                <span style={{ fontSize: '9px', color: '#1e40af', fontWeight: '600' }}>Manage tools, items issue and returns</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+      {/* ================= UNIQUE CENTER-NOTCHED BLUE NAVIGATION BAR ================= */}
       <div style={{ 
-        position: 'fixed', bottom: '12px', left: '50%', transform: 'translateX(-50%)', 
+        position: 'fixed', bottom: '10px', left: '50%', transform: 'translateX(-50%)', 
         width: '92%', maxWidth: '420px', 
-        backgroundColor: 'rgba(255, 255, 255, 0.7)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', 
+        height: '64px',
+        backgroundColor: '#ffffff', 
         display: 'flex', justifyContent: 'space-around', alignItems: 'center', 
-        padding: '9px 0', borderRadius: '50px', 
-        border: '1px solid rgba(255, 255, 255, 0.4)', 
-        boxShadow: '0 10px 30px 0 rgba(0, 0, 0, 0.08)', 
-        zIndex: 9999 
+        borderRadius: '35px', 
+        border: '1px solid #e2e8f0', 
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.08)', 
+        zIndex: 9999,
+        padding: '0 8px'
       }}>
-        <div onClick={() => setActiveTab('home')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'home' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <Home size={18} />
-          <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: activeTab === 'home' ? '800' : '600' }}>Home</span>
+        <div onClick={() => setActiveTab('home')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'home' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          <Home size={19} />
+          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'home' ? '800' : '600' }}>Home</span>
         </div>
-        <div onClick={() => setActiveTab('dpr')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'dpr' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <ClipboardEdit size={18} />
-          <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: activeTab === 'dpr' ? '800' : '600' }}>DPR</span>
+        
+        <div onClick={() => setActiveTab('dpr')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'dpr' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          <ClipboardEdit size={19} />
+          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'dpr' ? '800' : '600' }}>DPR</span>
         </div>
-        <div onClick={() => setActiveTab('expense')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <IndianRupee size={18} />
-          <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: '600' }}>Expense</span>
+
+        {/* 🌟 UNIQUE FLOATING BLUE CENTER BUTTON */}
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, position: 'relative' }}>
+          <div 
+            onClick={() => setIsPopupOpen(true)}
+            style={{
+              position: 'absolute',
+              top: '-26px',
+              width: '50px', height: '50px', borderRadius: '50%',
+              backgroundColor: '#2563eb', color: '#ffffff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 6px 16px rgba(37, 99, 235, 0.45)', cursor: 'pointer',
+              border: '4px solid #f8fafc',
+              transition: 'transform 0.2s ease'
+            }}
+          >
+            <Plus size={26} strokeWidth={2.5} />
+          </div>
         </div>
-        <div onClick={() => setActiveTab('attendance')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'attendance' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <UserCheck size={18} />
-          <span style={{ fontSize: '9px', marginTop: '2px', fontWeight: '600' }}>Attendance</span>
+
+        <div onClick={() => setActiveTab('expense')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          <IndianRupee size={19} />
+          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'expense' ? '800' : '600' }}>Expense</span>
+        </div>
+        
+        <div onClick={() => setActiveTab('attendance')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'attendance' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+          <UserCheck size={19} />
+          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'attendance' ? '800' : '600' }}>Attendance</span>
         </div>
       </div>
 

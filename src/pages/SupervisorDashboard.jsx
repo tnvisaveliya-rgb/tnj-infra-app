@@ -19,7 +19,7 @@ function SupervisorDashboard() {
 
   const [filterSite, setFilterSite] = useState('all')
   const [filterDate, setFilterDate] = useState('')
-
+  const [filterViewSite, setFilterViewSite] = useState('all');
   const [previewData, setPreviewData] = useState(null)
   const [reports, setReports] = useState([])
   const [showReportForm, setShowReportForm] = useState(false)
@@ -459,35 +459,34 @@ function SupervisorDashboard() {
     }
   }
 
-  const loadVendors = async () => {
-    const { data } = await supabase.from('site_vendors').select('*')
-    setVendors(data || [])
+const loadVendors = async () => {
+    const { data, error } = await supabase.from('site_vendors').select('*');
+    if (!error) setVendors(data || []);
   }
 
   const loadOutwardParties = async () => {
-    const { data } = await supabase.from('site_outward_parties').select('*')
-    setOutwardParties(data || [])
+    const { data, error } = await supabase.from('site_outward_parties').select('*');
+    if (!error) setOutwardParties(data || []);
   }
 
   const loadContractors = async () => {
-    const { data } = await supabase.from('contractors').select('*')
-    setContractors(data || [])
+    const { data, error } = await supabase.from('contractors').select('*');
+    if (!error) setContractors(data || []);
   }
 
   const loadMaterialsMaster = async () => {
-    const { data } = await supabase.from('site_materials_master').select('*')
-    setMaterialsMaster(data || [])
+    const { data, error } = await supabase.from('site_materials_master').select('*');
+    if (!error) setMaterialsMaster(data || []);
   }
 
   const loadWorkDescriptions = async () => {
     try {
-      const { data } = await supabase.from('site_work_descriptions').select('*')
-      setWorkDescriptions(data || [])
+      const { data, error } = await supabase.from('site_work_descriptions').select('*');
+      if (!error) setWorkDescriptions(data || []);
     } catch (err) {
-      setWorkDescriptions([])
+      setWorkDescriptions([]);
     }
   }
-
   const loadReports = async () => {
     const { data } = await supabase.from('daily_reports').select('*').order('created_at', { ascending: false })
     setReports(data || [])
@@ -498,11 +497,11 @@ function SupervisorDashboard() {
     setTransactions(data || [])
   }
 
-  const currentSiteVendors = vendors.filter(v => v.site_name === reportForm.siteName)
-  const currentSiteOutwardParties = outwardParties.filter(op => op.site_name === reportForm.siteName)
-  const currentSiteContractors = contractors.filter(c => c.site_name === reportForm.siteName)
-  const currentSiteMaterials = materialsMaster.filter(m => m.site_name === reportForm.siteName)
-  const currentSiteWorkDescriptions = workDescriptions.filter(w => w.site_name === reportForm.siteName)
+const currentSiteVendors = vendors.filter(v => v.site_name === reportForm.siteName || v.site_name === 'All Sites (General)')
+  const currentSiteOutwardParties = outwardParties.filter(op => op.site_name === reportForm.siteName || op.site_name === 'All Sites (General)')
+  const currentSiteContractors = contractors.filter(c => c.site_name === reportForm.siteName || c.site_name === 'All Sites (General)')
+  const currentSiteMaterials = materialsMaster.filter(m => m.site_name === reportForm.siteName || m.site_name === 'All Sites (General)')
+  const currentSiteWorkDescriptions = workDescriptions.filter(w => w.site_name === reportForm.siteName || w.site_name === 'All Sites (General)')
 
   const addInwardSource = () => setReportForm({...reportForm, inwardSources: [...reportForm.inwardSources, { sourceName: '', customSourceName: '', dcNumber: '', vehicleNumber: '', items: [{ materialName: '', customMaterialName: '', quantity: '', unit: 'Bags' }], files: [] }]})
   const removeInwardSource = (index) => setReportForm({...reportForm, inwardSources: reportForm.inwardSources.filter((_, i) => i !== index)})
@@ -805,7 +804,7 @@ return (
             <div style={{ backgroundColor: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', boxSizing: 'border-box', width: '100%' }}>
               
            {/* STICKY TOP APP HEADER - Unique & Highly Highlighted Site & Date Section */}
-              <div style={{ position: 'sticky', top: '55px', zIndex: 20 , backgroundColor: '#ffffff', padding: '14px 16px', borderBottom: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(255,255,255,0.08)', boxSizing: 'border-box', borderTopLeftRadius: '14px', borderTopRightRadius: '14px', borderBottomLeftRadius:'14px',borderBottomRightRadius:'14px' }}>
+              <div style={{ position: 'sticky', top: '180px', zIndex: 20 , backgroundColor: '#ffffff', padding: '14px 16px', borderBottom: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(255,255,255,0.08)', boxSizing: 'border-box', borderTopLeftRadius: '14px', borderTopRightRadius: '14px', borderBottomLeftRadius:'14px',borderBottomRightRadius:'14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                   <h3 style={{ fontSize: '14px', fontWeight: '700', margin: 0, color: '#0f172a' }}>📋 Complete Site Report</h3>
                   <button onClick={() => setShowReportForm(false)} style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
@@ -954,8 +953,8 @@ return (
                     <div style={{ backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '12px', boxSizing: 'border-box' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#166534' }}>1. Material Inward (મટીરિયલ આવ્યું)</span>
-                        <button type="button" onClick={addInwardSource} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Source</button>
-                      </div>
+                      </div>                        <button type="button" onClick={addInwardSource} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Source</button>
+
 
                       {reportForm.inwardSources.map((src, sIndex) => (
                         <div key={sIndex} style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '10px', boxSizing: 'border-box' }}>
