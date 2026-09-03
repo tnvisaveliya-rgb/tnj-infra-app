@@ -88,6 +88,11 @@ const [transporterVehicles, setTransporterVehicles] = useState([
   const [activeModal, setActiveModal] = useState(null)
   const [showViewSection, setShowViewSection] = useState(false)
   const [showSiteListSection, setShowSiteListSection] = useState(false)
+  // 🎯 Expense Categories Master State
+const [expenseCategories, setExpenseCategories] = useState([]);
+const [newExpenseCatName, setNewExpenseCatName] = useState('');
+const [editingCatId, setEditingCatId] = useState(null);
+const [editingCatName, setEditingCatName] = useState('');
 
   const [viewTab, setViewTab] = useState('vendors')
   const [filterViewSite, setFilterViewSite] = useState('all')
@@ -112,6 +117,11 @@ const [sitePartyName, setSitePartyName] = useState('');
   const loadAllData = async () => {
     const { data: plantsData } = await supabase.from('plants').select('*')
     setPlants(plantsData || [])
+const { data: expCatData } = await supabase
+  .from('expense_category_master')
+  .select('*')
+  .order('category_name', { ascending: true });
+setExpenseCategories(expCatData || []);
 
     const { data: sitesData } = await supabase.from('sites').select('*, plants(plant_name)')
     setSites(sitesData || [])
@@ -156,6 +166,57 @@ const [sitePartyName, setSitePartyName] = useState('');
       await loadAllData(); 
     }
   }
+  // ૧. Add New Category
+const handleAddExpenseCategory = async () => {
+  if (!newExpenseCatName.trim()) {
+    showAlert("Please enter category name!");
+    return;
+  }
+  const { error } = await supabase
+    .from('expense_category_master')
+    .insert([{ category_name: newExpenseCatName.trim(), is_active: true }]);
+
+  if (error) {
+    showAlert("Error: " + error.message);
+  } else {
+    showAlert("✅ Expense Category Added!");
+    setNewExpenseCatName('');
+    loadAllData();
+  }
+};
+
+// ૨. Soft Delete / Toggle Status (Active / Inactive)
+const handleToggleCategoryActive = async (id, currentStatus) => {
+  const { error } = await supabase
+    .from('expense_category_master')
+    .update({ is_active: !currentStatus })
+    .eq('id', id);
+
+  if (error) {
+    showAlert("Error updating status: " + error.message);
+  } else {
+    loadAllData();
+  }
+};
+
+// ૩. Rename / Update Category
+const handleUpdateExpenseCategory = async (id) => {
+  if (!editingCatName.trim()) {
+    showAlert("Category name cannot be empty!");
+    return;
+  }
+  const { error } = await supabase
+    .from('expense_category_master')
+    .update({ category_name: editingCatName.trim() })
+    .eq('id', id);
+
+  if (error) {
+    showAlert("Error: " + error.message);
+  } else {
+    setEditingCatId(null);
+    loadAllData();
+  }
+};
  const handleSaveSite = async () => {
     if (!selectedPlantId) { showAlert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!"); return; }
     if (!sitePartyName) { showAlert("કૃપા કરીને પાર્ટી સિલેક્ટ કરો!"); return; } // 👈 પાર્ટી સિલેક્ટ કરવી ફરજિયાત છે
@@ -843,6 +904,7 @@ const availablePlantsForForm = (plants || []).filter(p => {
           <button onClick={() => setShowViewSection(!showViewSection)} style={{ backgroundColor: showViewSection ? '#475569' : '#0f172a', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Eye size={14} /> {showViewSection ? 'Hide Lists' : 'View Lists'}
           </button>
+          
         </div>
       </div>
 <ConfirmModal
@@ -875,9 +937,29 @@ const availablePlantsForForm = (plants || []).filter(p => {
   🔄 Edit / Transfer Labour
 </button>
         </div>
-      </div>
-
-      {/* POPUP MODALS */}
+      
+<button 
+  onClick={() => setActiveModal('expenseCategory')} 
+  style={{ 
+    backgroundColor: '#0284c7', 
+    color: '#fff', 
+    padding: '12px', 
+    borderRadius: '8px', 
+    border: 'none', 
+    fontWeight: '600', 
+    fontSize: '13px', 
+    cursor: 'pointer', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: '6px', 
+    width: '100%' 
+  }}
+>
+  <Plus size={16} /> 10. Add Expense Category Master
+</button>
+</div>
+     {/* POPUP MODALS */}
       {activeModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '12px', boxSizing: 'border-box' }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '16px', width: '100%', maxWidth: '540px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', boxSizing: 'border-box' }}>
@@ -893,139 +975,241 @@ const availablePlantsForForm = (plants || []).filter(p => {
                  activeModal === 'description' ? '📝 Add Description' : 
                  activeModal === 'product' ? '🏷️ Add Products Name' : 
                  activeModal === 'transport' ? '🚚 Add Transporter' : 
+                 activeModal === 'expenseCategory' ? '💳 Expense Categories Master' :
                  '🏷️ Add Products Name'}
-
               </h3>
               <button onClick={() => setActiveModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><X size={18} /></button>
             </div>
+            
+            {/* 🎯 1. EXPENSE CATEGORY MODAL FORM */}
+            {activeModal === 'expenseCategory' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Enter new expense category name..." 
+                    value={newExpenseCatName} 
+                    onChange={(e) => setNewExpenseCatName(e.target.value)} 
+                    style={{ flex: 1, padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} 
+                  />
+                  <button 
+                    onClick={handleAddExpenseCategory} 
+                    style={{ backgroundColor: '#0d9488', color: '#fff', border: 'none', padding: '9px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    + Add
+                  </button>
+                </div>
 
-            {/* PRODUCT MODAL FORM */}
-            {activeModal === 'product' ? (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', boxSizing: 'border-box', width: '100%' }}>
-    <div>
-      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Assign Type *</label>
-      <div style={{ display: 'flex', gap: '6px', width: '100%', boxSizing: 'border-box' }}>
-        <button type="button" onClick={() => setAssignTarget('plant')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'plant' ? '#1e3a8a' : '#f1f5f9', color: assignTarget === 'plant' ? '#fff' : '#475569', cursor: 'pointer' }}>Plant Only</button>
-        <button type="button" onClick={() => setAssignTarget('site')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'site' ? '#2563eb' : '#f1f5f9', color: assignTarget === 'site' ? '#fff' : '#475569', cursor: 'pointer' }}>Site Only</button>
-        <button type="button" onClick={() => setAssignTarget('both')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'both' ? '#059669' : '#f1f5f9', color: assignTarget === 'both' ? '#fff' : '#475569', cursor: 'pointer' }}>Both</button>
-      </div>
-    </div>
+                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '10px', marginTop: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>
+                    Categories List ({expenseCategories.length}) [Hard delete disabled for integrity]
+                  </span>
 
-    {/* 🎯 ૧. Select State */}
-    <div>
-      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select State *</label>
-      <select value={formStateFilter} onChange={(e) => {
-        setFormStateFilter(e.target.value);
-        setFormPlantFilter(''); 
-        setFormSite('all');    
-      }} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-        <option value="">🌐 All States (General)</option>
-        {statesList.map(st => <option key={st} value={st}>{st}</option>)}
-      </select>
-    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
+                    {expenseCategories.length === 0 ? (
+                      <p style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '10px 0' }}>No categories created yet.</p>
+                    ) : (
+                      expenseCategories.map(cat => (
+                        <div 
+                          key={cat.id} 
+                          style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center', 
+                            padding: '8px 10px', 
+                            borderRadius: '6px', 
+                            backgroundColor: cat.is_active ? '#f8fafc' : '#fef2f2', 
+                            border: `1px solid ${cat.is_active ? '#e2e8f0' : '#fecaca'}` 
+                          }}
+                        >
+                          {editingCatId === cat.id ? (
+                            <div style={{ display: 'flex', gap: '6px', flex: 1, marginRight: '8px' }}>
+                              <input 
+                                value={editingCatName} 
+                                onChange={(e) => setEditingCatName(e.target.value)} 
+                                style={{ flex: 1, padding: '4px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+                              />
+                              <button onClick={() => handleUpdateExpenseCategory(cat.id)} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>Save</button>
+                              <button onClick={() => setEditingCatId(null)} style={{ backgroundColor: '#94a3b8', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>Cancel</button>
+                            </div>
+                          ) : (
+                            <div>
+                              <span style={{ fontWeight: 'bold', fontSize: '13px', color: cat.is_active ? '#0f172a' : '#991b1b', textDecoration: cat.is_active ? 'none' : 'line-through' }}>
+                                {cat.category_name}
+                              </span>
+                              <span style={{ marginLeft: '8px', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', backgroundColor: cat.is_active ? '#dcfce7' : '#fee2e2', color: cat.is_active ? '#15803d' : '#b91c1c' }}>
+                                {cat.is_active ? 'Active' : 'Disabled'}
+                              </span>
+                            </div>
+                          )}
 
-    <div>
-      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-      <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-        {availablePlantsForForm.length === 0 ? (
-          <option value="" disabled>⚠️ No Plant Available in this State</option>
-        ) : (
-          <>
-            <option value="all">🌐 All Plants (General)</option>
-            {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-          </>
-        )}
-      </select>
-    </div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            {editingCatId !== cat.id && (
+                              <button 
+                                onClick={() => { setEditingCatId(cat.id); setEditingCatName(cat.category_name); }} 
+                                style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer' }}
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                            )}
 
-    {/* 🎯 ૩. Select Site */}
-    {(assignTarget === 'site' || assignTarget === 'both') && (
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Site *</label>
-        <select value={formSite} onChange={(e) => setFormSite(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-          <option value="all">🌐 All Sites (General)</option>
-          {availableSitesForForm.map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
-        </select>
-      </div>
-    )}
+                            {/* 🛡️ Soft Delete Toggle (Disable/Enable) */}
+                            <button 
+                              onClick={() => handleToggleCategoryActive(cat.id, cat.is_active)} 
+                              title={cat.is_active ? "Disable Category" : "Enable Category"} 
+                              style={{ 
+                                backgroundColor: cat.is_active ? '#fee2e2' : '#dcfce7', 
+                                color: cat.is_active ? '#b91c1c' : '#15803d', 
+                                border: 'none', 
+                                padding: '4px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '11px', 
+                                fontWeight: 'bold', 
+                                cursor: 'pointer' 
+                              }}
+                            >
+                              {cat.is_active ? 'Disable' : 'Enable'}
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
 
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box', width: '100%' }}>
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Name *</label>
-        <input placeholder="e.g. U-Drain" value={productName} onChange={(e) => setProductName(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-      </div>
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Size *</label>
-        <input placeholder="e.g. 600x600" value={productSize} onChange={(e) => setProductSize(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-      </div>
-    </div>
+                <button 
+                  onClick={() => setActiveModal(null)} 
+                  style={{ marginTop: '10px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '9px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
+                >
+                  Close
+                </button>
+              </div>
+            ) : activeModal === 'product' ? (
+              /* 🎯 2. PRODUCT MODAL FORM */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', boxSizing: 'border-box', width: '100%' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Assign Type *</label>
+                  <div style={{ display: 'flex', gap: '6px', width: '100%', boxSizing: 'border-box' }}>
+                    <button type="button" onClick={() => setAssignTarget('plant')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'plant' ? '#1e3a8a' : '#f1f5f9', color: assignTarget === 'plant' ? '#fff' : '#475569', cursor: 'pointer' }}>Plant Only</button>
+                    <button type="button" onClick={() => setAssignTarget('site')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'site' ? '#2563eb' : '#f1f5f9', color: assignTarget === 'site' ? '#fff' : '#475569', cursor: 'pointer' }}>Site Only</button>
+                    <button type="button" onClick={() => setAssignTarget('both')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'both' ? '#059669' : '#f1f5f9', color: assignTarget === 'both' ? '#fff' : '#475569', cursor: 'pointer' }}>Both</button>
+                  </div>
+                </div>
 
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box', width: '100%' }}>
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Category *</label>
-        <input placeholder="e.g. Precast Drainage" value={productCategory} onChange={(e) => setProductCategory(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-      </div>
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Expected Concrete (M3) *</label>
-        <input type="number" step="0.001" placeholder="e.g. 0.75" value={expectedM3} onChange={(e) => setExpectedM3(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-      </div>
-    </div>
+                {/* 🎯 ૧. Select State */}
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select State *</label>
+                  <select value={formStateFilter} onChange={(e) => {
+                    setFormStateFilter(e.target.value);
+                    setFormPlantFilter(''); 
+                    setFormSite('all');    
+                  }} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    <option value="">🌐 All States (General)</option>
+                    {statesList.map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </div>
 
-    {/* 🎯 Effective Date ઇનપુટ ઉમેરવામાં આવ્યું છે */}
-    <div>
-      <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Effective From Date *</label>
-      <input type="date" value={effectiveDate || new Date().toISOString().split('T')[0]} onChange={(e) => setEffectiveDate(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }} />
-    </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
+                  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    {availablePlantsForForm.length === 0 ? (
+                      <option value="" disabled>⚠️ No Plant Available in this State</option>
+                    ) : (
+                      <>
+                        <option value="all">🌐 All Plants (General)</option>
+                        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                      </>
+                    )}
+                  </select>
+                </div>
 
-    <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', boxSizing: 'border-box', width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-        <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#0891b2' }}>📦 Bill of Materials (BOM)</span>
-        <button type="button" onClick={() => setBomItems([...bomItems, { material: '', consumption: '', unit: 'Nos' }])} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Material</button>
-      </div>
+                {/* 🎯 ૩. Select Site */}
+                {(assignTarget === 'site' || assignTarget === 'both') && (
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Site *</label>
+                    <select value={formSite} onChange={(e) => setFormSite(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                      <option value="all">🌐 All Sites (General)</option>
+                      {availableSitesForForm.map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
+                    </select>
+                  </div>
+                )}
 
-      {bomItems.map((bom, bIdx) => (
-        <div key={bIdx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-          <select value={bom.material} onChange={(e) => {
-            const updated = [...bomItems];
-            updated[bIdx].material = e.target.value;
-            setBomItems(updated);
-          }} style={{ flex: 1.8, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box', minWidth: '0' }}>
-            <option value="">-- Material --</option>
-            {availableMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
-          </select>
-          
-          <input type="number" placeholder="Consumption" value={bom.consumption} onChange={(e) => {
-            const updated = [...bomItems];
-            updated[bIdx].consumption = e.target.value;
-            setBomItems(updated);
-          }} style={{ flex: 1, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box', minWidth: '0' }} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box', width: '100%' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Name *</label>
+                    <input placeholder="e.g. U-Drain" value={productName} onChange={(e) => setProductName(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Size *</label>
+                    <input placeholder="e.g. 600x600" value={productSize} onChange={(e) => setProductSize(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                </div>
 
-          <select value={bom.unit} onChange={(e) => {
-            const updated = [...bomItems];
-            updated[bIdx].unit = e.target.value;
-            setBomItems(updated);
-          }} style={{ flex: 0.9, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box', minWidth: '0' }}>
-            <option value="Nos">Nos</option>
-            <option value="Bags">Bags</option>
-            <option value="Kg">Kg</option>
-            <option value="Tons">Tons</option>
-          </select>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box', width: '100%' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Product Category *</label>
+                    <input placeholder="e.g. Precast Drainage" value={productCategory} onChange={(e) => setProductCategory(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Expected Concrete (M3) *</label>
+                    <input type="number" step="0.001" placeholder="e.g. 0.75" value={expectedM3} onChange={(e) => setExpectedM3(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
+                  </div>
+                </div>
 
-          {bomItems.length > 1 && (
-            <button type="button" onClick={() => setBomItems(bomItems.filter((_, i) => i !== bIdx))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px', flexShrink: 0 }}><Trash2 size={14} /></button>
-          )}
-        </div>
-      ))}
-    </div>
+                {/* 🎯 Effective Date ઇનપુટ */}
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Effective From Date *</label>
+                  <input type="date" value={effectiveDate || new Date().toISOString().split('T')[0]} onChange={(e) => setEffectiveDate(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }} />
+                </div>
 
-    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', boxSizing: 'border-box', width: '100%' }}>
-      <button onClick={handleSaveProduct} style={{ flex: 1, backgroundColor: '#0891b2', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Product & BOM</button>
-      <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
-    </div>
-  </div>
+                <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', boxSizing: 'border-box', width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#0891b2' }}>📦 Bill of Materials (BOM)</span>
+                    <button type="button" onClick={() => setBomItems([...bomItems, { material: '', consumption: '', unit: 'Nos' }])} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Material</button>
+                  </div>
 
-  // ... (Plant modal code)
-           ) : activeModal === 'plant' ? (
+                  {bomItems.map((bom, bIdx) => (
+                    <div key={bIdx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                      <select value={bom.material} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].material = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 1.8, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box', minWidth: '0' }}>
+                        <option value="">-- Material --</option>
+                        {availableMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
+                      </select>
+                      
+                      <input type="number" placeholder="Consumption" value={bom.consumption} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].consumption = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 1, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box', minWidth: '0' }} />
+
+                      <select value={bom.unit} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].unit = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 0.9, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box', minWidth: '0' }}>
+                        <option value="Nos">Nos</option>
+                        <option value="Bags">Bags</option>
+                        <option value="Kg">Kg</option>
+                        <option value="Tons">Tons</option>
+                      </select>
+
+                      {bomItems.length > 1 && (
+                        <button type="button" onClick={() => setBomItems(bomItems.filter((_, i) => i !== bIdx))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px', flexShrink: 0 }}><Trash2 size={14} /></button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px', boxSizing: 'border-box', width: '100%' }}>
+                  <button onClick={handleSaveProduct} style={{ flex: 1, backgroundColor: '#0891b2', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Product & BOM</button>
+                  <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
+                </div>
+              </div>
+            ) : activeModal === 'plant' ? (
+              /* 🏭 3. PLANT MODAL FORM */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Plant Name *</label>
@@ -1054,8 +1238,8 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   <button onClick={() => { setActiveModal(null); setPlantState(''); }} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
                 </div>
               </div>
-) : activeModal === 'party' ? (
-              /* 🎯 ADD CUSTOMER / PARTY MODAL (ONLY PLANT LEVEL, NO SITES) */
+            ) : activeModal === 'party' ? (
+              /* 🎯 4. ADD CUSTOMER / PARTY MODAL */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select State *</label>
@@ -1068,21 +1252,19 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </select>
                 </div>
 
-              <div>
-  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-    
-    {/* 🎯 જો તે સ્ટેટના પ્લાન્ટ્સ ઝીરો હોય તો નો પ્લાન્ટ બતાવશે */}
-    {availablePlantsForForm.length === 0 ? (
-      <option value="" disabled>⚠️ No Plant Available in this State</option>
-    ) : (
-      <>
-        <option value="all">🌐 All Plants (General)</option>
-        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-      </>
-    )}
-  </select>
-</div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
+                  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    {availablePlantsForForm.length === 0 ? (
+                      <option value="" disabled>⚠️ No Plant Available in this State</option>
+                    ) : (
+                      <>
+                        <option value="all">🌐 All Plants (General)</option>
+                        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                      </>
+                    )}
+                  </select>
+                </div>
 
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Party Name *</label>
@@ -1104,12 +1286,9 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
                 </div>
               </div>
-
-
-              ) : activeModal === 'transport' ? (
-              // 🚚 🎯 Transport Modal
+            ) : activeModal === 'transport' ? (
+              /* 🚚 5. TRANSPORT MODAL FORM */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Assign Type *</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -1127,21 +1306,19 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </select>
                 </div>
 
-               <div>
-  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-    
-    {/* 🎯 જો તે સ્ટેટના પ્લાન્ટ્સ ઝીરો હોય તો નો પ્લાન્ટ બતાવશે */}
-    {availablePlantsForForm.length === 0 ? (
-      <option value="" disabled>⚠️ No Plant Available in this State</option>
-    ) : (
-      <>
-        <option value="all">🌐 All Plants (General)</option>
-        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-      </>
-    )}
-  </select>
-</div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
+                  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    {availablePlantsForForm.length === 0 ? (
+                      <option value="" disabled>⚠️ No Plant Available in this State</option>
+                    ) : (
+                      <>
+                        <option value="all">🌐 All Plants (General)</option>
+                        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                      </>
+                    )}
+                  </select>
+                </div>
 
                 {(assignTarget === 'site' || assignTarget === 'both') && (
                   <div>
@@ -1157,7 +1334,6 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Transporter / Agency Name *</label>
                   <input placeholder="e.g. Shree Ram Roadways" value={transporterName} onChange={(e) => setTransporterName(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
                 </div>
-               
 
                 {/* 🎯 ૧. નવા Company Name અને Mobile Number ના બોક્સ */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1202,29 +1378,24 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   <button onClick={handleSaveTransporter} style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Transport</button>
                   <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
                 </div>
-
               </div>
-
-       ) : activeModal === 'site' ? (
+            ) : activeModal === 'site' ? (
+              /* 🏗️ 6. SITE MODAL FORM */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                
-                {/* 🎯 ૧. Select Plant State */}
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant State *</label>
                   <select value={selectedPlantState} onChange={(e) => {
                     setSelectedPlantState(e.target.value);
-                    setSelectedPlantId(''); // સ્ટેટ બદલાય એટલે પ્લાન્ટ રીસેટ થઈ જાય
+                    setSelectedPlantId('');
                   }} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
                     <option value="">🌐 All States (General)</option>
                     {statesList.map(st => <option key={st} value={st}>{st}</option>)}
                   </select>
                 </div>
 
-                {/* 🎯 ૨. Select Plant (All Plants ઓપ્શન સાથે) */}
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
                   <select value={selectedPlantId} onChange={(e) => setSelectedPlantId(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                    
                     {filteredPlantsForSite.length === 0 ? (
                       <option value="" disabled>⚠️ No Plant Available in this State</option>
                     ) : (
@@ -1236,18 +1407,13 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </select>
                 </div>
 
-                {/* 🎯 ૩. Select Party / Client (ફક્ત સિલેક્ટ કરેલા પ્લાન્ટ કે જનરલ પાર્ટીઓ જ દેખાશે) */}
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Party / Client *</label>
                   <select value={sitePartyName} onChange={(e) => setSitePartyName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
                     <option value="">-- Choose Party --</option>
                     {(outwardParties || [])
                       .filter(p => {
-                        // જો ઉપર 'All Plants' કે ખાલી હોય તો બધી જ જનરલ/પ્લાન્ટ વગરની પાર્ટીઓ દેખાશે
-                        if (!selectedPlantId) {
-                          return !p.plant_id || p.plant_id === 'All Plants (General)';
-                        }
-                        // બાકી માત્ર એ જ પાર્ટી આવશે જે આ પ્લાન્ટ સાથે જોડાયેલી હોય
+                        if (!selectedPlantId) return !p.plant_id || p.plant_id === 'All Plants (General)';
                         return p.plant_id == selectedPlantId || p.plant_id === 'All Plants (General)';
                       })
                       .map(p => (
@@ -1280,11 +1446,10 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   <button onClick={() => { setActiveModal(null); setSelectedPlantState(''); }} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
                 </div>
               </div>
-              
             ) : activeModal === 'labour' ? (
-              // 🎯 મલ્ટીપલ રેટ એડ કરવા માટેનું સુધારેલું ફોર્મ (પ્રોડક્ટ અને ડિપાર્ટમેન્ટ બંને એકસાથે)
+              /* 👷 7. LABOUR MODAL FORM */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
- <div>
+                <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Assign Type *</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button type="button" onClick={() => setAssignTarget('plant')} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: assignTarget === 'plant' ? '#1e3a8a' : '#f1f5f9', color: assignTarget === 'plant' ? '#fff' : '#475569', cursor: 'pointer' }}>Plant Only</button>
@@ -1293,14 +1458,12 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </div>
                 </div>
 
-
-                {/* 🎯 ૧. સ્ટેટ ફિલ્ટર */}
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select State *</label>
                   <select value={formStateFilter} onChange={(e) => {
                     setFormStateFilter(e.target.value);
-                    setFormPlantFilter(''); // સ્ટેટ બદલાય એટલે પ્લાન્ટ ખાલી થઈ જાય
-                    setFormSite('all');     // સાઈટ રીસેટ થઈ જાય
+                    setFormPlantFilter(''); 
+                    setFormSite('all');     
                   }} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
                     <option value="">🌐 All States (General)</option>
                     {statesList.map(st => <option key={st} value={st}>{st}</option>)}
@@ -1308,22 +1471,19 @@ const availablePlantsForForm = (plants || []).filter(p => {
                 </div>
 
                 <div>
-  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-    
-    {/* 🎯 જો તે સ્ટેટના પ્લાન્ટ્સ ઝીરો હોય તો નો પ્લાન્ટ બતાવશે */}
-    {availablePlantsForForm.length === 0 ? (
-      <option value="" disabled>⚠️ No Plant Available in this State</option>
-    ) : (
-      <>
-        <option value="all">🌐 All Plants (General)</option>
-        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-      </>
-    )}
-  </select>
-</div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
+                  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    {availablePlantsForForm.length === 0 ? (
+                      <option value="" disabled>⚠️ No Plant Available in this State</option>
+                    ) : (
+                      <>
+                        <option value="all">🌐 All Plants (General)</option>
+                        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                      </>
+                    )}
+                  </select>
+                </div>
 
-                {/* 🎯 ૩. ફાઇનલ સાઈટ ડ્રોપડાઉન (જેમાં માત્ર તે જ પ્લાન્ટની સાઈટ્સ દેખાશે) */}
                 {(assignTarget === 'site' || assignTarget === 'both') && (
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Site *</label>
@@ -1333,13 +1493,6 @@ const availablePlantsForForm = (plants || []).filter(p => {
                     </select>
                   </div>
                 )}
-
-
-
-               
-                
-
-              
 
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Labour / Team Name *</label>
@@ -1357,141 +1510,130 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </div>
                 </div>
 
-               {/* 🎯 Multiple Labour Rates & Work Types Section */}
-<div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#9333ea' }}>💰 Labour Rates & Work Mappings (પ્રોડક્ટ અને ડિપાર્ટમેન્ટ રેટ્સ)</span>
-    <button type="button" onClick={() => setLabourRatesList([...labourRatesList, { workType: 'Product Rate', product: '', size: '', uom: 'Nos', rate: '', effectiveDate: new Date().toISOString().split('T')[0] }])} style={{ backgroundColor: '#9333ea', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Rate Row</button>
-  </div>
+                <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#9333ea' }}>💰 Labour Rates & Work Mappings</span>
+                    <button type="button" onClick={() => setLabourRatesList([...labourRatesList, { workType: 'Product Rate', product: '', size: '', uom: 'Nos', rate: '', effectiveDate: new Date().toISOString().split('T')[0] }])} style={{ backgroundColor: '#9333ea', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Rate Row</button>
+                  </div>
 
-  {labourRatesList.map((item, idx) => {
-    // 🎯 જે તે સિલેક્ટ કરેલી પ્રોડક્ટની બધી જ ઉપલબ્ધ સાઈઝ શોધવા માટે (જેમ કે 6 અને 8)
-    const availableSizesForProduct = availableProductsForPlant
-      .filter(p => p.name === item.product)
-      .map(p => p.product_size)
-      .filter(Boolean);
+                  {labourRatesList.map((item, idx) => {
+                    const availableSizesForProduct = availableProductsForPlant
+                      .filter(p => p.name === item.product)
+                      .map(p => p.product_size)
+                      .filter(Boolean);
 
-    return (
-      <div key={idx} style={{ backgroundColor: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative' }}>
-        
-        {labourRatesList.length > 1 && (
-          <button type="button" onClick={() => setLabourRatesList(labourRatesList.filter((_, i) => i !== idx))} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}><Trash2 size={14} /></button>
-        )}
+                    return (
+                      <div key={idx} style={{ backgroundColor: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative' }}>
+                        {labourRatesList.length > 1 && (
+                          <button type="button" onClick={() => setLabourRatesList(labourRatesList.filter((_, i) => i !== idx))} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}><Trash2 size={14} /></button>
+                        )}
 
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Work Type:</label>
-            <select value={item.workType} onChange={(e) => {
-              const updated = [...labourRatesList];
-              updated[idx].workType = e.target.value;
-              if (e.target.value === 'Other Work') {
-                updated[idx].size = '-'; // જો ડિપાર્ટમેન્ટ હોય તો સાઈઝ ડૅશ કરી દેવી
-              }
-              setLabourRatesList(updated);
-            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
-              <option value="Product Rate">Product Rate (પ્રોડક્ટ)</option>
-              <option value="Other Work">Other Department (ડિપાર્ટમેન્ટ)</option>
-            </select>
-          </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Work Type:</label>
+                            <select value={item.workType} onChange={(e) => {
+                              const updated = [...labourRatesList];
+                              updated[idx].workType = e.target.value;
+                              if (e.target.value === 'Other Work') updated[idx].size = '-';
+                              setLabourRatesList(updated);
+                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
+                              <option value="Product Rate">Product Rate (પ્રોડક્ટ)</option>
+                              <option value="Other Work">Other Department (ડિપાર્ટમેન્ટ)</option>
+                            </select>
+                          </div>
 
-          {item.workType === 'Product Rate' ? (
-            <div style={{ flex: 1.5 }}>
-              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Product Name:</label>
-              <select value={item.product} onChange={(e) => {
-                const selProdName = e.target.value;
-                const updated = [...labourRatesList];
-                updated[idx].product = selProdName;
-                
-                // પહેલી સાઈઝ ઓટોમેટિક સેટ કરવી
-                const matchedProducts = availableProductsForPlant.filter(p => p.name === selProdName);
-                if (matchedProducts.length > 0) {
-                  updated[idx].size = matchedProducts[0].product_size || '';
-                } else {
-                  updated[idx].size = '';
-                }
-                setLabourRatesList(updated);
-              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
-                <option value="">-- Select Product --</option>
-                {[...new Set(availableProductsForPlant.map(p => p.name))].map((pName, i) => (
-                  <option key={i} value={pName}>{pName}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div style={{ flex: 1.5 }}>
-              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Department Task:</label>
-              <input type="text" placeholder="e.g. Maintenance" value={item.product} onChange={(e) => {
-                const updated = [...labourRatesList];
-                updated[idx].product = e.target.value;
-                setLabourRatesList(updated);
-              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-            </div>
-          )}
-        </div>
+                          {item.workType === 'Product Rate' ? (
+                            <div style={{ flex: 1.5 }}>
+                              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Product Name:</label>
+                              <select value={item.product} onChange={(e) => {
+                                const selProdName = e.target.value;
+                                const updated = [...labourRatesList];
+                                updated[idx].product = selProdName;
+                                const matchedProducts = availableProductsForPlant.filter(p => p.name === selProdName);
+                                updated[idx].size = matchedProducts.length > 0 ? (matchedProducts[0].product_size || '') : '';
+                                setLabourRatesList(updated);
+                              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
+                                <option value="">-- Select Product --</option>
+                                {[...new Set(availableProductsForPlant.map(p => p.name))].map((pName, i) => (
+                                  <option key={i} value={pName}>{pName}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <div style={{ flex: 1.5 }}>
+                              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Department Task:</label>
+                              <input type="text" placeholder="e.g. Maintenance" value={item.product} onChange={(e) => {
+                                const updated = [...labourRatesList];
+                                updated[idx].product = e.target.value;
+                                setLabourRatesList(updated);
+                              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                            </div>
+                          )}
+                        </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: item.workType === 'Product Rate' ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: '6px' }}>
-          
-          {/* 🎯 જો પ્રોડક્ટ રેટ હોય તો જ સાઈઝનું ડ્રોપડાઉન બતાવવું */}
-          {item.workType === 'Product Rate' && (
-            <div>
-              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Size:</label>
-              <select value={item.size} onChange={(e) => {
-                const updated = [...labourRatesList];
-                updated[idx].size = e.target.value;
-                setLabourRatesList(updated);
-              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}>
-                <option value="">-- Size --</option>
-                {availableSizesForProduct.map((sz, sIdx) => (
-                  <option key={sIdx} value={sz}>{sz}</option>
-                ))}
-              </select>
-            </div>
-          )}
+                        <div style={{ display: 'grid', gridTemplateColumns: item.workType === 'Product Rate' ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: '6px' }}>
+                          {item.workType === 'Product Rate' && (
+                            <div>
+                              <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Size:</label>
+                              <select value={item.size} onChange={(e) => {
+                                const updated = [...labourRatesList];
+                                updated[idx].size = e.target.value;
+                                setLabourRatesList(updated);
+                              }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}>
+                                <option value="">-- Size --</option>
+                                {availableSizesForProduct.map((sz, sIdx) => (
+                                  <option key={sIdx} value={sz}>{sz}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
 
-          <div>
-            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>UOM:</label>
-            <select value={item.uom} onChange={(e) => {
-              const updated = [...labourRatesList];
-              updated[idx].uom = e.target.value;
-              setLabourRatesList(updated);
-            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
-              <option value="Nos">Nos</option>
-              <option value="Lines">Lines</option>
-              <option value="Hours">Hours</option>
-              <option value="Days">Days</option>
-              <option value="SqFt">SqFt</option>
-            </select>
-          </div>
+                          <div>
+                            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>UOM:</label>
+                            <select value={item.uom} onChange={(e) => {
+                              const updated = [...labourRatesList];
+                              updated[idx].uom = e.target.value;
+                              setLabourRatesList(updated);
+                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
+                              <option value="Nos">Nos</option>
+                              <option value="Lines">Lines</option>
+                              <option value="Hours">Hours</option>
+                              <option value="Days">Days</option>
+                              <option value="SqFt">SqFt</option>
+                            </select>
+                          </div>
 
-          <div>
-            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Rate (₹):</label>
-            <input type="number" placeholder="Rate" value={item.rate} onChange={(e) => {
-              const updated = [...labourRatesList];
-              updated[idx].rate = e.target.value;
-              setLabourRatesList(updated);
-            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-          </div>
+                          <div>
+                            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Rate (₹):</label>
+                            <input type="number" placeholder="Rate" value={item.rate} onChange={(e) => {
+                              const updated = [...labourRatesList];
+                              updated[idx].rate = e.target.value;
+                              setLabourRatesList(updated);
+                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                          </div>
 
-          <div>
-            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Effective From:</label>
-            <input type="date" value={item.effectiveDate} onChange={(e) => {
-              const updated = [...labourRatesList];
-              updated[idx].effectiveDate = e.target.value;
-              setLabourRatesList(updated);
-            }} style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '10px', boxSizing: 'border-box' }} />
-          </div>
-        </div>
+                          <div>
+                            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569' }}>Effective From:</label>
+                            <input type="date" value={item.effectiveDate} onChange={(e) => {
+                              const updated = [...labourRatesList];
+                              updated[idx].effectiveDate = e.target.value;
+                              setLabourRatesList(updated);
+                            }} style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '10px', boxSizing: 'border-box' }} />
+                          </div>
+                        </div>
 
-      </div>
-    );
-  })}
-</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                   <button onClick={handleSaveModalData} style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Labour & Rates</button>
                   <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
                 </div>
               </div>
             ) : (
+              /* 📦 8. DEFAULT MODAL (Supplier, Material, Description) */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Assign Type *</label>
@@ -1502,7 +1644,6 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </div>
                 </div>
 
-              {/* 🎯 ૧. Select State */}
                 <div>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select State *</label>
                   <select value={formStateFilter} onChange={(e) => {
@@ -1515,24 +1656,20 @@ const availablePlantsForForm = (plants || []).filter(p => {
                   </select>
                 </div>
 
-                {/* 🎯 ૨. Select Plant (હવે તે Site Only માં પણ કાયમ દેખાશે) */}
-               <div>
-  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-    
-    {/* 🎯 જો તે સ્ટેટના પ્લાન્ટ્સ ઝીરો હોય તો નો પ્લાન્ટ બતાવશે */}
-    {availablePlantsForForm.length === 0 ? (
-      <option value="" disabled>⚠️ No Plant Available in this State</option>
-    ) : (
-      <>
-        <option value="all">🌐 All Plants (General)</option>
-        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-      </>
-    )}
-  </select>
-</div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
+                  <select value={formPlantFilter} onChange={(e) => setFormPlantFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                    {availablePlantsForForm.length === 0 ? (
+                      <option value="" disabled>⚠️ No Plant Available in this State</option>
+                    ) : (
+                      <>
+                        <option value="all">🌐 All Plants (General)</option>
+                        {availablePlantsForForm.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                      </>
+                    )}
+                  </select>
+                </div>
 
-                {/* 🎯 ૩. Select Site (જો Assign Type માં Site કે Both હોય તો જ દેખાશે) */}
                 {(assignTarget === 'site' || assignTarget === 'both') && (
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Site *</label>
@@ -1562,7 +1699,7 @@ const availablePlantsForForm = (plants || []).filter(p => {
                     </div>
                   </>
                 )}
-{/* 🎯 જો મટીરિયલ હોય તો જ Item Category નું ડ્રોપડાઉન દેખાશે */}
+
                 {activeModal === 'material' && (
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Item Category *</label>
@@ -1575,32 +1712,33 @@ const availablePlantsForForm = (plants || []).filter(p => {
                     </select>
                   </div>
                 )}
-                {/* 🎯 ફક્ત Supplier ફોર્મ માટે જ મટીરિયલ રો સેક્શન */}
-            {activeModal === 'supplier' && (
-              <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#059669' }}>📦 Linked Materials (કયું મટીરિયલ આવે છે?)</span>
-                  <button type="button" onClick={() => setSupplierMaterialsList([...supplierMaterialsList, { materialName: '' }])} style={{ backgroundColor: '#059669', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Row</button>
-                </div>
 
-                {supplierMaterialsList.map((supMat, sIdx) => (
-                  <div key={sIdx} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <select value={supMat.materialName} onChange={(e) => {
-                      const updated = [...supplierMaterialsList];
-                      updated[sIdx].materialName = e.target.value;
-                      setSupplierMaterialsList(updated);
-                    }} style={{ flex: 1, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                      <option value="">-- Select Material --</option>
-                      {availableMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
-                    </select>
+                {activeModal === 'supplier' && (
+                  <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#059669' }}>📦 Linked Materials</span>
+                      <button type="button" onClick={() => setSupplierMaterialsList([...supplierMaterialsList, { materialName: '' }])} style={{ backgroundColor: '#059669', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Row</button>
+                    </div>
 
-                    {supplierMaterialsList.length > 1 && (
-                      <button type="button" onClick={() => setSupplierMaterialsList(supplierMaterialsList.filter((_, i) => i !== sIdx))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={14} /></button>
-                    )}
+                    {supplierMaterialsList.map((supMat, sIdx) => (
+                      <div key={sIdx} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <select value={supMat.materialName} onChange={(e) => {
+                          const updated = [...supplierMaterialsList];
+                          updated[sIdx].materialName = e.target.value;
+                          setSupplierMaterialsList(updated);
+                        }} style={{ flex: 1, padding: '7px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                          <option value="">-- Select Material --</option>
+                          {availableMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
+                        </select>
+
+                        {supplierMaterialsList.length > 1 && (
+                          <button type="button" onClick={() => setSupplierMaterialsList(supplierMaterialsList.filter((_, i) => i !== sIdx))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={14} /></button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
+
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                   <button onClick={handleSaveModalData} style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save</button>
                   <button onClick={() => setActiveModal(null)} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
@@ -1611,7 +1749,6 @@ const availablePlantsForForm = (plants || []).filter(p => {
           </div>
         </div>
       )}
-
 
 
 
@@ -1705,6 +1842,8 @@ const availablePlantsForForm = (plants || []).filter(p => {
   </div>
 )}
 
+
+
 {activeModal === 'labourTransfer' && (
   <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
     <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', width: '90%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
@@ -1782,6 +1921,7 @@ const availablePlantsForForm = (plants || []).filter(p => {
     </div>
   </div>
 )}
+
 
 {/* VIEW LISTS SECTION */}
       {showViewSection && (

@@ -628,6 +628,7 @@ return (
           <input 
             type="date" 
             value={dprDate} 
+             max={new Date().toISOString().split('T')[0]}
             onChange={(e) => setDprDate(e.target.value)} 
             style={{ 
               width: '100%', 

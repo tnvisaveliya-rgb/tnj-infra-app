@@ -944,6 +944,7 @@ let totalProducedQty = 0;
             </label>
             <input 
               type="date" 
+              max={new Date().toISOString().split('T')[0]}
               value={dprDate} 
               onChange={(e) => setDprDate(e.target.value)} 
               style={{ 

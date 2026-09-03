@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X } from 'lucide-react';
+import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X , Layers } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import SupervisorDashboard from './SupervisorDashboard';
@@ -8,13 +8,20 @@ import SupervisorExpenses from './SupervisorExpenses';
 import PlantDprEntry from './PlantDprEntry';
 import PlantInwardPage from './PlantInwardPage';
 import PlantOutwardPage from './PlantOutwardPage';
+import SiteMaterialReturn from './SiteMaterialReturn';
+import IssueReturn from './IssueReturn';
+
+import PlantExpensesPage from './PlantExpensesPage';
+
 export default function PlantEmployeeDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [workingBalance, setWorkingBalance] = useState(0);
   const [todayExpense, setTodayExpense] = useState(0);
+  const [rawMaterialsStock, setRawMaterialsStock] = useState([]);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
-  
+  const [isExpensePopupOpen, setIsExpensePopupOpen] = useState(false);
+const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense'); // 'income' or 'expense'
   const [attendanceInfo, setAttendanceInfo] = useState({
     status: 'Punched In',
     time: '09:30 AM',
@@ -48,6 +55,9 @@ export default function PlantEmployeeDashboard() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
+  useEffect(() => {
+  fetchDashboardData();
+}, [user]);
 
   const fetchDashboardData = async () => {
     try {
@@ -86,6 +96,35 @@ export default function PlantEmployeeDashboard() {
 
         setWorkingBalance(totalIncome - totalExpense);
         setTodayExpense(todayExpSum);
+      }
+      // 📦 Fetch Live Raw Material Stock
+      const { data: matLedger, error: matErr } = await supabase
+        .from('material_stock_ledger')
+        .select('*');
+
+      if (!matErr && matLedger) {
+        const stockMap = {};
+
+        matLedger.forEach(item => {
+          const name = (item.material_name || '').trim();
+          if (!name) return;
+
+          const qty = parseFloat(item.qty || item.quantity || 0);
+          const type = (item.transaction_type || '').toUpperCase();
+          const unit = item.unit || 'Nos';
+
+          if (!stockMap[name]) {
+            stockMap[name] = { name, stock: 0, unit };
+          }
+
+          if (type === 'INWARD' || type === 'IN') {
+            stockMap[name].stock += qty;
+          } else if (type === 'OUTWARD' || type === 'OUT' || type === 'CONSUME') {
+            stockMap[name].stock -= qty;
+          }
+        });
+
+        setRawMaterialsStock(Object.values(stockMap));
       }
 
       const { data: attData, error: attError } = await supabase
@@ -166,6 +205,163 @@ export default function PlantEmployeeDashboard() {
               <span>Live Data</span>
             </div>
           </div>
+{/* 📦 PREMIUM LIVE RAW MATERIAL STOCK CARD */}
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '20px',
+            padding: '16px 18px',
+            border: '1.5px solid #dbeafe',
+            boxShadow: '0 4px 16px rgba(37, 99, 235, 0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1.5px dashed #bfdbfe', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ 
+                  backgroundColor: '#dbeafe', 
+                  color: '#1d4ed8', 
+                  width: '38px', 
+                  height: '38px', 
+                  borderRadius: '12px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center' 
+                }}>
+                  <Layers size={20} strokeWidth={2.5} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '900', color: '#1e3a8a', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                    LIVE RAW MATERIAL STOCK
+                  </h4>
+                  <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: '600' }}>Real-time inventory level</span>
+                </div>
+              </div>
+              <span style={{ 
+                fontSize: '11px', 
+                fontWeight: '800', 
+                backgroundColor: '#dcfce7', 
+                color: '#15803d', 
+                padding: '4px 10px', 
+                borderRadius: '20px', 
+                border: '1px solid #bbf7d0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }}></span>
+                Live
+              </span>
+            </div>
+
+            {/* List / Modern Row View */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {rawMaterialsStock.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>
+                  No Raw Material Stock Available
+                </div>
+              ) : (
+                rawMaterialsStock.map((item, index) => {
+                  const isLow = item.stock <= 0;
+                  const nameLower = (item.name || '').toLowerCase();
+
+                  // સ્માર્ટ કલરિંગ: મટીરિયલ મુજબ સોફ્ટ કલર્સ
+                  let badgeBg = '#eff6ff';
+                  let badgeColor = '#1d4ed8';
+                  let iconEmoji = '🧱';
+
+                  if (nameLower.includes('cement')) {
+                    badgeBg = '#f1f5f9';
+                    badgeColor = '#334155';
+                    iconEmoji = '🏢';
+                  } else if (nameLower.includes('steel') || nameLower.includes('tmt') || nameLower.includes('wire')) {
+                    badgeBg = '#eff6ff';
+                    badgeColor = '#2563eb';
+                    iconEmoji = '🔩';
+                  } else if (nameLower.includes('sand') || nameLower.includes('dust')) {
+                    badgeBg = '#fffbeb';
+                    badgeColor = '#b45309';
+                    iconEmoji = '⏳';
+                  } else if (nameLower.includes('mm') || nameLower.includes('aggregate')) {
+                    badgeBg = '#f5f3ff';
+                    badgeColor = '#7c3aed';
+                    iconEmoji = '🪨';
+                  }
+
+                  return (
+                    <div
+                      key={index}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 12px',
+                        backgroundColor: '#f8fafc',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {/* Left: Material Name + Emoji Icon */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '10px',
+                          backgroundColor: badgeBg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '15px'
+                        }}>
+                          {iconEmoji}
+                        </div>
+                        <div>
+                          <h5 style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>
+                            {item.name}
+                          </h5>
+                          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600' }}>
+                            Item Code: #{index + 101}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Right: Quantity + UOM Pill */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{
+                            fontSize: '15px',
+                            fontWeight: '900',
+                            color: isLow ? '#dc2626' : '#0f172a',
+                            letterSpacing: '-0.3px',
+                            display: 'block'
+                          }}>
+                            {item.stock.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+
+                        {/* UOM Badge */}
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: '800',
+                          backgroundColor: isLow ? '#fee2e2' : '#dbeafe',
+                          color: isLow ? '#b91c1c' : '#1d4ed8',
+                          padding: '4px 8px',
+                          borderRadius: '8px',
+                          minWidth: '38px',
+                          textAlign: 'center',
+                          textTransform: 'uppercase'
+                        }}>
+                          {item.unit}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
           <div style={{ backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -206,9 +402,9 @@ export default function PlantEmployeeDashboard() {
                 {attendanceInfo.status}
               </p>
             </div>
-
+{/* 💰 Today Expense Card -> Opens Expense/Income Popup */}
             <div 
-              onClick={() => setActiveTab('expense')} 
+              onClick={() => setIsExpensePopupOpen(true)} 
               style={{ backgroundColor: '#ffffff', padding: '12px', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -234,7 +430,8 @@ export default function PlantEmployeeDashboard() {
               <ChevronRight size={16} color="#94a3b8" />
             </div>
 
-            <div onClick={() => setActiveTab('expense')} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
+          {/* 💰 Expense / Transaction Row -> Opens Expense/Income Popup */}
+            <div onClick={() => setIsExpensePopupOpen(true)} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ backgroundColor: '#fff7ed', color: '#ea580c', padding: '8px', borderRadius: '10px' }}><IndianRupee size={16} /></div>
                 <div>
@@ -251,9 +448,13 @@ export default function PlantEmployeeDashboard() {
 
       {activeTab === 'dpr' && <PlantDprEntry />}
       {activeTab === 'attendance' && <AttendancePage />}
-      {activeTab === 'expense' && <SupervisorExpenses />}
+      {activeTab === 'expense' && <SupervisorExpenses defaultType={incomeInitialTab} />}
       {activeTab === 'inward' && <PlantInwardPage />}
       {activeTab === 'outward' && <PlantOutwardPage />}
+      {activeTab === 'site_return' && <SiteMaterialReturn />}
+      {activeTab === 'issue_return' && <IssueReturn />}
+      {activeTab === 'plantexpense' && <PlantExpensesPage user={user} defaultType={expenseInitialTab} />}
+      
  {/* ================= BOTTOM-UP SLIDE POPUP WITH VISIBLE BOTTOM BAR ================= */}
       {isPopupOpen && (
         <div style={{
@@ -272,6 +473,7 @@ export default function PlantEmployeeDashboard() {
             transformOrigin: 'bottom center',
             animation: 'slideUpFromBottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
           }} onClick={(e) => e.stopPropagation()}>
+           
             
             {/* Header with "SELECT OPERATION" and Close Button */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -309,11 +511,94 @@ export default function PlantEmployeeDashboard() {
             </div>
 
             {/* Option 3: Issue & Return */}
-            <div onClick={() => { setActiveTab('dpr'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', cursor: 'pointer' }}>
+            <div onClick={() => { setActiveTab('issue_return'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', cursor: 'pointer' }}>
               <span style={{ fontSize: '18px', backgroundColor: '#dbeafe', padding: '6px', borderRadius: '10px' }}>🛠️</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 <span style={{ fontSize: '12px', fontWeight: '900', color: '#1d4ed8' }}>3. ISSUE & RETURN</span>
                 <span style={{ fontSize: '9px', color: '#1e40af', fontWeight: '600' }}>Manage tools, items issue and returns</span>
+              </div>
+            </div>
+            {/* Option 4: Site Return (Inward) */}
+            <div onClick={() => { setActiveTab('site_return'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f3e8ff', border: '1px solid #d8b4fe', cursor: 'pointer', }}>
+              <span style={{ fontSize: '18px', backgroundColor: '#e9d5ff', padding: '6px', borderRadius: '10px' }}>🔄</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#7e22ce' }}>4. SITE MATERIAL RETURN</span>
+                <span style={{ fontSize: '10px', color: '#6b21a8', fontWeight: '600' }}>Receive damaged/extra goods from site</span>
+              </div>
+            </div>
+
+
+
+          </div>
+        </div>
+      )}
+       {/* ================= EXPENSE & INCOME POPUP ================= */}
+      {isExpensePopupOpen && (
+        <div 
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+            backgroundColor: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)',
+            zIndex: 9999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            paddingBottom: '95px',
+            animation: 'fadeIn 0.2s ease-out'
+          }} 
+          onClick={() => setIsExpensePopupOpen(false)}
+        >
+          <div 
+            style={{
+              width: '92%', maxWidth: '400px', backgroundColor: '#ffffff',
+              borderRadius: '26px', padding: '18px',
+              boxShadow: '0 -10px 30px rgba(0,0,0,0.15)', border: '1px solid #e2e8f0',
+              display: 'flex', flexDirection: 'column', gap: '10px',
+              animation: 'slideUpFromBottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+            }} 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '900', color: '#475569', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                SELECT TRANSACTION TYPE
+              </span>
+              <button 
+                onClick={() => setIsExpensePopupOpen(false)} 
+                style={{ 
+                  background: '#f1f5f9', border: 'none', borderRadius: '50%', 
+                  width: '28px', height: '28px', display: 'flex', alignItems: 'center', 
+                  justifyContent: 'center', cursor: 'pointer', color: '#475569'
+                }}
+              >
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            {/* Option 1: INCOME / FUND RECEIVE */}
+            <div 
+              onClick={() => {
+                setExpenseInitialTab('income');
+                setActiveTab('expense');
+                setIsExpensePopupOpen(false);
+              }} 
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer' }}
+            >
+              <span style={{ fontSize: '18px', backgroundColor: '#dcfce7', padding: '6px', borderRadius: '10px' }}>💰</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#15803d' }}>1. INCOME / FUND RECEIVE</span>
+                <span style={{ fontSize: '9px', color: '#166534', fontWeight: '600' }}>Add money received from office/owner</span>
+              </div>
+            </div>
+
+            {/* Option 2: EXPENSE ENTRY */}
+            <div 
+              onClick={() => {
+                setExpenseInitialTab('plantexpenseexpense');
+                setActiveTab('plantexpense');
+                setIsExpensePopupOpen(false);
+              }} 
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', cursor: 'pointer' }}>
+              <span style={{ fontSize: '18px', backgroundColor: '#ffedd5', padding: '6px', borderRadius: '10px' }}>💸</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '900', color: '#c2410c' }}>2. EXPENSE PAYMENT</span>
+                <span style={{ fontSize: '9px', color: '#9a3412', fontWeight: '600' }}>Add plant purchases, diesel, tea, repairs</span>
               </div>
             </div>
 
@@ -361,8 +646,8 @@ export default function PlantEmployeeDashboard() {
             <Plus size={26} strokeWidth={2.5} />
           </div>
         </div>
-
-        <div onClick={() => setActiveTab('expense')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+{/* 💰 Expense Tab Button In Navigation Bar (Opens Expense/Income Popup) */}
+        <div onClick={() => setIsExpensePopupOpen(true)} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
           <IndianRupee size={19} />
           <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'expense' ? '800' : '600' }}>Expense</span>
         </div>
