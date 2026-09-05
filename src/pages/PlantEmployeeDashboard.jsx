@@ -19,6 +19,9 @@ export default function PlantEmployeeDashboard() {
   const [workingBalance, setWorkingBalance] = useState(0);
   const [todayExpense, setTodayExpense] = useState(0);
   const [rawMaterialsStock, setRawMaterialsStock] = useState([]);
+  // 🏭 Plant Filter States
+const [plantList, setPlantList] = useState([]);
+const [selectedPlant, setSelectedPlant] = useState('All'); // અથવા ડિફોલ્ટ પ્લાન્ટનું નામ
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isExpensePopupOpen, setIsExpensePopupOpen] = useState(false);
 const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense'); // 'income' or 'expense'
@@ -55,113 +58,201 @@ const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense'); // '
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
-  useEffect(() => {
+useEffect(() => {
   fetchDashboardData();
-}, [user]);
-
-  const fetchDashboardData = async () => {
+}, [user, selectedPlant]);
+// 🏭 ડેટાબેઝમાંથી લાઈવ પ્લાન્ટના સાચા નામ ફેચ કરવા માટે
+useEffect(() => {
+  const fetchPlantList = async () => {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      const { data: txData, error: txError } = await supabase.from('site_transactions').select('*');
-      
-      if (!txError && txData && txData.length > 0) {
-        const filteredData = (user?.email === 'infra.tnj@gmail.com') 
-          ? txData 
-          : txData.filter(item => 
-              item.user_id === user?.email || 
-              item.created_by === user?.email || 
-              item.email === user?.email
-            );
-
-        let totalIncome = 0;
-        let totalExpense = 0;
-        let todayExpSum = 0;
-
-        filteredData.forEach(item => {
-          const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
-          const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
-          const typeStr = (item.type || item.transaction_type || '').toLowerCase();
-
-          if (typeStr.includes('income') || typeStr.includes('credit') || typeStr.includes('fund') || typeStr.includes('receive') || typeStr.includes('deposit')) {
-            totalIncome += amt;
-          } 
-          else if (typeStr.includes('expense') || typeStr.includes('debit') || typeStr.includes('payment') || typeStr.includes('cash')) {
-            totalExpense += amt;
-            if (itemDate === todayStr) {
-              todayExpSum += amt;
-            }
-          }
-        });
-
-        setWorkingBalance(totalIncome - totalExpense);
-        setTodayExpense(todayExpSum);
-      }
-      // 📦 Fetch Live Raw Material Stock
-      const { data: matLedger, error: matErr } = await supabase
+      const { data, error } = await supabase
         .from('material_stock_ledger')
-        .select('*');
+        .select('plant_name');
 
-      if (!matErr && matLedger) {
-        const stockMap = {};
-
-        matLedger.forEach(item => {
-          const name = (item.material_name || '').trim();
-          if (!name) return;
-
-          const qty = parseFloat(item.qty || item.quantity || 0);
-          const type = (item.transaction_type || '').toUpperCase();
-          const unit = item.unit || 'Nos';
-
-          if (!stockMap[name]) {
-            stockMap[name] = { name, stock: 0, unit };
-          }
-
-          if (type === 'INWARD' || type === 'IN') {
-            stockMap[name].stock += qty;
-          } else if (type === 'OUTWARD' || type === 'OUT' || type === 'CONSUME') {
-            stockMap[name].stock -= qty;
-          }
-        });
-
-        setRawMaterialsStock(Object.values(stockMap));
-      }
-
-      const { data: attData, error: attError } = await supabase
-        .from('site_attendance')
-        .select('*');
-
-      if (!attError && attData && attData.length > 0) {
-        const userAtt = attData.find(a => 
-          (a.employee_name === user?.email) && 
-          (a.created_at && a.created_at.split('T')[0] === todayStr)
-        );
-
-        if (userAtt) {
-          if (userAtt.punch_type === 'OUT') {
-            setAttendanceInfo({
-              status: 'Punched Out',
-              time: new Date(userAtt.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-              badgeText: 'Day Ended',
-              badgeBg: '#f1f5f9',
-              badgeColor: '#475569'
-            });
-          } else {
-            setAttendanceInfo({
-              status: 'Punched In',
-              time: new Date(userAtt.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-              badgeText: 'On Time',
-              badgeBg: '#f0fdf4',
-              badgeColor: '#15803d'
-            });
-          }
+      if (!error && data) {
+        const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
+        setPlantList(unique);
+        // જો લિસ્ટમાં પ્લાન્ટ મળે તો પહેલો પ્લાન્ટ ઓટોમેટિક સિલેક્ટ કરી લેશે
+        if (unique.length > 0 && selectedPlant === 'All') {
+          setSelectedPlant(unique[0]);
         }
       }
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
+      console.error('Error fetching plant list:', err);
     }
   };
 
+  fetchPlantList();
+}, []);
+
+const fetchDashboardData = async () => {
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const userEmail = user?.email;
+
+    if (!userEmail) return;
+
+    let totalIncome = 0;
+    let totalPlantExpense = 0;
+    let totalSiteExpense = 0;
+    let todayExpSum = 0;
+
+    // ==========================================
+    // ૧. 🏢 SITE TRANSACTIONS (created_by ચેક કરશે)
+    // ==========================================
+    const { data: siteTxData, error: siteTxErr } = await supabase
+      .from('site_transactions')
+      .select('*');
+
+    if (!siteTxErr && siteTxData) {
+      // લૉગિન યુઝરની એન્ટ્રી ફિલ્ટર (created_by)
+      const userSiteTx = siteTxData.filter(item => 
+        item.created_by === userEmail ||
+        item.user_id === userEmail ||
+        item.email === userEmail
+      );
+
+      userSiteTx.forEach(item => {
+        const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
+        const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
+        const typeStr = (item.type || item.transaction_type || '').toLowerCase();
+
+        // 💰 સાઈટ કે પ્લાન્ટ માટે ઓફિસથી મળેલી રકમ (Income)
+        if (
+          typeStr.includes('income') || 
+          typeStr.includes('credit') || 
+          typeStr.includes('fund') || 
+          typeStr.includes('receive') || 
+          typeStr.includes('deposit')
+        ) {
+          totalIncome += amt;
+        } 
+        // 💸 સાઈટ પર કરેલો ખર્ચ (Site Expense)
+        else if (
+          typeStr.includes('expense') || 
+          typeStr.includes('debit') || 
+          typeStr.includes('payment') || 
+          typeStr.includes('cash')
+        ) {
+          totalSiteExpense += amt;
+          if (itemDate === todayStr) {
+            todayExpSum += amt;
+          }
+        }
+      });
+    }
+
+    // ==========================================
+    // ૨. 🏭 PLANT EXPENSES (submitted_by ચેક કરશે)
+    // ==========================================
+    const { data: plantExpData, error: plantExpErr } = await supabase
+      .from('plant_expenses')
+      .select('*');
+
+    if (!plantExpErr && plantExpData) {
+      // લૉગિન યુઝરની એન્ટ્રી ફિલ્ટર (submitted_by)
+      const userPlantExp = plantExpData.filter(item => 
+        item.submitted_by === userEmail ||
+        item.created_by === userEmail
+      );
+
+      userPlantExp.forEach(item => {
+        const amt = parseFloat(item.amount || 0);
+        const itemDate = item.expense_date || (item.created_at ? item.created_at.split('T')[0] : '');
+
+        totalPlantExpense += amt;
+        if (itemDate === todayStr) {
+          todayExpSum += amt;
+        }
+      });
+    }
+
+    // ==========================================
+    // ૩. 📊 WORKING BALANCE ગણતરી
+    // ==========================================
+    // Balance = Total Income - (Plant Expense + Site Expense)
+    const grandTotalExpense = totalPlantExpense + totalSiteExpense;
+    setWorkingBalance(totalIncome - grandTotalExpense);
+    setTodayExpense(todayExpSum);
+
+    // ==========================================
+    // ૪. 📦 RAW MATERIAL STOCK (પ્લાન્ટ સિલેક્શન મુજબ)
+    // ==========================================
+    let matQuery = supabase.from('material_stock_ledger').select('*');
+    if (selectedPlant && selectedPlant !== 'All') {
+      matQuery = matQuery.eq('plant_name', selectedPlant);
+    }
+    const { data: matLedger, error: matErr } = await matQuery;
+
+    if (!matErr && matLedger) {
+      const stockMap = {};
+
+      matLedger.forEach(item => {
+        const rawName = (item.material_name || '').trim();
+        if (!rawName) return;
+
+        const key = rawName.toLowerCase();
+        const qty = parseFloat(item.qty || item.quantity || 0);
+        const type = (item.transaction_type || '').toUpperCase().trim();
+        const unit = item.unit || 'Nos';
+
+        if (!stockMap[key]) {
+          stockMap[key] = { name: rawName, stock: 0, unit };
+        }
+
+        if (type === 'INWARD' || type === 'IN' || type.includes('INWARD')) {
+          stockMap[key].stock += qty;
+        } else if (
+          type === 'OUTWARD' || 
+          type === 'OUT' || 
+          type.includes('CONSUM') || 
+          type.includes('ISSUE') || 
+          type.includes('OUTWARD')
+        ) {
+          stockMap[key].stock -= qty;
+        }
+      });
+
+      setRawMaterialsStock(Object.values(stockMap));
+    }
+
+    // ==========================================
+    // ૫. 🕒 ATTENDANCE FETCH
+    // ==========================================
+    const { data: attData, error: attError } = await supabase
+      .from('site_attendance')
+      .select('*');
+
+    if (!attError && attData && attData.length > 0) {
+      const userAtt = attData.find(a => 
+        (a.employee_name === userEmail || a.created_by === userEmail) && 
+        (a.created_at && a.created_at.split('T')[0] === todayStr)
+      );
+
+      if (userAtt) {
+        if (userAtt.punch_type === 'OUT') {
+          setAttendanceInfo({
+            status: 'Punched Out',
+            time: new Date(userAtt.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            badgeText: 'Day Ended',
+            badgeBg: '#f1f5f9',
+            badgeColor: '#475569'
+          });
+        } else {
+          setAttendanceInfo({
+            status: 'Punched In',
+            time: new Date(userAtt.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            badgeText: 'On Time',
+            badgeBg: '#f0fdf4',
+            badgeColor: '#15803d'
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching employee dashboard data:', err);
+  }
+};
   return (
     <div style={{ minHeight: '100vh', paddingBottom: '100px', backgroundColor: '#f8fafc', position: 'relative' }}>
       
@@ -205,6 +296,46 @@ const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense'); // '
               <span>Live Data</span>
             </div>
           </div>
+
+          {/* 🏭 PLANT SELECTOR DROPDOWN BAR */}
+<div style={{
+  backgroundColor: '#ffffff',
+  padding: '8px 12px',
+  borderRadius: '12px',
+  border: '1px solid #cbd5e1',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+}}>
+  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+    <span style={{ fontSize: '14px' }}>🏭</span>
+    <span style={{ fontSize: '12px', fontWeight: '700', color: '#334155' }}>Select Plant:</span>
+  </div>
+  <select 
+    value={selectedPlant} 
+    onChange={(e) => setSelectedPlant(e.target.value)}
+    style={{
+      border: '1px solid #94a3b8',
+      borderRadius: '8px',
+      padding: '5px 10px',
+      fontSize: '12px',
+      fontWeight: '700',
+      color: '#0f172a',
+      backgroundColor: '#f8fafc',
+      outline: 'none',
+      cursor: 'pointer',
+      maxWidth: '220px'
+    }}  
+  >
+    <option value="All">All Plants (બધા પ્લાન્ટ)</option>
+    {plantList.map((plantName, idx) => (
+      <option key={idx} value={plantName}>
+        {plantName}
+      </option>
+    ))}
+  </select>
+</div>
 {/* 📦 PREMIUM LIVE RAW MATERIAL STOCK CARD */}
           <div style={{
             backgroundColor: '#ffffff',
@@ -254,6 +385,7 @@ const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense'); // '
                 Live
               </span>
             </div>
+    
 
             {/* List / Modern Row View */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
