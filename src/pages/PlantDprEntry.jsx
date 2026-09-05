@@ -294,7 +294,7 @@ const [editingId, setEditingId] = useState(null);
     }
   };
 
-  const updateBomCementForSource = async (sIdx, updatedSources) => {
+ const updateBomCementForSource = async (sIdx, updatedSources) => {
     const source = updatedSources[sIdx];
     if (source.concreteSource !== 'Site Mix') return;
 
@@ -305,30 +305,40 @@ const [editingId, setEditingId] = useState(null);
       const isColumn = item.product.toLowerCase().includes('column');
       const isPanel = item.product.toLowerCase().includes('panel');
       
-      // 🎯 સુધારો: જો કૉલમ હોય તો સ્ટીલ રો ની Qty, પેનલ કે યુ-ડ્રેઈન હોય તો લાઈન કે ડાયરેક્ટ Qty લેવી
       let totalProducedQty = 0;
       if (isColumn) {
         totalProducedQty = item.steelRows ? item.steelRows.reduce((acc, s) => acc + (Number(s.qty) || 0), 0) : 0;
       } else if (isPanel) {
         totalProducedQty = (Number(item.lineOfCasting) || 0) * 30;
       } else {
-        totalProducedQty = Number(item.qty) || 0; // 👈 આ યુ-ડ્રેઈન કે અન્ય પ્રોડક્ટ માટે ડાયરેક્ટ Qty પકડશે!
+        totalProducedQty = Number(item.qty) || 0;
       }
 
       if (totalProducedQty <= 0) continue;
 
       let productVariant = item.sizeVariant || 'Standard';
-      if (isColumn && item.steelRows && item.steelRows.length > 0) {
-        productVariant = item.steelRows[0].productSize || 'Standard';
+      if (typeof productVariant === 'string' && productVariant.includes(' (')) {
+        productVariant = productVariant.split(' (')[0].trim();
       }
 
       try {
-        const { data: bomData } = await supabase
+        // 🎯 UDrain કે ગમે તે પ્રોડક્ટ હોય, .ilike વાપરીને પરફેક્ટ BOM ફેચ કરશે
+        let { data: bomData } = await supabase
           .from('plant_work_descriptions')
-          .select('bom_items, expected_m3')
+          .select('bom_items')
           .ilike('name', (item.product || '').trim())
           .ilike('product_size', (productVariant || '').trim())
           .maybeSingle();
+
+        // જો સાઈઝથી ન મળે તો માત્ર નામથી ટ્રાય કરો જેથી સિમેન્ટ મિસ ન થાય
+        if (!bomData || !bomData.bom_items) {
+          let { data: fallbackBom } = await supabase
+            .from('plant_work_descriptions')
+            .select('bom_items')
+            .ilike('name', (item.product || '').trim())
+            .maybeSingle();
+          bomData = fallbackBom;
+        }
 
         if (bomData && bomData.bom_items) {
           const bomList = Array.isArray(bomData.bom_items) ? bomData.bom_items : [bomData.bom_items];
@@ -375,12 +385,11 @@ const [editingId, setEditingId] = useState(null);
       }
 
       try {
-        // 🎯 .eq ની જગ્યાએ .ilike વાપરી લીધું જેથી સાઇઝની મિસ્ટેક ના થાય
         const { data: prodData } = await supabase
           .from('plant_work_descriptions')
           .select('expected_m3')
-          .ilike('name', (item.product || '').trim())
-          .ilike('product_size', (productVariant || '').trim())
+          .ilike('name', item.product.trim())
+          .eq('product_size', productVariant)
           .maybeSingle();
 
         if (prodData && prodData.expected_m3) {
@@ -724,12 +733,12 @@ let totalProducedQty = 0;
 
               let bomList = [];
               try {
-               const { data: bomData } = await supabase
-          .from('plant_work_descriptions')
-          .select('bom_items')
-          .ilike('name', (item.product || '').trim())
-          .ilike('product_size', (productVariant || '').trim())
-          .maybeSingle();
+                const { data: bomData } = await supabase
+                  .from('plant_work_descriptions')
+                  .select('bom_items')
+                  .eq('name', item.product)
+                  .eq('product_size', baseSize)
+                  .maybeSingle();
 
                 if (bomData && bomData.bom_items) {
                   bomList = Array.isArray(bomData.bom_items) ? bomData.bom_items : [bomData.bom_items];
@@ -1028,35 +1037,26 @@ let totalProducedQty = 0;
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         <div>
                           <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Product Name</label>
-                         <select 
-  value={item.product} 
-  onClick={() => {
-    if (!handleDropdownClick()) return;
-    handleLabourCheck(source.labour);
-  }} 
-  onChange={async (e) => {
-    if (!source.labour) {
-      alert("⚠️ Please select labour first!");
-      return;
-    }
-    const val = e.target.value;
-    
-    // 1. પ્રોડક્ટ અપડેટ કરો
-    await updateProductionItem(sIndex, iIndex, 'product', val);
-    
-    // 2. 🎯 BOM કેલ્ક્યુલેશન ફંક્શન્સ અહીં ફરજિયાત કૉલ કરો જેથી Qty અને Volume તરત દેખાય
-    const updated = [...productionSources];
-    updated[sIndex].items[iIndex].product = val;
-    await updateBomCementForSource(sIndex, updated);
-    await updateBomM3ForSource(sIndex, updated);
-  }} 
-  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
->
-  <option value="">-- Select Product --</option>
-  {uniqueProductNames.map((prodName, idx) => (
-    <option key={idx} value={prodName}>{prodName}</option>
-  ))}
-</select>
+                          <select 
+                            value={item.product} 
+                            onClick={() => {
+                              if (!handleDropdownClick()) return;
+                              handleLabourCheck(source.labour);
+                            }} 
+                            onChange={(e) => {
+                              if (!source.labour) {
+                                alert("⚠️ Please select labour first!");
+                                return;
+                              }
+                              updateProductionItem(sIndex, iIndex, 'product', e.target.value);
+                            }} 
+                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+                          >
+                            <option value="">-- Select Product --</option>
+                            {uniqueProductNames.map((prodName, idx) => (
+                              <option key={idx} value={prodName}>{prodName}</option>
+                            ))}
+                          </select>
                         </div>
 
                        <div>
@@ -1095,22 +1095,13 @@ let totalProducedQty = 0;
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div>
                             <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Products Qty *</label>
-                           <input 
-  type="number" 
-  placeholder="Enter Qty" 
-  value={item.qty} 
-  onChange={(e) => {
-    // ફક્ત સ્ટેટ અપડેટ કરો જેથી ટાઈપ કરતી વખતે લેગ કે હેંગ ના થાય
-    updateProductionItem(sIndex, iIndex, 'qty', e.target.value);
-  }}
-  onBlur={async (e) => {
-    // જ્યારે યુઝર ટાઈપ કરીને બોક્સની બહાર જાય ત્યારે જ BOM કેલ્ક્યુલેશન રન થશે
-    const updated = [...productionSources];
-    await updateBomCementForSource(sIndex, updated);
-    await updateBomM3ForSource(sIndex, updated);
-  }}
-  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#fff', fontWeight: 'bold', color: '#1d4ed8' }} 
-/>
+                            <input 
+                              type="number" 
+                              placeholder="Enter Qty" 
+                              value={item.qty} 
+                              onChange={(e) => updateProductionItem(sIndex, iIndex, 'qty', e.target.value)} 
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#fff', fontWeight: 'bold', color: '#1d4ed8' }} 
+                            />
                           </div>
 
                           <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px', border: '1px solid #e2e8f0' }}>
@@ -1118,29 +1109,24 @@ let totalProducedQty = 0;
                             
                             {item.steelRows.map((steel, stIdx) => (
                               <div key={stIdx} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1.2fr auto', gap: '6px', alignItems: 'center' }}>
-                                {/* 🎯 સ્ટેટિક ઓપ્શન્સને બદલે ડાયનેમિક BOM સ્ટીલ લિસ્ટ */}
-<select 
+                               <select 
   value={steel.wireSize} 
   onChange={(e) => updateSteelRow(sIndex, iIndex, stIdx, 'wireSize', e.target.value)} 
   style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%' }}
 >
   <option value="">-- Select Material from BOM --</option>
   {(() => {
-    // 🎯 અતિશય પાવરફુલ નોર્મલાઇઝેશન: ×, x, સ્પેસ, કૌંસ બધું જ કાઢીને માત્ર આંકડા અને અક્ષરો જ સરખાવશે
     const strictNormalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
     const currentProduct = strictNormalize(item.product);
     const rawSize = String(item.sizeVariant || steel.productSize || '').split('(')[0];
     const currentSize = strictNormalize(rawSize);
 
-    // 🔍 1st Attempt: નામ અને સાઈઝ બંને પરફેક્ટ મૅચ કરીને શોધો
     let matchedProd = products.find(p => {
       const pName = strictNormalize(p.name);
       const pSize = strictNormalize(p.product_size);
       return pName === currentProduct && pSize === currentSize;
     });
 
-    // 🔍 2nd Attempt (Safety): જો સાઈઝથી ન મળે, તો માત્ર પ્રોડક્ટના નામથી શોધો જેથી BOM મટીરિયલ તો મળી જ જાય!
     if (!matchedProd) {
       matchedProd = products.find(p => strictNormalize(p.name) === currentProduct);
     }
@@ -1149,20 +1135,12 @@ let totalProducedQty = 0;
       ? (Array.isArray(matchedProd.bom_items) ? matchedProd.bom_items : [matchedProd.bom_items]) 
       : [];
 
-    // 3. માત્ર સિમેન્ટ, RMC, સેન્ડ વગેરે સિવાયના BOM ના મટીરિયલ્સ જ બતાવો
-    // 🎯 પરફેક્ટ ફિલ્ટર: માત્ર અસલી સ્ટીલ/વાયર જ આવશે, 20mm એગ્ગ્રીગેટ કે બીજા મટીરિયલ્સ નહીં આવે
     const bomMaterials = bomList.filter(b => {
       const mat = (b.material || '').toLowerCase();
-      
-      // જો મટીરિયલમાં આમાંથી કોઈ પણ શબ્દ હોય તો તેને તરત જ બહાર કાઢી મૂકો (Exclude)
-      if (mat.includes('cement') || mat.includes('rmc') || mat.includes('concrete') || mat.includes('sand') || mat.includes('20mm') || mat.includes('20 mm') || mat.includes('10mm') || mat.includes('10 mm') || mat.includes('aggregate') || mat.includes('stone')) {
+      if (mat.includes('cement') || mat.includes('rmc') || mat.includes('concrete') || mat.includes('sand') || mat.includes('20mm') || mat.includes('20 mm') || mat.includes('aggregate')) {
         return false;
       }
-      
-      // માત્ર એ જ મટીરિયલ અંદર આવશે જેમાં steel, tmt, wire અથવા 3mm/4mm/6mm/8mm સ્પષ્ટ લખેલું હોય
-      const isTrueSteel = mat.includes('steel') || mat.includes('tmt') || mat.includes('wire') || mat.includes('3mm') || mat.includes('4mm') || mat.includes('6mm') || mat.includes('8mm');
-      
-      return isTrueSteel;
+      return mat.includes('steel') || mat.includes('tmt') || mat.includes('wire') || mat.includes('mm');
     });
 
     return bomMaterials.length > 0 ? (
@@ -1170,10 +1148,16 @@ let totalProducedQty = 0;
         <option key={idx} value={b.material}>{b.material}</option>
       ))
     ) : (
-      <option value="">-- BOM માં કોઈ મટીરિયલ નથી મળ્યું --</option>
+      <>
+        <option value="3mm">3mm</option>
+        <option value="4mm">4mm</option>
+        <option value="6mm">6mm</option>
+        <option value="8mm">8mm</option>
+      </>
     );
   })()}
-</select>          
+</select>
+                                
                                 <input type="number" placeholder="Qty" value={steel.qty || ''} onChange={(e) => updateSteelRow(sIndex, iIndex, stIdx, 'qty', e.target.value)} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }} />
 
                                 <div style={{ padding: '6px', backgroundColor: '#e2e8f0', borderRadius: '4px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8' }}>
@@ -1226,8 +1210,7 @@ let totalProducedQty = 0;
       .map(prod => prod.product_size ? <option key={prod.id} value={prod.product_size}>{prod.product_size}</option> : null)
     }
   </select>
-)}
-                             <select 
+)}<select 
   value={steel.wireSize} 
   onChange={(e) => updateSteelRow(sIndex, iIndex, stIdx, 'wireSize', e.target.value)} 
   style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%' }}
@@ -1235,7 +1218,6 @@ let totalProducedQty = 0;
   <option value="">-- Select Material from BOM --</option>
   {(() => {
     const strictNormalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
     const currentProduct = strictNormalize(item.product);
     const rawSize = String(item.sizeVariant || steel.productSize || '').split('(')[0];
     const currentSize = strictNormalize(rawSize);
@@ -1254,19 +1236,12 @@ let totalProducedQty = 0;
       ? (Array.isArray(matchedProd.bom_items) ? matchedProd.bom_items : [matchedProd.bom_items]) 
       : [];
 
-   // 🎯 પરફેક્ટ ફિલ્ટર: માત્ર અસલી સ્ટીલ/વાયર જ આવશે, 20mm એગ્ગ્રીગેટ કે બીજા મટીરિયલ્સ નહીં આવે
     const bomMaterials = bomList.filter(b => {
       const mat = (b.material || '').toLowerCase();
-      
-      // જો મટીરિયલમાં આમાંથી કોઈ પણ શબ્દ હોય તો તેને તરત જ બહાર કાઢી મૂકો (Exclude)
-      if (mat.includes('cement') || mat.includes('rmc') || mat.includes('concrete') || mat.includes('sand') || mat.includes('20mm') || mat.includes('20 mm') || mat.includes('10mm') || mat.includes('10 mm') || mat.includes('aggregate') || mat.includes('stone')) {
+      if (mat.includes('cement') || mat.includes('rmc') || mat.includes('concrete') || mat.includes('sand') || mat.includes('20mm') || mat.includes('20 mm') || mat.includes('aggregate')) {
         return false;
       }
-      
-      // માત્ર એ જ મટીરિયલ અંદર આવશે જેમાં steel, tmt, wire અથવા 3mm/4mm/6mm/8mm સ્પષ્ટ લખેલું હોય
-      const isTrueSteel = mat.includes('steel') || mat.includes('tmt') || mat.includes('wire') || mat.includes('3mm') || mat.includes('4mm') || mat.includes('6mm') || mat.includes('8mm');
-      
-      return isTrueSteel;
+      return mat.includes('steel') || mat.includes('tmt') || mat.includes('wire') || mat.includes('mm');
     });
 
     return bomMaterials.length > 0 ? (
@@ -1274,7 +1249,12 @@ let totalProducedQty = 0;
         <option key={idx} value={b.material}>{b.material}</option>
       ))
     ) : (
-      <option value="">-- BOM માં કોઈ મટીરિયલ નથી મળ્યું --</option>
+      <>
+        <option value="3mm">3mm</option>
+        <option value="4mm">4mm</option>
+        <option value="6mm">6mm</option>
+        <option value="8mm">8mm</option>
+      </>
     );
   })()}
 </select>
