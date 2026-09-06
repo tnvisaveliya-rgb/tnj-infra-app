@@ -747,91 +747,98 @@ let totalProducedQty = 0;
                 console.error("BOM Fetch Error:", bomCatchErr.message);
               }
 
-              for (const bom of bomList) {
-                const matNameLower = bom.material ? bom.material.toLowerCase() : '';
-                if (matNameLower.includes('cement') || matNameLower.includes('steel') || matNameLower.includes('wire') || matNameLower.includes('3mm') || matNameLower.includes('4mm')) {
-                  continue;
-                }
+             for (const bom of bomList) {
+  const matNameLower = bom.material ? bom.material.toLowerCase() : '';
+  
+  // 🛑 સ્ટીલ, વાયર, TMT કે કોઈપણ mm વાળા સળિયાને અહીંથી અટકાવો
+  if (
+    matNameLower.includes('cement') || 
+    matNameLower.includes('steel') || 
+    matNameLower.includes('wire') || 
+    matNameLower.includes('tmt') 
+  ) {
+    continue;
+  }
 
-                if (source.concreteSource === 'RMC') {
-                  continue; 
-                }
+  if (source.concreteSource === 'RMC') {
+    continue; 
+  }
 
-                const unitConsumption = Number(bom.consumption) || 0;
-                const totalMaterialConsumed = unitConsumption * totalProducedQty;
+  const unitConsumption = Number(bom.consumption) || 0;
+  const totalMaterialConsumed = unitConsumption * totalProducedQty;
 
-                if (totalMaterialConsumed > 0 && bom.material) {
-                  materialLedgerRows.push({
-                    date: dprDate,
-                    plant_name: selectedPlant,
-                    material_name: bom.material,
-                    unit: bom.unit || 'Kg',
-                    transaction_type: 'CONSUMPTION',
-                    qty: Number(totalMaterialConsumed.toFixed(2)),
-                    reference_id: itemId
-                  });
-                }
-              }
-
-              // 🛠️ સ્ટીલની રો (Steel Rows) સેવ કરવા માટેનું પરફેક્ટ લોજિક
-              if (item.steelRows && item.steelRows.length > 0) {
-                for (const steel of item.steelRows) {
-                  let producedCount = 0;
-                  if (isColumn) {
-                    producedCount = Number(steel.qty) || 0;
-                  } else if (isPanel) {
-                    producedCount = (Number(steel.totalLines) || 0) * 30;
-                  } else {
-                    producedCount = Number(steel.qty) || 0;
-                  }
-
-                  const wireCountNum = Number(steel.wireCount) || 4;
-                  const steelSizeStr = steel.wireSize || '3mm';
-                  const wireBarText = (isPanel || isColumn) ? `${wireCountNum} Wires` : 'Kg Fix';
-
-                  const { error: steelErr } = await supabase
-                    .from('production_steel_details')
-                    .insert([{
-                      item_id: itemId,
-                      steel_size: steelSizeStr,
-                      wires_or_bars: wireBarText,
-                      total_qty: producedCount
-                    }]);
-
-                  if (steelErr) throw steelErr;
-
-                  let totalSteelWeight = 0;
-                  if (isPanel || isColumn) {
-                    let weightPerWire = 0;
-                    const cleanSteelSize = steelSizeStr.toLowerCase().replace(/\s/g, '');
-                    const matchedSteelBom = bomList.find(b => (b.material || '').toLowerCase().replace(/\s/g, '').includes(cleanSteelSize));
-                    if (matchedSteelBom) {
-                      weightPerWire = Number(matchedSteelBom.consumption) || 0;
-                    }
-                    if (producedCount > 0 && weightPerWire > 0) {
-                      totalSteelWeight = producedCount * wireCountNum * weightPerWire;
-                    }
-                 } else {
-  // 🎯 અહીં Per Piece સ્ટીલને Products Qty (totalProducedQty) સાથે ગુણાકાર કરવામાં આવ્યો છે
-  const steelPerPiece = Number(steel.qty) || 0;
-  totalSteelWeight = steelPerPiece * totalProducedQty; 
+  if (totalMaterialConsumed > 0 && bom.material) {
+    materialLedgerRows.push({
+      date: dprDate,
+      plant_name: selectedPlant,
+      material_name: bom.material,
+      unit: bom.unit || 'Kg',
+      transaction_type: 'CONSUMPTION',
+      qty: Number(totalMaterialConsumed.toFixed(2)),
+      reference_id: itemId
+    });
+  }
 }
-                  if (totalSteelWeight > 0) {
-                    const cleanSteelSize = steelSizeStr.toLowerCase().replace(/\s/g, '');
-                    const matchedSteelBom = bomList.find(b => (b.material || '').toLowerCase().replace(/\s/g, '').includes(cleanSteelSize));
 
-                    materialLedgerRows.push({
-                      date: dprDate,
-                      plant_name: selectedPlant,
-                      material_name: matchedSteelBom ? matchedSteelBom.material : `${steelSizeStr} Steel`,
-                      unit: matchedSteelBom ? (matchedSteelBom.unit || 'Kg') : 'Kg',
-                      transaction_type: 'CONSUMPTION',
-                      qty: Number(totalSteelWeight.toFixed(2)),
-                      reference_id: itemId
-                    });
-                  }
-                }
-              }
+       // 🛠️ સ્ટીલની રો (Steel Rows) સેવ કરવા માટેનું સુધારેલું લોજિક
+if (item.steelRows && item.steelRows.length > 0) {
+  for (const steel of item.steelRows) {
+    let producedCount = 0;
+    if (isColumn) {
+      producedCount = Number(steel.qty) || 0;
+    } else if (isPanel) {
+      producedCount = (Number(steel.totalLines) || 0) * 30;
+    } else {
+      producedCount = Number(item.qty) || 0;
+    }
+
+    const wireCountNum = Number(steel.wireCount) || 4;
+    const steelSizeStr = steel.wireSize || '3mm';
+    const wireBarText = (isPanel || isColumn) ? `${wireCountNum} Wires` : 'Kg Fix';
+
+    const { error: steelErr } = await supabase
+      .from('production_steel_details')
+      .insert([{
+        item_id: itemId,
+        steel_size: steelSizeStr,
+        wires_or_bars: wireBarText,
+        total_qty: isPanel || isColumn ? producedCount : (Number(steel.qty) || 0)
+      }]);
+
+    if (steelErr) throw steelErr;
+
+    // 🎯 ગણતરી: Panel/Column સિવાય (U Drain વગેરે માટે) યુઝરે નાખેલ Box Qty * Products Qty
+    let totalSteelWeight = 0;
+    if (isPanel || isColumn) {
+      let weightPerWire = 0;
+      const cleanSteelSize = steelSizeStr.toLowerCase().replace(/\s/g, '');
+      const matchedSteelBom = bomList.find(b => (b.material || '').toLowerCase().replace(/\s/g, '').includes(cleanSteelSize));
+      if (matchedSteelBom) {
+        weightPerWire = Number(matchedSteelBom.consumption) || 0;
+      }
+      if (producedCount > 0 && weightPerWire > 0) {
+        totalSteelWeight = producedCount * wireCountNum * weightPerWire;
+      }
+    } else {
+      // 🔑 UDrain માટે: બોક્સમાં નાખેલ વજન (Kg/Pc) * કુલ બનેલા નંગ (Products Qty)
+      const inputSteelPerPiece = Number(steel.qty) || 0;
+      totalSteelWeight = inputSteelPerPiece * totalProducedQty;
+    }
+
+    // 📦 Stock Ledger માં એન્ટ્રી: માત્ર યુઝરે નાખેલ વજન જ જશે
+    if (totalSteelWeight > 0) {
+      materialLedgerRows.push({
+        date: dprDate,
+        plant_name: selectedPlant,
+        material_name: steelSizeStr,
+        unit: 'Kg',
+        transaction_type: 'CONSUMPTION',
+        qty: Number(totalSteelWeight.toFixed(2)),
+        reference_id: itemId
+      });
+    }
+  }
+}
 
             }
           }
@@ -1466,7 +1473,7 @@ let totalProducedQty = 0;
 
                       // 3️⃣ છેલ્લે મેઈન હેડર ડિલીટ કરો
                       const { error: headerErr } = await supabase
-                        .from('daily_production_headers') 
+                        .from('production_header') 
                         .delete()
                         .eq('id', editingId);
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Receipt, Send, Plus, Trash2, Clock, Upload } from 'lucide-react';
+import { Receipt, Send, Plus, Trash2, Clock, Upload, X } from 'lucide-react';
 
 export default function PlantExpensesPage({ user }) {
   const [plants, setPlants] = useState([]);
@@ -8,30 +8,58 @@ export default function PlantExpensesPage({ user }) {
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [expensesHistory, setExpensesHistory] = useState([]);
-  
+  const [activeModalRowIndex, setActiveModalRowIndex] = useState(null); // 🎯 કઈ રો માટે પોપઅપ ચાલુ છે
+
   // Master Lists
   const [dbCategories, setDbCategories] = useState([]);
   const [plantLabours, setPlantLabours] = useState([]);
   const [availableMaterials, setAvailableMaterials] = useState([]);
+  // પોપઅપમાં નવી આઇટમ રો ઉમેરવા
+const addStockSubItem = (rowIndex) => {
+  const updated = [...expenseRows];
+  if (!updated[rowIndex].stockItems) updated[rowIndex].stockItems = [];
+  updated[rowIndex].stockItems.push({
+    id: Date.now(),
+    selectedMaterial: '',
+    manualMaterialName: '',
+    qty: ''
+  });
+  setExpenseRows(updated);
+};
 
-  // 🎯 મલ્ટી-એક્સપેન્સ એન્ટ્રી સ્ટેટ
-  const [expenseRows, setExpenseRows] = useState([
-    {
-      id: 1,
-      expenseCategory: '',
-      amount: '',
-      paidTo: '',
-      selectedLabour: '',
-      paymentMode: 'Cash',
-      billNo: '',
-      remarks: '',
-      billFile: null,
-      uploading: false,
-      addToStock: false,
-      selectedMaterial: '',
-      qty: ''
-    }
-  ]);
+// પોપઅપમાંથી આઇટમ રો કાઢી નાખવા
+const removeStockSubItem = (rowIndex, subIndex) => {
+  const updated = [...expenseRows];
+  updated[rowIndex].stockItems = updated[rowIndex].stockItems.filter((_, i) => i !== subIndex);
+  setExpenseRows(updated);
+};
+
+// પોપઅપની અંદર સબ-આઇટમ વેલ્યુ અપડેટ કરવા
+const updateStockSubItem = (rowIndex, subIndex, field, value) => {
+  const updated = [...expenseRows];
+  updated[rowIndex].stockItems[subIndex][field] = value;
+  setExpenseRows(updated);
+};
+
+const [expenseRows, setExpenseRows] = useState([
+  {
+    id: 1,
+    expenseCategory: '',
+    amount: '',
+    paidTo: '',
+    selectedLabour: '',
+    paymentMode: 'Cash',
+    billNo: '',
+    remarks: '',
+    billFile: null,
+    uploading: false,
+    addToStock: false,
+    // 🎯 મલ્ટીપલ સ્ટોક આઇટમ્સ માટે એરે:
+    stockItems: [
+      { id: Date.now(), selectedMaterial: '', manualMaterialName: '', qty: '' }
+    ]
+  }
+]);
 
   useEffect(() => {
     fetchPlants();
@@ -67,14 +95,34 @@ export default function PlantExpensesPage({ user }) {
     }
   };
 
-  const fetchMaterialsMaster = async () => {
-    try {
-      const { data } = await supabase.from('site_materials_master').select('*');
-      setAvailableMaterials(data || []);
-    } catch (err) {
-      console.error("Materials Master Error:", err);
+ const fetchMaterialsMaster = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('site_materials_master')
+      .select('*');
+
+    if (error) throw error;
+
+    if (data) {
+      // 🎯 'item_type' કોલમ પરથી ફિલ્ટર કરો
+      const filtered = data.filter((item) => {
+        const type = (item.item_type || '').toLowerCase();
+        
+        return (
+          type.includes('hardware') ||
+          type.includes('tool') ||
+          type.includes('consumable') ||
+          type.includes('asset')
+        );
+      });
+
+      // જો ફિલ્ટરમાં ડેટા મળે તો ફિલ્ટર કરેલો, નહીં તો બેકઅપ તરીકે બધો ડેટા બતાવો
+      setAvailableMaterials(filtered.length > 0 ? filtered : data);
     }
-  };
+  } catch (err) {
+    console.error("Materials Master Error:", err.message);
+  }
+};
 
   const fetchLaboursForPlant = async (plantName) => {
     try {
@@ -120,6 +168,7 @@ export default function PlantExpensesPage({ user }) {
         uploading: false,
         addToStock: false,
         selectedMaterial: '',
+        manualMaterialName: '',
         qty: ''
       }
     ]);
@@ -135,6 +184,20 @@ export default function PlantExpensesPage({ user }) {
     setExpenseRows(updated);
   };
 
+  // 🎯 કેટેગરી બદલાય ત્યારે પોપઅપ કંટ્રોલ
+  const handleCategoryChange = (index, value) => {
+    updateExpenseRow(index, 'expenseCategory', value);
+    const valLower = value.toLowerCase();
+    if (valLower.includes('hardware') || valLower.includes('tool')) {
+      setActiveModalRowIndex(index);
+    } else {
+      updateExpenseRow(index, 'addToStock', false);
+      updateExpenseRow(index, 'selectedMaterial', '');
+      updateExpenseRow(index, 'manualMaterialName', '');
+      updateExpenseRow(index, 'qty', '');
+    }
+  };
+
   const handleFileUpload = async (index, file) => {
     if (!file) return;
     const updated = [...expenseRows];
@@ -144,9 +207,8 @@ export default function PlantExpensesPage({ user }) {
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-      const filePath = `plant_expense/${fileName}`; // 👈 અહીં 'plant_expense/' ફોલ્ડર સેટ કર્યું છે
+      const filePath = `plant_expense/${fileName}`;
 
-      // 🎯 બકેટનું સાચું નામ 'Plant' વાપરવામાં આવ્યું છે
       const { error: uploadErr } = await supabase.storage
         .from('Plant')
         .upload(filePath, file);
@@ -167,22 +229,52 @@ export default function PlantExpensesPage({ user }) {
     }
   };
 
-  // 🎯 અહીં 'async' ઉમેરી દીધું છે જેથી એરર સોલ્વ થઈ જાય
-  const handleSubmitExpenses = async (e) => {
-    e.preventDefault();
-    if (!selectedPlant) {
-      alert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+const handleSubmitExpenses = async (e) => {
+  e.preventDefault();
+  if (!selectedPlant) {
+    alert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+    return;
+  }
+
+  for (let i = 0; i < expenseRows.length; i++) {
+    const row = expenseRows[i];
+    const isHardware = (row.expenseCategory || '').toLowerCase().includes('hardware') || (row.expenseCategory || '').toLowerCase().includes('tool');
+    
+    // 📸 બિલ અપલોડ વેલિડેશન
+    if ((isHardware || row.addToStock) && !row.billFile) {
+      alert(`⚠️ એક્સપેન્સ #${i + 1}: હાર્ડવેર/ટૂલ્સ અથવા સ્ટોક એન્ટ્રી માટે બિલ/ફોટો અપલોડ કરવો ફરજિયાત છે!`);
       return;
     }
 
-    for (let i = 0; i < expenseRows.length; i++) {
-      const row = expenseRows[i];
-      const isHardware = row.expenseCategory.toLowerCase().includes('hardware') || row.expenseCategory.toLowerCase().includes('tool');
-      if ((isHardware || row.addToStock) && !row.billFile) {
-        alert(`⚠️ એક્સપેન્સ #${i + 1}: હાર્ડવેર/ટૂલ્સ અથવા સ્ટોક એન્ટ્રી માટે બિલ/ફોટો અપલોડ કરવો ફરજિયાત છે!`);
+    // 📦 સ્ટોક ઇનવર્ડ વેલિડેશન (મલ્ટીપલ આઇટમ્સ માટે)
+    if (row.addToStock) {
+      if (!row.stockItems || row.stockItems.length === 0) {
+        alert(`⚠️ એક્સપેન્સ #${i + 1}: કૃપા કરીને ઓછામાં ઓછું એક મટીરીયલ ઉમેરો!`);
         return;
       }
+
+      for (let s = 0; s < row.stockItems.length; s++) {
+        const item = row.stockItems[s];
+        
+        if (!item.selectedMaterial) {
+          alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): કૃપા કરીને મટીરીયલ પસંદ કરો!`);
+          return;
+        }
+
+        if (item.selectedMaterial === '__OTHER__' && !item.manualMaterialName?.trim()) {
+          alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): કૃપા કરીને મટીરિયલનું મેન્યુઅલ નામ દાખલ કરો!`);
+          return;
+        }
+
+        if (!item.qty || Number(item.qty) <= 0) {
+          alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): કૃપા કરીને સાચી સ્ટોક સંખ્યા (Qty) દાખલ કરો!`);
+          return;
+        }
+      }
     }
+  }
+
+  // આગળનું સેવ કરવાનું લોજિક (જેમ હતું તેમ જ)...
 
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Admin';
@@ -211,17 +303,25 @@ export default function PlantExpensesPage({ user }) {
           bill_url: row.billFile || null,
           submitted_by: currentLoggedUser
         });
+// ૨. સ્ટોક લેજર ઇનવર્ડ એન્ટ્રી (મલ્ટીપલ આઇટમ્સ લૂપ)
+if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
+  for (const subItem of row.stockItems) {
+    if (subItem.qty && Number(subItem.qty) > 0) {
+      const finalMaterialName = subItem.selectedMaterial === '__OTHER__' 
+        ? (subItem.manualMaterialName?.trim() || 'General Tool') 
+        : subItem.selectedMaterial;
 
-        if (row.addToStock && row.selectedMaterial && row.qty) {
-          stockLedgerRows.push({
-            date: expenseDate,
-            plant_name: selectedPlant,
-            material_name: row.selectedMaterial,
-            transaction_type: 'INWARD',
-            qty: Number(row.qty),
-            unit: 'Nos'
-          });
-        }
+      stockLedgerRows.push({
+        date: expenseDate,
+        plant_name: selectedPlant,
+        material_name: finalMaterialName,
+        transaction_type: 'INWARD',
+        qty: Number(subItem.qty),
+        unit: 'Nos'
+      });
+    }
+  }
+}
       }
 
       const { error: expErr } = await supabase.from('plant_expenses').insert(expenseInsertRows);
@@ -248,6 +348,7 @@ export default function PlantExpensesPage({ user }) {
           uploading: false,
           addToStock: false,
           selectedMaterial: '',
+          manualMaterialName: '',
           qty: ''
         }
       ]);
@@ -319,11 +420,11 @@ export default function PlantExpensesPage({ user }) {
               borderRadius: '10px', 
               border: '1px solid #cbd5e1', 
               fontSize: '13px', 
-              backgroundColor: '#f8fafc',
-              fontWeight: '600',
-              color: '#0f172a',
-              outline: 'none',
-              boxSizing: 'border-box'
+              backgroundColor: '#f8fafc', 
+              fontWeight: '600', 
+              color: '#0f172a', 
+              outline: 'none', 
+              boxSizing: 'border-box' 
             }} 
             required
           >
@@ -346,10 +447,10 @@ export default function PlantExpensesPage({ user }) {
               borderRadius: '10px', 
               border: '1px solid #cbd5e1', 
               fontSize: '12px', 
-              backgroundColor: '#f8fafc',
-              fontWeight: '600',
-              color: '#0f172a',
-              outline: 'none',
+              backgroundColor: '#f8fafc', 
+              fontWeight: '600', 
+              color: '#0f172a', 
+              outline: 'none', 
               boxSizing: 'border-box' 
             }} 
             required 
@@ -397,7 +498,7 @@ export default function PlantExpensesPage({ user }) {
                       <label style={{ fontSize: '10px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '2px' }}>Category *</label>
                       <select
                         value={row.expenseCategory}
-                        onChange={(e) => updateExpenseRow(index, 'expenseCategory', e.target.value)}
+                        onChange={(e) => handleCategoryChange(index, e.target.value)}
                         style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#f8fafc', fontWeight: 'bold', color: '#991b1b' }}
                         required
                       >
@@ -472,43 +573,45 @@ export default function PlantExpensesPage({ user }) {
                     </div>
                   </div>
 
-                  {/* [Add to Asset Stock?] Toggle & Fields */}
-                  <div style={{ backgroundColor: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '700', color: '#1e3a8a', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={row.addToStock} 
-                        onChange={(e) => updateExpenseRow(index, 'addToStock', e.target.checked)} 
-                      />
-                      <span>Add to Asset / Material Stock? (ઓટો-ઇનવર્ડ સ્ટોક જમા કરો)</span>
-                    </label>
-
-                    {row.addToStock && (
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                        <select
-                          value={row.selectedMaterial}
-                          onChange={(e) => updateExpenseRow(index, 'selectedMaterial', e.target.value)}
-                          style={{ flex: 2, padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
-                          required={row.addToStock}
-                        >
-                          <option value="">-- Select Material / Tool --</option>
-                          {availableMaterials.map((mat) => (
-                            <option key={mat.id} value={mat.name}>{mat.name}</option>
-                          ))}
-                        </select>
-
-                        <input
-                          type="number"
-                          min="1"
-                          placeholder="Qty"
-                          value={row.qty}
-                          onChange={(e) => updateExpenseRow(index, 'qty', e.target.value)}
-                          style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }}
-                          required={row.addToStock}
-                        />
-                      </div>
-                    )}
-                  </div>
+                {/* 🎯 હાર્ડવેર સ્ટોક બેજ */}
+{isHardware && (
+  <div style={{ 
+    backgroundColor: row.addToStock ? '#f0fdf4' : '#f8fafc', 
+    padding: '8px 10px', 
+    borderRadius: '8px', 
+    border: `1px solid ${row.addToStock ? '#86efac' : '#e2e8f0'}`, 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  }}>
+    <span style={{ fontSize: '11px', fontWeight: '700', color: row.addToStock ? '#15803d' : '#475569' }}>
+      {row.addToStock 
+        ? `📦 Stock Inward: ${
+            (row.stockItems || [])
+              .map(item => `${item.selectedMaterial === '__OTHER__' ? item.manualMaterialName : item.selectedMaterial} (${item.qty || 0})`)
+              .filter(Boolean)
+              .join(', ') || 'કોઈ આઇટમ નથી'
+          }` 
+        : '📦 Stock Inward: ઉમેરેલ નથી'}
+    </span>
+    <button
+      type="button"
+      onClick={() => setActiveModalRowIndex(index)}
+      style={{
+        backgroundColor: row.addToStock ? '#15803d' : '#2563eb',
+        color: '#fff',
+        border: 'none',
+        padding: '4px 8px',
+        borderRadius: '6px',
+        fontSize: '10px',
+        fontWeight: 'bold',
+        cursor: 'pointer'
+      }}
+    >
+      {row.addToStock ? 'Edit Stock' : '+ Add to Stock'}
+    </button>
+  </div>
+)}
 
                   {/* Bill No & Mandatory Attachment */}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -623,6 +726,189 @@ export default function PlantExpensesPage({ user }) {
         </div>
       </div>
 
+ {/* ================= 🎯 મલ્ટી-આઇટમ સ્ટોક ઇનવર્ડ પોપઅપ ================= */}
+{activeModalRowIndex !== null && (
+  <div style={{
+    position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
+    zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
+  }}>
+    <div style={{
+      width: '100%', maxWidth: '460px', maxHeight: '85vh', backgroundColor: '#ffffff',
+      borderRadius: '20px', padding: '20px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+      border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '14px',
+      overflow: 'hidden'
+    }}>
+      
+      {/* Header */}
+      <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#1e3a8a' }}>
+            📦 Plant Stock Inward Confirmation
+          </h4>
+          <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+            આ ટૂલ/હાર્ડવેરને પ્લાન્ટના સ્ટોકમાં જમા કરવું છે?
+          </p>
+        </div>
+        <button 
+          type="button" 
+          onClick={() => setActiveModalRowIndex(null)}
+          style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Buttons: Yes or No */}
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button
+          type="button"
+          onClick={() => {
+            const updated = [...expenseRows];
+            updated[activeModalRowIndex].addToStock = true;
+            if (!updated[activeModalRowIndex].stockItems || updated[activeModalRowIndex].stockItems.length === 0) {
+              updated[activeModalRowIndex].stockItems = [{ id: Date.now(), selectedMaterial: '', manualMaterialName: '', qty: '' }];
+            }
+            setExpenseRows(updated);
+          }}
+          style={{
+            flex: 1, padding: '10px', borderRadius: '10px', border: 'none',
+            backgroundColor: expenseRows[activeModalRowIndex]?.addToStock ? '#16a34a' : '#f1f5f9',
+            color: expenseRows[activeModalRowIndex]?.addToStock ? '#ffffff' : '#334155',
+            fontWeight: 'bold', fontSize: '12px', cursor: 'pointer'
+          }}
+        >
+          ✅ હા, સ્ટોકમાં લો
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const updated = [...expenseRows];
+            updated[activeModalRowIndex].addToStock = false;
+            updated[activeModalRowIndex].stockItems = [{ id: Date.now(), selectedMaterial: '', manualMaterialName: '', qty: '' }];
+            setExpenseRows(updated);
+            setActiveModalRowIndex(null);
+          }}
+          style={{
+            flex: 1, padding: '10px', borderRadius: '10px', border: 'none',
+            backgroundColor: !expenseRows[activeModalRowIndex]?.addToStock ? '#dc2626' : '#f1f5f9',
+            color: !expenseRows[activeModalRowIndex]?.addToStock ? '#ffffff' : '#334155',
+            fontWeight: 'bold', fontSize: '12px', cursor: 'pointer'
+          }}
+        >
+          ❌ માત્ર ખર્ચ રાખો
+        </button>
+      </div>
+
+      {/* Multi-Items Dynamic List */}
+      {expenseRows[activeModalRowIndex]?.addToStock && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', maxHeight: '350px', paddingRight: '2px' }}>
+          {(expenseRows[activeModalRowIndex]?.stockItems || []).map((subItem, sIdx) => (
+            <div key={subItem.id || sIdx} style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#1e3a8a' }}>Item #{sIdx + 1}</span>
+                {expenseRows[activeModalRowIndex]?.stockItems.length > 1 && (
+                  <button 
+                    type="button" 
+                    onClick={() => removeStockSubItem(activeModalRowIndex, sIdx)}
+                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                  >
+                    ✕ કાઢો
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ flex: 2 }}>
+                  <select
+                    value={subItem.selectedMaterial}
+                    onChange={(e) => updateStockSubItem(activeModalRowIndex, sIdx, 'selectedMaterial', e.target.value)}
+                    style={{ width: '100%', padding: '7px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
+                  >
+                    <option value="">-- મટીરીયલ પસંદ કરો --</option>
+                    {availableMaterials.map((mat) => (
+                      <option key={mat.id} value={mat.name}>{mat.name}</option>
+                    ))}
+                    <option value="__OTHER__">➕ Other / Manual Enter</option>
+                  </select>
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qty"
+                    value={subItem.qty}
+                    onChange={(e) => updateStockSubItem(activeModalRowIndex, sIdx, 'qty', e.target.value)}
+                    style={{ width: '100%', padding: '7px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              {subItem.selectedMaterial === '__OTHER__' && (
+                <div>
+                  <input
+                    type="text"
+                    placeholder="હાથેથી નામ લખો (દા.ત. પાવડા, તગારા)"
+                    value={subItem.manualMaterialName || ''}
+                    onChange={(e) => updateStockSubItem(activeModalRowIndex, sIdx, 'manualMaterialName', e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* ➕ Add Another Item Button */}
+          <button
+            type="button"
+            onClick={() => addStockSubItem(activeModalRowIndex)}
+            style={{
+              alignSelf: 'flex-start', background: 'none', border: '1px dashed #2563eb',
+              color: '#2563eb', padding: '6px 12px', borderRadius: '8px', fontSize: '11px',
+              fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
+            }}
+          >
+            <Plus size={13} /> + બીજી આઇટમ ઉમેરો (Add Item)
+          </button>
+        </div>
+      )}
+
+      {/* Done Button with Validation */}
+      <button
+        type="button"
+        onClick={() => {
+          const row = expenseRows[activeModalRowIndex];
+          if (row.addToStock) {
+            for (let s = 0; s < row.stockItems.length; s++) {
+              const item = row.stockItems[s];
+              if (!item.selectedMaterial) {
+                alert(`⚠️ Item #${s + 1}: મટીરીયલ પસંદ કરો!`);
+                return;
+              }
+              if (item.selectedMaterial === '__OTHER__' && !item.manualMaterialName?.trim()) {
+                alert(`⚠️ Item #${s + 1}: મેન્યુઅલ નામ લખો!`);
+                return;
+              }
+              if (!item.qty || Number(item.qty) <= 0) {
+                alert(`⚠️ Item #${s + 1}: સાચી સંખ્યા (Qty) લખો!`);
+                return;
+              }
+            }
+          }
+          setActiveModalRowIndex(null);
+        }}
+        style={{
+          width: '100%', padding: '10px', backgroundColor: '#1e3a8a', color: '#fff',
+          borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', marginTop: '4px'
+        }}
+      >
+        Done (ઓકે)
+      </button>
+
+    </div>
+  </div>
+)}
     </div>
   );
 }
