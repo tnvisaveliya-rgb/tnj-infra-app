@@ -175,8 +175,8 @@ const fetchDashboardData = async () => {
     setWorkingBalance(totalIncome - grandTotalExpense);
     setTodayExpense(todayExpSum);
 
-    // ==========================================
-    // ૪. 📦 RAW MATERIAL STOCK (પ્લાન્ટ સિલેક્શન મુજબ)
+   // ==========================================
+    // ૪. 📦 RAW MATERIAL & STORE STOCK (પ્લાન્ટ મુજબ)
     // ==========================================
     let matQuery = supabase.from('material_stock_ledger').select('*');
     if (selectedPlant && selectedPlant !== 'All') {
@@ -186,6 +186,27 @@ const fetchDashboardData = async () => {
 
     if (!matErr && matLedger) {
       const stockMap = {};
+
+      // 🔍 આઈટમ રો મટીરીયલ છે કે સ્ટોર આઈટમ તે નક્કી કરવા માટેનું લૉજિક
+      const checkIsRawMaterial = (name, unit) => {
+        const n = name.toLowerCase();
+        const u = (unit || '').toLowerCase();
+        
+        // જો યુનિટ Bags, KG, Ton, Brass, CFT, Cum હોય અથવા નામમાં નીચેના શબ્દો હોય તો Raw Material
+        const hasRawKeywords = 
+          n.includes('cement') ||
+          n.includes('steel') ||
+          n.includes('wire') ||
+          n.includes('mm') ||
+          n.includes('aggregate') ||
+          n.includes('sand') ||
+          n.includes('dust') ||
+          n.includes('flyash') ||
+          n.includes('rmc') ||
+          n.includes('tmt');
+
+        return hasRawKeywords;
+      };
 
       matLedger.forEach(item => {
         const rawName = (item.material_name || '').trim();
@@ -197,7 +218,13 @@ const fetchDashboardData = async () => {
         const unit = item.unit || 'Nos';
 
         if (!stockMap[key]) {
-          stockMap[key] = { name: rawName, stock: 0, unit };
+          stockMap[key] = { 
+            name: rawName, 
+            stock: 0, 
+            unit,
+            // 👈 અહીંયા જ કેટેગરી નક્કી થઈ જશે
+            category: checkIsRawMaterial(rawName, unit) ? 'raw' : 'store'
+          };
         }
 
         if (type === 'INWARD' || type === 'IN' || type.includes('INWARD')) {
@@ -254,11 +281,27 @@ const fetchDashboardData = async () => {
   }
 };
   return (
-    <div style={{ minHeight: '100vh', paddingBottom: '100px', backgroundColor: '#f8fafc', position: 'relative' }}>
-      
-      {/* ================= ૧. HOME TAB ================= */}
-      {activeTab === 'home' && (
-        <div style={{ maxWidth: '480px', margin: '0 auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+   <div style={{ 
+    width: '100%', 
+    maxWidth: '650px', 
+    minHeight: '100vh', 
+    paddingBottom: '100px', 
+    backgroundColor: '#f8fafc', 
+    position: 'relative',
+    boxSizing: 'border-box'
+  }}>
+  {/* ================= ૧. HOME TAB ================= */}
+{activeTab === 'home' && (
+  <div style={{ 
+    width: '100%', 
+    maxWidth: '650px',          /* 👈 PlantInwardPage જેટલી જ 650px */
+    margin: '0 auto', 
+    padding: '10px 0', 
+    boxSizing: 'border-box',
+    display: 'flex', 
+    flexDirection: 'column', 
+    gap: '12px' 
+  }}>
           
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', padding: '10px 14px', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -336,165 +379,121 @@ const fetchDashboardData = async () => {
     ))}
   </select>
 </div>
-{/* 📦 PREMIUM LIVE RAW MATERIAL STOCK CARD */}
-          <div style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '20px',
-            padding: '16px 18px',
-            border: '1.5px solid #dbeafe',
-            boxShadow: '0 4px 16px rgba(37, 99, 235, 0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px'
-          }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1.5px dashed #bfdbfe', paddingBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ 
-                  backgroundColor: '#dbeafe', 
-                  color: '#1d4ed8', 
-                  width: '38px', 
-                  height: '38px', 
-                  borderRadius: '12px', 
+{/* 📦 COMPACT LIVE INVENTORY SECTION (RAW + STORE SEPARATED) */}
+{(() => {
+  const rawItems = rawMaterialsStock.filter(i => i.category === 'raw');
+  const storeItems = rawMaterialsStock.filter(i => i.category === 'store');
+
+  return (
+    <div style={{
+      backgroundColor: '#ffffff',
+      borderRadius: '16px',
+      padding: '6px 8px',
+      border: '1px solid #e2e8f0',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px'
+    }}>
+      {/* Top Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Layers size={16} color="#2563eb" />
+          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+            Live Plant Inventory
+          </span>
+        </div>
+        <span style={{ fontSize: '10px', fontWeight: '800', color: '#16a34a', backgroundColor: '#f0fdf4', padding: '2px 6px', borderRadius: '6px' }}>
+          ● Live Sync
+        </span>
+      </div>
+
+      {/* ================= ૧. RAW MATERIALS SECTION ================= */}
+      <div>
+        <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+          🧱 Raw Materials ({rawItems.length})
+        </span>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+          {rawItems.length === 0 ? (
+            <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', gridColumn: 'span 2' }}>No raw material stock</span>
+          ) : (
+            rawItems.map((item, idx) => (
+              <div 
+                key={idx} 
+                style={{ 
+                  backgroundColor: '#f8fafc', 
+                  border: '1px solid #e2e8f0', 
+                  borderRadius: '10px', 
+                  padding: '6px 8px', 
                   display: 'flex', 
                   alignItems: 'center', 
-                  justifyContent: 'center' 
-                }}>
-                  <Layers size={20} strokeWidth={2.5} />
-                </div>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '900', color: '#1e3a8a', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
-                    LIVE RAW MATERIAL STOCK
-                  </h4>
-                  <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: '600' }}>Real-time inventory level</span>
+                  justifyContent: 'space-between' 
+                }}
+              >
+                <span style={{ fontSize: '11px', fontWeight: '700', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '65%' }}>
+                  {item.name}
+                </span>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock <= 0 ? '#dc2626' : '#0f172a' }}>
+                    {item.stock.toLocaleString('en-IN')}
+                  </span>
+                  <span style={{ fontSize: '9px', fontWeight: '700', color: '#64748b', marginLeft: '3px' }}>
+                    {item.unit}
+                  </span>
                 </div>
               </div>
-              <span style={{ 
-                fontSize: '11px', 
-                fontWeight: '800', 
-                backgroundColor: '#dcfce7', 
-                color: '#15803d', 
-                padding: '4px 10px', 
-                borderRadius: '20px', 
-                border: '1px solid #bbf7d0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }}></span>
-                Live
-              </span>
-            </div>
-    
+            ))
+          )}
+        </div>
+      </div>
 
-            {/* List / Modern Row View */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {rawMaterialsStock.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>
-                  No Raw Material Stock Available
+      {/* Divider */}
+      <div style={{ borderTop: '1px dashed #e2e8f0', margin: '2px 0' }} />
+
+      {/* ================= ૨. STORE & TOOLS SECTION ================= */}
+      <div>
+        <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+          🛠️ Store & Tools ({storeItems.length})
+        </span>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+          {storeItems.length === 0 ? (
+            <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', gridColumn: 'span 2' }}>No store items found</span>
+          ) : (
+            storeItems.map((item, idx) => (
+              <div 
+                key={idx} 
+                style={{ 
+                  backgroundColor: '#fffbeb', 
+                  border: '1px solid #fef3c7', 
+                  borderRadius: '10px', 
+                  padding: '6px 8px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between' 
+                }}
+              >
+                <span style={{ fontSize: '11px', fontWeight: '700', color: '#92400e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '65%' }}>
+                  {item.name}
+                </span>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock <= 0 ? '#dc2626' : '#78350f' }}>
+                    {item.stock.toLocaleString('en-IN')}
+                  </span>
+                  <span style={{ fontSize: '9px', fontWeight: '700', color: '#b45309', marginLeft: '3px' }}>
+                    {item.unit}
+                  </span>
                 </div>
-              ) : (
-                rawMaterialsStock.map((item, index) => {
-                  const isLow = item.stock <= 0;
-                  const nameLower = (item.name || '').toLowerCase();
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
-                  // સ્માર્ટ કલરિંગ: મટીરિયલ મુજબ સોફ્ટ કલર્સ
-                  let badgeBg = '#eff6ff';
-                  let badgeColor = '#1d4ed8';
-                  let iconEmoji = '🧱';
-
-                  if (nameLower.includes('cement')) {
-                    badgeBg = '#f1f5f9';
-                    badgeColor = '#334155';
-                    iconEmoji = '🏢';
-                  } else if (nameLower.includes('steel') || nameLower.includes('tmt') || nameLower.includes('wire')) {
-                    badgeBg = '#eff6ff';
-                    badgeColor = '#2563eb';
-                    iconEmoji = '🔩';
-                  } else if (nameLower.includes('sand') || nameLower.includes('dust')) {
-                    badgeBg = '#fffbeb';
-                    badgeColor = '#b45309';
-                    iconEmoji = '⏳';
-                  } else if (nameLower.includes('mm') || nameLower.includes('aggregate')) {
-                    badgeBg = '#f5f3ff';
-                    badgeColor = '#7c3aed';
-                    iconEmoji = '🪨';
-                  }
-
-                  return (
-                    <div
-                      key={index}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '10px 12px',
-                        backgroundColor: '#f8fafc',
-                        borderRadius: '14px',
-                        border: '1px solid #e2e8f0',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      {/* Left: Material Name + Emoji Icon */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '10px',
-                          backgroundColor: badgeBg,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '15px'
-                        }}>
-                          {iconEmoji}
-                        </div>
-                        <div>
-                          <h5 style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>
-                            {item.name}
-                          </h5>
-                          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600' }}>
-                            Item Code: #{index + 101}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Right: Quantity + UOM Pill */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{
-                            fontSize: '15px',
-                            fontWeight: '900',
-                            color: isLow ? '#dc2626' : '#0f172a',
-                            letterSpacing: '-0.3px',
-                            display: 'block'
-                          }}>
-                            {item.stock.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-
-                        {/* UOM Badge */}
-                        <span style={{
-                          fontSize: '10px',
-                          fontWeight: '800',
-                          backgroundColor: isLow ? '#fee2e2' : '#dbeafe',
-                          color: isLow ? '#b91c1c' : '#1d4ed8',
-                          padding: '4px 8px',
-                          borderRadius: '8px',
-                          minWidth: '38px',
-                          textAlign: 'center',
-                          textTransform: 'uppercase'
-                        }}>
-                          {item.unit}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
+    </div>
+  );
+})()}
           <div style={{ backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -741,8 +740,8 @@ const fetchDashboardData = async () => {
       <div style={{ 
         position: 'fixed', bottom: '10px', left: '50%', transform: 'translateX(-50%)', 
         width: '92%', maxWidth: '420px', 
-        height: '64px',
-        backgroundColor: '#ffffff', 
+        height: '54px',
+        backgroundColor: 'rgba(255, 255, 255, 0.9)', 
         display: 'flex', justifyContent: 'space-around', alignItems: 'center', 
         borderRadius: '35px', 
         border: '1px solid #e2e8f0', 
@@ -750,15 +749,80 @@ const fetchDashboardData = async () => {
         zIndex: 9999,
         padding: '0 8px'
       }}>
-        <div onClick={() => setActiveTab('home')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'home' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <Home size={19} />
-          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'home' ? '800' : '600' }}>Home</span>
-        </div>
-        
-        <div onClick={() => setActiveTab('dpr')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'dpr' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <ClipboardEdit size={19} />
-          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'dpr' ? '800' : '600' }}>DPR</span>
-        </div>
+       <div 
+  onClick={() => setActiveTab('home')} 
+  style={{ 
+    textAlign: 'center', 
+    cursor: 'pointer', 
+    color: activeTab === 'home' ? '#2563eb' : '#64748b', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    flex: 1 
+  }}
+>
+  {/* આઇકોન ફરતે બ્લૂ રાઉન્ડ બેકગ્રાઉન્ડ કન્ટેનર */}
+  <div 
+    style={{
+      backgroundColor: activeTab === 'home' ? '#dbeafe' : 'transparent', // ક્લિક હોય ત્યારે આછો બ્લૂ બેકગ્રાઉન્ડ
+      padding: '4px 16px', // આઇકોન ની ફરતે જગ્યા (રાઉન્ડ પિલ બનાવવા)
+      borderRadius: '9999px', // ગોળ/કેપ્સ્યુલ શેપ માટે
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease-in-out' // સ્મૂથ એનિમેશન
+    }}
+  >
+    <Home size={19} />
+  </div>
+
+  <span 
+    style={{ 
+      fontSize: '9px', 
+      marginTop: '3px', 
+      fontWeight: activeTab === 'home' ? '800' : '600' 
+    }}
+  >
+    Home
+  </span>
+</div>
+      <div 
+  onClick={() => setActiveTab('dpr')} 
+  style={{ 
+    textAlign: 'center', 
+    cursor: 'pointer', 
+    color: activeTab === 'dpr' ? '#2563eb' : '#64748b', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    flex: 1 
+  }}
+>
+  {/* DPR માટે રાઉન્ડ બેકગ્રાઉન્ડ */}
+  <div 
+    style={{
+      backgroundColor: activeTab === 'dpr' ? '#dbeafe' : 'transparent',
+      padding: '4px 16px',
+      borderRadius: '9999px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'all 0.2s ease-in-out'
+    }}
+  >
+    <ClipboardEdit size={19} />
+  </div>
+
+  <span 
+    style={{ 
+      fontSize: '9px', 
+      marginTop: '3px', 
+      fontWeight: activeTab === 'dpr' ? '800' : '600' 
+    }}
+  >
+    DPR
+  </span>
+</div>
 
         {/* 🌟 UNIQUE FLOATING BLUE CENTER BUTTON */}
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, position: 'relative' }}>
@@ -779,16 +843,55 @@ const fetchDashboardData = async () => {
           </div>
         </div>
 {/* 💰 Expense Tab Button In Navigation Bar (Opens Expense/Income Popup) */}
-        <div onClick={() => setIsExpensePopupOpen(true)} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'expense' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <IndianRupee size={19} />
-          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'expense' ? '800' : '600' }}>Expense</span>
-        </div>
-        
-        <div onClick={() => setActiveTab('attendance')} style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'attendance' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <UserCheck size={19} />
-          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'attendance' ? '800' : '600' }}>Attendance</span>
-        </div>
-      </div>
+        <div 
+    onClick={() => setIsExpensePopupOpen(true)} 
+    style={{ 
+      textAlign: 'center', 
+      cursor: 'pointer', 
+      color: isExpensePopupOpen ? '#2563eb' : '#64748b', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      flex: 1 
+    }}
+  >
+    {/* પોપઅપ ઓપન હશે ત્યારે બ્લૂ રાઉન્ડ દેખાશે */}
+    <div 
+      style={{
+        backgroundColor: isExpensePopupOpen ? '#dbeafe' : 'transparent',
+        padding: '4px 16px',
+        borderRadius: '9999px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.2s ease-in-out'
+      }}
+    >
+      <IndianRupee size={19} />
+    </div>
+
+    <span 
+      style={{ 
+        fontSize: '9px', 
+        marginTop: '3px', 
+        fontWeight: isExpensePopupOpen ? '800' : '600' 
+      }}
+    >
+      Expense
+    </span>
+  </div>
+       {/* Attendance Tab */}
+  <div 
+    onClick={() => setActiveTab('attendance')} 
+    style={{ textAlign: 'center', cursor: 'pointer', color: activeTab === 'attendance' ? '#2563eb' : '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}
+  >
+    <div style={{ backgroundColor: activeTab === 'attendance' ? '#dbeafe' : 'transparent', padding: '4px 16px', borderRadius: '9999px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease-in-out' }}>
+      <UserCheck size={19} />
+    </div>
+    <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'attendance' ? '800' : '600' }}>Attendance</span>
+  </div>
+
+</div>
 
     </div>
   );

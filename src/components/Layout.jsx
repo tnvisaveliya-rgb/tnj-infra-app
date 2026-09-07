@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { LayoutDashboard, Building2, LogOut, Menu, X, ChevronRight, Receipt, FileText } from 'lucide-react'
+import { X, LogOut, Menu, ChevronRight, Globe, FileText, LayoutDashboard, Building2, FileSpreadsheet, Receipt } from 'lucide-react';
 
 function Layout({ children }) {
   const location = useLocation()
@@ -68,168 +68,306 @@ function Layout({ children }) {
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc', position: 'relative' }}>
-      
-      {/* Mobile Backdrop */}
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.7)',
-            zIndex: 998,
-          }}
-        />
-      )}
-
-      {/* Sidebar */}
-      <aside
+  <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc', position: 'relative' }}>
+    
+    {/* Mobile Backdrop */}
+    {sidebarOpen && (
+      <div
+        onClick={() => setSidebarOpen(false)}
         style={{
           position: 'fixed',
-          top: 0,
-          bottom: 75,
-          borderBottomRightRadius: '14px',
-          borderTopRightRadius: '14px',
-          left: 0,
-          width: '280px',
-          backgroundColor: '#0f172a',
-          color: '#fff',
-          zIndex: 999,
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.3s ease-in-out',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          zIndex: 998,
         }}
-        className="lg:translate-x-0"
-      >
-        <div>
-          {/* Logo Header */}
-          <div style={{ height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid #1e293b' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ width: '36px', height: '36px', backgroundColor: '#2563eb', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                T&J
-              </div>
-              <div>
-                <h1 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0 }}>T&J Infra</h1>
-                <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>Management System</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
-              className="lg:hidden"
-            >
-              <X size={20} />
-            </button>
-          </div>
+      />
+    )}
 
-          {/* Navigation Links */}
-          <nav style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = location.pathname === item.path
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setSidebarOpen(false)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    textDecoration: 'none',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    backgroundColor: isActive ? '#2563eb' : 'transparent',
-                    color: isActive ? '#fff' : '#cbd5e1',
-                  }}
-                >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
-                </Link>
-              )
-            })}
-          </nav>
+   {/* ================= PREMIUM MODERN ROUNDED SIDEBAR ================= */}
+<aside
+  style={{
+    position: 'fixed',
+    top: '12px',
+    left: '12px',
+    bottom: '72px', /* 👈 બોટમ બારથી ઉપર રહેશે જેથી સાઇન આઉટ ક્યારેય નહીં દબાય */
+    width: '280px',
+    background: 'linear-gradient(165deg, #0b1329 0%, #111e38 50%, #0d172b 100%)',
+    borderRadius: '24px', /* 👈 સ્મૂધ મોર્ડન રાઉન્ડેડ શેપ */
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    color: '#ffffff',
+    zIndex: 99999,
+    boxShadow: '0 20px 45px -10px rgba(2, 6, 23, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+    transform: sidebarOpen ? 'translateX(0)' : 'translateX(-120%)',
+    transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    padding: '16px',
+    boxSizing: 'border-box',
+    overflow: 'hidden'
+  }}
+  className="lg:translate-x-0"
+>
+  {/* 🌟 TOP HALF: COMPANY LOGO & NAVIGATION */}
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+    
+    {/* COMPANY BRANDING HEADER */}
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: '14px',
+      borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* કંપનીનો ઓરિજિનલ લોગો */}
+        <div style={{
+          width: '42px',
+          height: '42px',
+          borderRadius: '14px',
+          backgroundColor: '#ffffff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          overflow: 'hidden',
+          padding: '4px'
+        }}>
+          <img 
+            src="/logo.png" 
+            alt="T&J Infra Logo" 
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            onError={(e) => {
+              // જો ઇમેજ પાથ ન મળે તો ફોલબેક બેજ
+              e.target.style.display = 'none';
+              e.target.parentNode.innerText = 'T&J';
+              e.target.parentNode.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+              e.target.parentNode.style.color = '#ffffff';
+              e.target.parentNode.style.fontWeight = '900';
+            }}
+          />
         </div>
 
-        {/* User & Logout Footer */}
-        <div style={{ padding: '16px', borderTop: '1px solid #1e293b', backgroundColor: 'rgba(15, 23, 42, 0.8)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px', backgroundColor: '#1e293b', borderRadius: '10px', marginBottom: '12px' }}>
-            <div style={{ width: '32px', height: '32px', backgroundColor: '#3b82f6', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>
-              {userEmail?.charAt(0).toUpperCase() || 'U'}
-            </div>
-            <div style={{ overflow: 'hidden' }}>
-              <p style={{ fontSize: '12px', fontWeight: 'bold', margin: 0, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {userEmail || 'User'}
-              </p>
-              <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0 }}>
-                {userEmail === 'infra.tnj@gmail.com' ? 'Administrator' : 'User'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
+        <div>
+          <h2 style={{ margin: 0, fontSize: '15px', fontWeight: '900', letterSpacing: '0.4px', color: '#ffffff' }}>
+            T&J INFRA
+          </h2>
+          <span style={{ fontSize: '10px', color: '#38bdf8', fontWeight: '700', letterSpacing: '0.6px', textTransform: 'uppercase' }}>
+            Enterprise Suite
+          </span>
+        </div>
+      </div>
+
+      {/* Close Button (Mobile) */}
+      <button
+        onClick={() => setSidebarOpen(false)}
+        style={{
+          background: 'rgba(255, 255, 255, 0.06)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          color: '#94a3b8',
+          cursor: 'pointer',
+          width: '32px',
+          height: '32px',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+        className="lg:hidden"
+      >
+        <X size={16} />
+      </button>
+    </div>
+
+    {/* NAVIGATION LINKS */}
+    <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {navItems.map((item) => {
+        const Icon = item.icon;
+        const isActive = location.pathname === item.path;
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            onClick={() => setSidebarOpen(false)}
             style={{
-              width: '100%',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              padding: '10px',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              color: '#f87171',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              borderRadius: '10px',
-              fontWeight: '600',
-              fontSize: '12px',
-              cursor: 'pointer',
+              gap: '12px',
+              padding: '10px 14px',
+              borderRadius: '14px',
+              textDecoration: 'none',
+              fontSize: '13px',
+              fontWeight: isActive ? '800' : '600',
+              backgroundColor: isActive ? '#2563eb' : 'transparent',
+              color: isActive ? '#ffffff' : '#94a3b8',
+              boxShadow: isActive ? '0 6px 18px rgba(37, 99, 235, 0.45)' : 'none',
+              transition: 'all 0.2s ease',
+              border: isActive ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid transparent'
             }}
           >
-            <LogOut size={16} />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </aside>
+            <Icon size={17} color={isActive ? '#ffffff' : '#64748b'} strokeWidth={isActive ? 2.5 : 2} />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  </div>
 
-    {/* Main Content */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflowY: 'auto', position: 'relative' }} className="lg:pl-[280px]">
-        {/* Header */}
-        <header style={{ height: '64px', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button
-              onClick={() => setSidebarOpen(true)}
-              style={{ background: '#f1f5f9', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-              className="lg:hidden"
-            >
-              <Menu size={20} />
-            </button>
-            <div style={{ display: 'none', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: '#64748b' }} className="lg:flex">
-              <span>T&J Infra</span>
-              <ChevronRight size={14} /> 
-              <span style={{ color: '#0f172a' }}>
-                {navItems.find(item => item.path === location.pathname)?.label || 'Dashboard'}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ fontSize: '12px', color: '#64748b' }}>
-            Welcome, <strong style={{ color: '#0f172a' }}>{userEmail?.split('@')[0] || 'User'}</strong>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <div style={{ flex: 1, padding: '12px 16px', maxWidth: '1200px', width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
-          {children}
-        </div>
-     
-      </main>
+  {/* 🔻 BOTTOM HALF: COMPACT PROFILE, LANGUAGE & LOGOUT */}
+  <div style={{
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    paddingTop: '12px',
+    borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+  }}>
+    
+    {/* Logged User Info */}
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '8px 10px',
+      borderRadius: '14px',
+      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+      border: '1px solid rgba(255, 255, 255, 0.06)'
+    }}>
+      <div style={{
+        width: '32px',
+        height: '32px',
+        borderRadius: '10px',
+        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+        color: '#ffffff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: '800',
+        fontSize: '12px',
+        flexShrink: 0
+      }}>
+        {userEmail?.charAt(0).toUpperCase() || 'U'}
+      </div>
+      <div style={{ overflow: 'hidden' }}>
+        <p style={{ fontSize: '11px', fontWeight: '800', margin: 0, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {userEmail || 'infra.tnj@gmail.com'}
+        </p>
+        <span style={{ fontSize: '9px', color: '#38bdf8', fontWeight: '700', textTransform: 'uppercase' }}>
+          Administrator
+        </span>
+      </div>
     </div>
-  )
+
+    {/* Language Toggle */}
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '6px 10px',
+      borderRadius: '12px',
+      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+      border: '1px solid rgba(255, 255, 255, 0.06)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#94a3b8' }}>
+        <Globe size={14} color="#38bdf8" />
+        <span style={{ fontSize: '11px', fontWeight: '700' }}>Lang</span>
+      </div>
+      <div style={{ display: 'flex', backgroundColor: '#060b16', borderRadius: '8px', padding: '2px' }}>
+        <button
+          type="button"
+          style={{
+            background: 'transparent',
+            color: '#64748b',
+            border: 'none',
+            padding: '3px 7px',
+            borderRadius: '6px',
+            fontSize: '10px',
+            fontWeight: '700',
+            cursor: 'pointer'
+          }}
+        >
+          EN
+        </button>
+        <button
+          type="button"
+          style={{
+            background: '#2563eb',
+            color: '#ffffff',
+            border: 'none',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '10px',
+            fontWeight: '800',
+            cursor: 'pointer'
+          }}
+        >
+          ગુજરાતી
+        </button>
+      </div>
+    </div>
+
+    {/* Sign Out Button (ક્યારેય નીચે નહીં છુપાય) */}
+    <button
+      onClick={handleLogout}
+      style={{
+        width: '100%',
+        padding: '9px',
+        borderRadius: '12px',
+        backgroundColor: 'rgba(239, 68, 68, 0.12)',
+        color: '#f87171',
+        border: '1px solid rgba(239, 68, 68, 0.25)',
+        fontSize: '12px',
+        fontWeight: '800',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px'
+      }}
+    >
+      <LogOut size={14} />
+      <span>Sign Out</span>
+    </button>
+
+  </div>
+</aside>
+
+    {/* Main Content Area */}
+    <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflowY: 'auto', position: 'relative' }} className="lg:pl-[280px]">
+      
+      {/* Top Sticky Header */}
+      <header style={{ height: '64px', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button
+            onClick={() => setSidebarOpen(true)}
+            style={{ background: '#f1f5f9', border: 'none', padding: '8px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            className="lg:hidden"
+          >
+            <Menu size={20} />
+          </button>
+          <div style={{ display: 'none', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '600', color: '#64748b' }} className="lg:flex">
+            <span>T&J Infra</span>
+            <ChevronRight size={14} /> 
+            <span style={{ color: '#0f172a' }}>
+              {navItems.find(item => item.path === location.pathname)?.label || 'Dashboard'}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#64748b' }}>
+          Welcome, <strong style={{ color: '#0f172a' }}>{userEmail?.split('@')[0] || 'User'}</strong>
+        </div>
+      </header>
+
+      {/* Page Content */}
+      <div style={{ flex: 1, padding: '12px 16px', maxWidth: '1200px', width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+        {children}
+      </div>
+    
+    </main>
+  </div>
+);
 }
 
 export default Layout
