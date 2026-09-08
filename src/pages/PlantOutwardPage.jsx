@@ -11,6 +11,7 @@ export default function PlantOutwardPage({ user }) {
   const [sites, setSites] = useState([]);
   const [products, setProducts] = useState([]);
   
+  
   const [loading, setLoading] = useState(false);
   const [transporters, setTransporters] = useState([]);
 const [materials, setMaterials] = useState([]);
@@ -963,30 +964,50 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                   </div>
           {/* 📦 Material Items */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {source.items.map((item, iIndex) => {
-              
-              const isFinishedProduct = item.category === 'Finished Product';
-              const isPanel = item.material && item.material.toLowerCase().includes('panel');
-              const isColumn = item.material && item.material.toLowerCase().includes('column');
+           {source.items.map((item, iIndex) => {
+  const currentCategory = item.category || 'Finished Product';
+  const isFinishedProduct = currentCategory === 'Finished Product';
+  
+  // 1. ફિલ્ટર મટીરિયલ્સ
+  const filteredMaterials = materials.filter(m => {
+    if (!m.item_type) return true;
+    return m.item_type.toLowerCase().trim() === currentCategory.toLowerCase().trim() ||
+           m.item_type.toLowerCase().includes(currentCategory.toLowerCase().split(' ')[0]);
+  });
 
+  // 2. ચેક કરો કે આઈટમ લિસ્ટમાં છે કે નહીં
+  const isMaterialInList = isFinishedProduct 
+    ? Array.from(new Map(products.map(p => [p.name ? p.name.trim().toLowerCase() : '', p.name ? p.name.trim() : ''])).values())
+        .map(n => n.trim().toLowerCase())
+        .includes((item.material || '').trim().toLowerCase())
+    : filteredMaterials.some(m => m.name && m.name.trim().toLowerCase() === (item.material || '').trim().toLowerCase());
+
+  // 3. મેન્યુઅલ/કસ્ટમ નક્કી કરો (isManual ફ્લેગ અથવા OTHER_MANUAL પરથી)
+  const isCustomItem = Boolean(item.isManual) || item.material === 'OTHER_MANUAL' || (!isMaterialInList && item.material !== '');
+
+  // 🎯 4. Finished Product + લિસ્ટમાંથી હોવું જોઈએ (Manual ન હોવું જોઈએ) + Panel/Column હોવું જોઈએ
+  const isPanel = isFinishedProduct && !isCustomItem && item.material && item.material.toLowerCase().includes('panel');
+  const isColumn = isFinishedProduct && !isCustomItem && item.material && item.material.toLowerCase().includes('column');
               return (
                 <div key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                   
                   {/* Category Select */}
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <select 
-                      value={item.category || 'Finished Product'} 
-                      onChange={(e) => {
-                        updateOutwardItem(sIndex, iIndex, 'category', e.target.value);
-                        updateOutwardItem(sIndex, iIndex, 'material', ''); 
-                      }} 
-                      style={{ flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff7ed', fontWeight: 'bold', color: '#c2410c' }}
-                    >
-                      <option value="Finished Product">1. Finished Product</option>
-                      <option value="Raw Material">2. Raw Material</option>
-                      <option value="Consumable Item">3. Consumable Item</option>
-                      <option value="Tools and Hardware">4. Tools and Hardware</option>
-                    </select>
+                   {/* Category Select */}
+<select 
+  value={item.category || 'Finished Product'} 
+  onChange={(e) => {
+    updateOutwardItem(sIndex, iIndex, 'category', e.target.value);
+    updateOutwardItem(sIndex, iIndex, 'material', ''); 
+  }} 
+  style={{ flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff7ed', fontWeight: 'bold', color: '#c2410c' }}
+>
+  <option value="Finished Product">1. Finished Product</option>
+  <option value="Raw Material">2. Raw Material</option>
+  <option value="Consumable Item">3. Consumable Item</option>
+  <option value="Tools and Hardware">4. Tools and Hardware</option>
+  <option value="Asset">5. Asset</option>
+</select>
 
                     {source.items.length > 1 && (
                       <button type="button" onClick={() => removeOutwardItem(sIndex, iIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}>
@@ -1244,9 +1265,11 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
               if (val === 'OTHER_TRANSPORTER_MANUAL') {
                 updateOutwardSource(sIndex, 'transporter', 'OTHER_TRANSPORTER_MANUAL');
                 updateOutwardSource(sIndex, 'vehicleNumber', ''); 
+                updateOutwardSource(sIndex, 'isCustomVehicle', false);
               } else {
                 updateOutwardSource(sIndex, 'transporter', val);
                 updateOutwardSource(sIndex, 'vehicleNumber', ''); 
+                updateOutwardSource(sIndex, 'isCustomVehicle', false);
               }
             }} 
             style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
@@ -1259,21 +1282,46 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
           </select>
         </div>
 
-        {/* 2. Vehicle Number Box */}
+        {/* 2. Vehicle Number Box (Dropdown + Manual Support) */}
         <div style={{ flex: 1 }}>
-          {isCustomTransporter ? (
-            <input 
-              type="text" 
-              placeholder="Type vehicle number manually..." 
-              value={source.vehicleNumber || ''} 
-              onChange={(e) => updateOutwardSource(sIndex, 'vehicleNumber', e.target.value)} 
-              style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #2563eb', fontSize: '12px', backgroundColor: '#eff6ff', boxSizing: 'border-box' }} 
-            />
+          {isCustomTransporter || source.isCustomVehicle ? (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <input 
+                type="text" 
+                placeholder="Type vehicle number manually..." 
+                value={source.vehicleNumber || ''} 
+                onChange={(e) => updateOutwardSource(sIndex, 'vehicleNumber', e.target.value)} 
+                autoFocus
+                style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #2563eb', fontSize: '12px', backgroundColor: '#eff6ff', boxSizing: 'border-box' }} 
+              />
+              {!isCustomTransporter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateOutwardSource(sIndex, 'isCustomVehicle', false);
+                    updateOutwardSource(sIndex, 'vehicleNumber', '');
+                  }}
+                  title="Back to dropdown"
+                  style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: '6px', padding: '0 8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+                >
+                  ↩
+                </button>
+              )}
+            </div>
           ) : (
             <select 
               value={source.vehicleNumber || ''} 
               onClick={handleDropdownClick}
-              onChange={(e) => updateOutwardSource(sIndex, 'vehicleNumber', e.target.value)} 
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'OTHER_VEHICLE_MANUAL') {
+                  updateOutwardSource(sIndex, 'isCustomVehicle', true);
+                  updateOutwardSource(sIndex, 'vehicleNumber', '');
+                } else {
+                  updateOutwardSource(sIndex, 'isCustomVehicle', false);
+                  updateOutwardSource(sIndex, 'vehicleNumber', val);
+                }
+              }} 
               style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
             >
               <option value="">-- Select Vehicle Number --</option>
@@ -1290,13 +1338,14 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                   <option key={`veh-${vIdx}`} value={vehNo}>{vehNo}</option>
                 ))
               }
+              <option value="OTHER_VEHICLE_MANUAL" style={{ fontWeight: 'bold', color: '#2563eb' }}>➕ Other (Type Manually...)</option>
             </select>
           )}
         </div>
 
       </div>
 
-      {/* 🎯 Custom Transporter Name Input Box */}
+      {/* 3. Custom Transporter Input Box */}
       {isCustomTransporter && (
         <input 
           type="text" 

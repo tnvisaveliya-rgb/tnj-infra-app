@@ -407,18 +407,17 @@ export default function IssueReturnPage({ user }) {
       setLoading(false);
     }
   };
-
-  // Handle Split Tool Return (Good સ્ટોકમાં જશે, Scrap/Repair અલગ નોંધાશે)
+// Handle Split Tool Return (Good સ્ટોકમાં, Repair અલગ ટ્રેકિંગમાં, Scrap હિસ્ટ્રીમાં)
   const handleConfirmReturn = async (e) => {
     e.preventDefault();
     if (!selectedReturnTx) return;
 
-    const totalEntered = 
-      Number(returnQtys.good || 0) + 
-      Number(returnQtys.repair || 0) + 
-      Number(returnQtys.scrap || 0) + 
-      Number(returnQtys.lost || 0);
+    const goodQty = Number(returnQtys.good || 0);
+    const repairQty = Number(returnQtys.repair || 0);
+    const scrapQty = Number(returnQtys.scrap || 0);
+    const lostQty = Number(returnQtys.lost || 0);
 
+    const totalEntered = goodQty + repairQty + scrapQty + lostQty;
     const totalIssued = Number(selectedReturnTx.quantity);
 
     if (totalEntered === 0) {
@@ -435,31 +434,65 @@ export default function IssueReturnPage({ user }) {
     try {
       const today = new Date().toISOString().split('T')[0];
 
-      // કન્ડિશન સમરી બનાવો (દા.ત. "1 Good, 2 Scrap")
+      // કન્ડિશન સમરી (દા.ત. "1 Good, 2 Needs Repair")
       const summaryParts = [];
-      if (returnQtys.good > 0) summaryParts.push(`${returnQtys.good} Good`);
-      if (returnQtys.repair > 0) summaryParts.push(`${returnQtys.repair} Needs Repair`);
-      if (returnQtys.scrap > 0) summaryParts.push(`${returnQtys.scrap} Scrap`);
-      if (returnQtys.lost > 0) summaryParts.push(`${returnQtys.lost} Lost`);
+      if (goodQty > 0) summaryParts.push(`${goodQty} Good`);
+      if (repairQty > 0) summaryParts.push(`${repairQty} Needs Repair`);
+      if (scrapQty > 0) summaryParts.push(`${scrapQty} Scrap`);
+      if (lostQty > 0) summaryParts.push(`${lostQty} Lost`);
       const conditionSummary = summaryParts.join(', ');
 
-      // ૧. Tool Transaction Update કરો
-      const { error: updateError } = await supabase
-        .from('plant_tool_transactions')
-        .update({
-          return_date: today,
-          return_condition: conditionSummary,
-          status: totalEntered === totalIssued ? 'RETURNED' : 'PARTIALLY_RETURNED',
-          remarks: returnRemarks 
-            ? `${selectedReturnTx.remarks || ''} | Return: ${conditionSummary} (${returnRemarks})`
-            : `${selectedReturnTx.remarks || ''} | Return: ${conditionSummary}`
-        })
-        .eq('id', selectedReturnTx.id);
+      const remainingPendingQty = totalIssued - totalEntered;
 
-      if (updateError) throw updateError;
+      // ૧. મૂળ Transaction Update કરો
+      if (remainingPendingQty > 0) {
+        // 👉 જો અમુક સામાન હજુ કારીગર પાસે બાકી હોય તો જૂની રો ની Qty ઘટાડી દો
+        const { error: updateOldErr } = await supabase
+          .from('plant_tool_transactions')
+          .update({
+            quantity: remainingPendingQty,
+            remarks: `${selectedReturnTx.remarks || ''} | Partially returned: ${conditionSummary}`
+          })
+          .eq('id', selectedReturnTx.id);
 
-     // 🎯 ફક્ત જે 'Good' હોય તેટલો જ સ્ટોક INWARD (પ્લસ) થશે
-      if (Number(returnQtys.good) > 0) {
+        if (updateOldErr) throw updateOldErr;
+
+        // જમા થયેલા ભાગની અલગ RETURNED એન્ટ્રી હિસ્ટ્રી માટે બનાવો
+        await supabase
+          .from('plant_tool_transactions')
+          .insert([{
+            plant_name: selectedReturnTx.plant_name,
+            material_name: selectedReturnTx.material_name,
+            category: selectedReturnTx.category,
+            issued_to: selectedReturnTx.issued_to,
+            quantity: totalEntered,
+            unit: selectedReturnTx.unit,
+            issue_date: selectedReturnTx.issue_date,
+            return_date: today,
+            return_condition: conditionSummary,
+            status: 'RETURNED',
+            remarks: returnRemarks ? `Return: ${conditionSummary} (${returnRemarks})` : `Return: ${conditionSummary}`
+          }]);
+
+      } else {
+        // 👉 જો બધો જ સામાન જમા થઈ ગયો હોય તો સ્ટેટસ RETURNED કરો
+        const { error: updateError } = await supabase
+          .from('plant_tool_transactions')
+          .update({
+            return_date: today,
+            return_condition: conditionSummary,
+            status: 'RETURNED',
+            remarks: returnRemarks 
+              ? `${selectedReturnTx.remarks || ''} | Return: ${conditionSummary} (${returnRemarks})`
+              : `${selectedReturnTx.remarks || ''} | Return: ${conditionSummary}`
+          })
+          .eq('id', selectedReturnTx.id);
+
+        if (updateError) throw updateError;
+      }
+
+      // ૨. 🎯 ફક્ત જે 'Good' હોય તેટલો જ સ્ટોક INWARD (લાઈવ સ્ટોકમાં પ્લસ) થશે
+      if (goodQty > 0) {
         const { error: returnLedgerErr } = await supabase
           .from('material_stock_ledger')
           .insert([{
@@ -468,9 +501,9 @@ export default function IssueReturnPage({ user }) {
             material_name: selectedReturnTx.material_name,
             unit: selectedReturnTx.unit || 'Nos',
             transaction_type: 'INWARD',
-            qty: Number(returnQtys.good),
-            reference_id: selectedReturnTx.id, // 👈 ટ્રાન્ઝેક્શનની ID
-            description: `Tool Returned by ${selectedReturnTx.issued_to} (Condition: Good: ${returnQtys.good})` // 👈 વિગત
+            qty: goodQty,
+            reference_id: selectedReturnTx.id,
+            description: `Tool Returned by ${selectedReturnTx.issued_to} (Good: ${goodQty})`
           }]);
 
         if (returnLedgerErr) {
@@ -478,7 +511,25 @@ export default function IssueReturnPage({ user }) {
         }
       }
 
-      alert(`✅ રિટર્ન નોંધાઈ ગયું! (${returnQtys.good > 0 ? returnQtys.good + ' સ્ટોકમાં પાછા ઉમેરાયા' : 'સ્ટોકમાં કોઈ ઉમેરાયા નથી'})`);
+      // ૩. 🎯 જો રિપેરિંગ (Needs Repair) માં ગયો હોય તો તેને 'UNDER_REPAIR' સ્ટેટસ સાથે નોંધો
+      if (repairQty > 0) {
+        await supabase
+          .from('plant_tool_transactions')
+          .insert([{
+            plant_name: selectedReturnTx.plant_name,
+            material_name: selectedReturnTx.material_name,
+            category: selectedReturnTx.category || 'Tools and Hardware',
+            issued_to: selectedReturnTx.issued_to,
+            quantity: repairQty,
+            unit: selectedReturnTx.unit || 'Nos',
+            issue_date: today,
+            status: 'UNDER_REPAIR', // 👈 આનાથી રિપેરિંગ સેક્શનમાં દેખાશે
+            remarks: `Sent for repair. Reason: ${returnRemarks || 'Damaged on site'}`
+          }]);
+      }
+
+      alert(`✅ રિટર્ન સફળતાપૂર્વક નોંધાઈ ગયું!\n• Good: ${goodQty} (સ્ટોકમાં ઉમેરાયા)\n• Needs Repair: ${repairQty} (રિપેરિંગમાં ગયા)\n• Scrap/Lost: ${scrapQty + lostQty}`);
+      
       setSelectedReturnTx(null);
       setReturnRemarks('');
       setReturnQtys({ good: 0, repair: 0, scrap: 0, lost: 0 });
@@ -491,7 +542,53 @@ export default function IssueReturnPage({ user }) {
       setLoading(false);
     }
   };
+// 🎯 રિપેર થઈને પાછું આવે ત્યારે સ્ટોકમાં INWARD કરવું
+  const handleReceiveFromRepair = async (repairTx) => {
+    if (!window.confirm(`શું "${repairTx.material_name}" (${repairTx.quantity} ${repairTx.unit}) રિપેર થઈને તૈયાર છે અને લાઈવ સ્ટોકમાં ઉમેરવું છે?`)) {
+      return;
+    }
 
+    setLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+
+      // ૧. Transaction સ્ટેટસ અપડેટ કરો
+      const { error: txErr } = await supabase
+        .from('plant_tool_transactions')
+        .update({
+          status: 'REPAIRED_RETURNED',
+          return_date: today,
+          remarks: `${repairTx.remarks || ''} | Repaired and Restocked on ${today}`
+        })
+        .eq('id', repairTx.id);
+
+      if (txErr) throw txErr;
+
+      // ૨. 🎯 Live Stock માં પાછું INWARD (પ્લસ) કરો
+      const { error: ledgerErr } = await supabase
+        .from('material_stock_ledger')
+        .insert([{
+          date: today,
+          plant_name: repairTx.plant_name,
+          material_name: repairTx.material_name,
+          unit: repairTx.unit || 'Nos',
+          transaction_type: 'INWARD', // 👈 હવે લાઈવ સ્ટોકમાં પ્લસ થશે
+          qty: Number(repairTx.quantity),
+          reference_id: repairTx.id,
+          description: `Received back after repair (${repairTx.quantity} ${repairTx.unit})`
+        }]);
+
+      if (ledgerErr) console.error("Stock Ledger Error:", ledgerErr.message);
+
+      alert(`✅ "${repairTx.material_name}" રિપેર થઈને લાઈવ સ્ટોકમાં પાછું ઉમેરાઈ ગયું!`);
+      fetchActiveIssues();
+      fetchHistory();
+    } catch (err) {
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '650px', margin: '0 auto', paddingBottom: '20px', fontFamily: 'Inter, sans-serif' }}>
       
@@ -785,6 +882,70 @@ export default function IssueReturnPage({ user }) {
           </button>
         </div>
       </form>
+
+      {/* 🔧 TOOLS UNDER REPAIR CARD */}
+      <div style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '16px', padding: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#b45309', margin: 0 }}>
+            🔧 Tools Under Repair (રિપેરિંગમાં ગયેલ સામાન)
+          </h4>
+          <span style={{ fontSize: '11px', fontWeight: 'bold', backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '12px' }}>
+            In Repair: {allHistory.filter(h => h.status === 'UNDER_REPAIR').length}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {allHistory
+            .filter(item => item.status === 'UNDER_REPAIR')
+            .map(item => (
+              <div
+                key={item.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  backgroundColor: '#fffbeb',
+                  borderRadius: '10px',
+                  border: '1px solid #fde68a',
+                  fontSize: '12px'
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 'bold', color: '#92400e' }}>
+                    {item.material_name} <span style={{ color: '#b45309' }}>({item.quantity} {item.unit})</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#78350f', marginTop: '2px' }}>
+                    {item.remarks}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleReceiveFromRepair(item)}
+                  style={{
+                    backgroundColor: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✅ Restock (રિપેર થઈ ગયું)
+                </button>
+              </div>
+            ))}
+
+          {allHistory.filter(h => h.status === 'UNDER_REPAIR').length === 0 && (
+            <div style={{ textAlign: 'center', padding: '10px', color: '#94a3b8', fontSize: '12px' }}>
+              હાલમાં કોઈ ટૂલ રિપેરિંગમાં નથી.
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* 4. ACTIVE PENDING TOOLS */}
       <div style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.03)' }}>
@@ -1102,6 +1263,20 @@ export default function IssueReturnPage({ user }) {
                   value={returnQtys.repair}
                   onChange={(e) => setReturnQtys({ ...returnQtys, repair: Number(e.target.value) })}
                   style={{ width: '65px', padding: '5px', borderRadius: '6px', border: '1px solid #fcd34d', textAlign: 'center', fontWeight: 'bold' }}
+                />
+              </div>
+              {/* ૪. Lost / Missing (ખોવાઈ ગયેલ - સ્ટોકમાં નહીં જાય) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f1f5f9', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>
+                  ❌ Lost / Missing (ખોવાઈ ગયેલ)
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  max={selectedReturnTx.quantity}
+                  value={returnQtys.lost}
+                  onChange={(e) => setReturnQtys({ ...returnQtys, lost: Number(e.target.value) })}
+                  style={{ width: '65px', padding: '5px', borderRadius: '6px', border: '1px solid #94a3b8', textAlign: 'center', fontWeight: 'bold' }}
                 />
               </div>
 

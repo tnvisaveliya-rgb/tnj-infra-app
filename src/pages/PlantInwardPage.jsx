@@ -715,29 +715,36 @@ return (
 
                   {/* 📦 Material Items */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {source.items.map((item, iIndex) => {
-                      const isFinishedProduct = item.category === 'Finished Product';
-                      const isPanel = item.material && item.material.toLowerCase().includes('panel');
-                      const isColumn = item.material && item.material.toLowerCase().includes('column');
-                      
-                      const filteredMaterials = materials.filter(m => {
-                        if (item.category && m.item_type) {
-                          const dbType = m.item_type.toLowerCase().trim();
-                          const selCat = item.category.toLowerCase().trim();
-                          if (!dbType.includes(selCat.split(' ')[0])) return false;
-                        }
-                        if (supplierMaterials && supplierMaterials.length > 0) {
-                          if (!supplierMaterials.includes(m.name)) return false;
-                        }
-                        return true;
-                      });
+                   {source.items.map((item, iIndex) => {
+  const isFinishedProduct = item.category === 'Finished Product';
+  
+  const filteredMaterials = materials.filter(m => {
+    if (item.category && m.item_type) {
+      const dbType = m.item_type.toLowerCase().trim();
+      const selCat = item.category.toLowerCase().trim();
+      if (!dbType.includes(selCat.split(' ')[0])) return false;
+    }
+    if (supplierMaterials && supplierMaterials.length > 0) {
+      if (!supplierMaterials.includes(m.name)) return false;
+    }
+    return true;
+  });
 
-                      const isMaterialInList = isFinishedProduct 
-                        ? products.some(p => (p.product_size ? `${p.name} (${p.product_size})` : p.name) === item.material)
-                        : (filteredMaterials.some(m => m.name === item.material) || materials.some(m => m.name === item.material));
+  // 🎯 1. આખા આઈટમ માટે એક જ વાર Material Check થશે:
+  const isMaterialInList = isFinishedProduct 
+    ? Array.from(new Map(products.map(p => [p.name ? p.name.trim().toLowerCase() : '', p.name ? p.name.trim() : ''])).values())
+        .map(n => n.trim().toLowerCase())
+        .includes((item.material || '').trim().toLowerCase())
+    : filteredMaterials.some(m => m.name && m.name.trim().toLowerCase() === (item.material || '').trim().toLowerCase());
 
-                      const dropdownValue = isMaterialInList ? item.material : (item.material ? 'OTHER_MANUAL' : '');
-                      const showManualBox = !isFinishedProduct && (item.material === 'OTHER_MANUAL' || (!isMaterialInList && item.material));
+  const isCustomMaterial = item.material === 'OTHER_MANUAL' || (!isMaterialInList && item.material !== '');
+
+  // 🎯 2. Finished Product હોવું જોઈએ + Manual ન હોવું જોઈએ
+  const isPanel = isFinishedProduct && !isCustomMaterial && item.material && item.material.toLowerCase().includes('panel');
+  const isColumn = isFinishedProduct && !isCustomMaterial && item.material && item.material.toLowerCase().includes('column');
+
+                
+                    
 
                       return (
                         <div key={item.id} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1028,12 +1035,23 @@ return (
                     </div>
                   </div>
 
-                  {/* DC Number & Vehicle Number */}
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input type="text" placeholder="DC Number" value={source.dcNumber} onChange={(e) => updateInwardSource(sIndex, 'dcNumber', e.target.value)} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
-                    <input type="text" placeholder="Vehicle Number" value={source.vehicleNumber} onChange={(e) => updateInwardSource(sIndex, 'vehicleNumber', e.target.value)} style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
-                  </div>
-
+                 {/* DC Number & Vehicle Number */}
+<div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+  <input 
+    type="text" 
+    placeholder="DC Number" 
+    value={source.dcNumber} 
+    onChange={(e) => updateInwardSource(sIndex, 'dcNumber', e.target.value)} 
+    style={{ flex: 1, minWidth: 0, padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} 
+  />
+  <input 
+    type="text" 
+    placeholder="Vehicle Number" 
+    value={source.vehicleNumber} 
+    onChange={(e) => updateInwardSource(sIndex, 'vehicleNumber', e.target.value)} 
+    style={{ flex: 1, minWidth: 0, padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} 
+  />
+</div>
 
 {/* Description Box (નવું ઉમેરેલું) */}
 <div style={{ marginTop: '2px' }}>

@@ -18,6 +18,9 @@ const [editingId, setEditingId] = useState(null);
     {
       id: 1,
       labour: '', 
+      workType: 'Production', // 👈 'Production' અથવા 'Other Work'
+      otherWorkName: 'Plant Cleaning', // 👈 કામનું નામ
+      otherWorkDays: 1, // 👈 હાજરી / દિવસો
       concreteSource: 'Site Mix', 
       actualCementUsed: '',
       bomSuggestedCement: 0,
@@ -484,6 +487,7 @@ const [editingId, setEditingId] = useState(null);
     }
 
     for (const source of productionSources) {
+    
       for (const item of source.items) {
         const isColumn = item.product ? item.product.toLowerCase().includes('column') : false;
         const isPanel = item.product ? item.product.toLowerCase().includes('panel') : false;
@@ -576,7 +580,17 @@ const [editingId, setEditingId] = useState(null);
           await supabase.from('material_stock_ledger').delete().eq('reference_id', editingId);
           await supabase.from('stock_ledger').delete().eq('reference_id', editingId);
         }
-
+if (source.workType === 'Other Work') {
+          await supabase.from('production_items').insert([{
+            header_id: headerId,
+            product_name: source.otherWorkName || 'Other Department Work',
+            size_variant: 'Day Work',
+            concrete_source: 'N/A',
+            nos_of_line_casting: Number(source.otherWorkDays || 1), // દિવસોની સંખ્યા
+            broken_qty: 0
+          }]);
+          continue; // 👈 આનાથી નીચેનો RMC, Cement અને Steel વાળો લૂપ નહીં ચાલે
+        }
         if (source.concreteSource === 'Site Mix' && totalCement > 0) {
           materialLedgerRows.push({
             date: dprDate,
@@ -1015,6 +1029,86 @@ if (item.steelRows && item.steelRows.length > 0) {
                   <option value="">-- Select Labour / Team --</option>
                   {labours.map(lab => <option key={lab.id} value={lab.name}>{lab.name}</option>)}
                 </select>
+                {/* ૧. વર્ક ટાઈપ સિલેક્શન (Production vs Other / Day Work) */}
+<div style={{ display: 'flex', gap: '10px', backgroundColor: '#e2e8f0', padding: '4px', borderRadius: '10px' }}>
+  <button
+    type="button"
+    onClick={() => updateProductionSource(sIndex, 'workType', 'Production')}
+    style={{
+      flex: 1,
+      padding: '7px',
+      borderRadius: '8px',
+      border: 'none',
+      fontWeight: 'bold',
+      fontSize: '11px',
+      cursor: 'pointer',
+      backgroundColor: source.workType !== 'Other Work' ? '#2563eb' : 'transparent',
+      color: source.workType !== 'Other Work' ? '#fff' : '#475569'
+    }}
+  >
+    🏭 Production (નંગ / લાઈન)
+  </button>
+  <button
+    type="button"
+    onClick={() => updateProductionSource(sIndex, 'workType', 'Other Work')}
+    style={{
+      flex: 1,
+      padding: '7px',
+      borderRadius: '8px',
+      border: 'none',
+      fontWeight: 'bold',
+      fontSize: '11px',
+      cursor: 'pointer',
+      backgroundColor: source.workType === 'Other Work' ? '#d97706' : 'transparent',
+      color: source.workType === 'Other Work' ? '#fff' : '#475569'
+    }}
+  >
+    🧹 Other / Day Work (હાજરી / કામ)
+  </button>
+</div>
+
+{/* ૨. જો "Other Work" પસંદ કર્યું હોય તો માત્ર આ સરળ બોક્સ દેખાશે */}
+{source.workType === 'Other Work' ? (
+  <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div>
+      <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#92400e', display: 'block', marginBottom: '3px' }}>
+        કામનું વર્ણન (Work Description / Task) *
+      </label>
+      <input
+        type="text"
+        placeholder="દા.ત. Plant Cleaning / Shifting / Helper"
+        value={source.otherWorkName || ''}
+        onChange={(e) => updateProductionSource(sIndex, 'otherWorkName', e.target.value)}
+        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d97706', fontSize: '12px', boxSizing: 'border-box' }}
+      />
+    </div>
+
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+      <div>
+        <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#92400e', display: 'block', marginBottom: '3px' }}>
+          હાજરી / દિવસો (Days / Mandays) *
+        </label>
+        <input
+          type="number"
+          step="0.5"
+          placeholder="દા.ત. 1 અથવા 1.5"
+          value={source.otherWorkDays || ''}
+          onChange={(e) => updateProductionSource(sIndex, 'otherWorkDays', e.target.value)}
+          style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d97706', fontSize: '12px', boxSizing: 'border-box', fontWeight: 'bold' }}
+        />
+      </div>
+      <div>
+        <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#92400e', display: 'block', marginBottom: '3px' }}>
+          યુનિટ (Unit)
+        </label>
+        <div style={{ padding: '8px', backgroundColor: '#fef3c7', borderRadius: '6px', border: '1px solid #fde68a', fontSize: '12px', fontWeight: 'bold', color: '#b45309', textAlign: 'center' }}>
+          Days (હાજરી)
+        </div>
+      </div>
+    </div>
+  </div>
+) : (
+          <>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px', backgroundColor: '#f8fafc', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', border: '1px solid #e2e8f0' }}>
                   <span>Concrete Source:</span>
@@ -1360,11 +1454,18 @@ if (item.steelRows && item.steelRows.length > 0) {
                       </div>
                     </div>
                   </div>
+                  
                 )}
+                </> 
+)}
 
               </div>
+              
             ))}
+
+            
           </div>
+          
         </div>
 
        <div style={{ display: 'flex', gap: '10px' }}>

@@ -194,67 +194,87 @@ export default function SiteMaterialReturnPage({ user }) {
 
     setLoading(true);
     try {
-      let stockLedgerRows = [];
+     // 🎯 ૧. બંને લેજર માટે ખાલી એરે બનાવો
+let stockLedgerRows = [];
+let materialLedgerRows = [];
 
-      for (const source of returnSources) {
-        for (const item of source.items) {
-          if (item.qty && item.material) {
-            const qtyVal = Number(item.qty);
-            let exactProductName = item.material.trim();
-            let exactSize = item.size ? item.size.trim() : '';
-            let finalSizeVariant = exactSize || 'Standard';
+for (const source of returnSources) {
+  for (const item of source.items) {
+    if (item.qty && item.material) {
+      const qtyVal = Number(item.qty);
+      let exactProductName = item.material.trim();
+      let exactSize = item.size ? item.size.trim() : '';
+      let finalSizeVariant = exactSize || 'Standard';
 
-            let fullMatName = exactProductName;
-            if (exactSize) fullMatName += ` ${exactSize}`;
-            if (item.steelSpec) {
-              fullMatName += ` (${item.steelSpec})`;
-              finalSizeVariant = exactSize ? `${exactSize} (${item.steelSpec})` : item.steelSpec;
-            }
+      let fullMatName = exactProductName;
+      if (exactSize) fullMatName += ` ${exactSize}`;
+      if (item.steelSpec) {
+        fullMatName += ` (${item.steelSpec})`;
+        finalSizeVariant = exactSize ? `${exactSize} (${item.steelSpec})` : item.steelSpec;
+      }
 
-            // ૧. Supabase ના 'site_material_returns' ટેબલમાં એન્ટ્રી સેવ કરો
-            const { data: insertedReturn, error: insErr } = await supabase.from('site_material_returns').insert([
-              {
-                date: returnDate,
-                plant_name: selectedPlant,
-                return_no: source.returnNo || 'EMPTY',
-                party_name: source.party,
-                site_name: source.site,
-                transporter_name: source.transporter || 'EMPTY',
-                vehicle_no: source.vehicleNumber || 'EMPTY',
-                material_name: fullMatName,
-                item_type: item.category,
-                condition: item.condition, // 'Good' અથવા 'Broken'
-                quantity: qtyVal,
-                unit: item.unit,
-                submitted_by: currentLoggedUser
-              }
-            ]).select().single();
+      // ૧. મેઈન ટેબલમાં ઇન્સર્ટ
+      const { data: insertedReturn, error: insErr } = await supabase.from('site_material_returns').insert([
+        {
+          date: returnDate,
+          plant_name: selectedPlant,
+          return_no: source.returnNo || 'EMPTY',
+          party_name: source.party,
+          site_name: source.site,
+          transporter_name: source.transporter || 'EMPTY',
+          vehicle_no: source.vehicleNumber || 'EMPTY',
+          material_name: fullMatName,
+          item_type: item.category,
+          condition: item.condition,
+          quantity: qtyVal,
+          unit: item.unit,
+          submitted_by: currentLoggedUser
+        }
+      ]).select().single();
 
-            if (insErr) throw insErr;
+      if (insErr) throw insErr;
 
-            // ૨. 🎯 સ્ટૉક લેજર માટે લોજિક (Good હોય તો INWARD, Broken હોય તો BROKEN)
-            if (item.category === 'Finished Product' && insertedReturn) {
-              const transType = item.condition === 'Broken' ? 'BROKEN' : 'INWARD';
-              
-              stockLedgerRows.push({
-                date: returnDate,
-                plant_name: selectedPlant,
-                product_name: exactProductName,
-                size_variant: finalSizeVariant,
-                transaction_type: transType, 
-                qty: qtyVal,
-                reference_id: insertedReturn.id
-              });
-            }
-          }
+      // ૨. 🎯 લેજર લોજિક: Finished Product હોય તો stock_ledger માં, બાકીના material_stock_ledger માં
+      if (insertedReturn) {
+        const transType = item.condition === 'Broken' ? 'BROKEN' : 'INWARD';
+
+        if (item.category === 'Finished Product') {
+          stockLedgerRows.push({
+            date: returnDate,
+            plant_name: selectedPlant,
+            product_name: exactProductName,
+            size_variant: finalSizeVariant,
+            transaction_type: transType, 
+            qty: qtyVal,
+            reference_id: insertedReturn.id
+          });
+        } else {
+          // 👈 Raw Material, Consumable, Tools માટે આ લેજરમાં જશે
+          materialLedgerRows.push({
+            date: returnDate,
+            plant_name: selectedPlant,
+            material_name: item.material,
+            unit: item.unit || 'Nos',
+            transaction_type: transType,
+            qty: qtyVal,
+            reference_id: insertedReturn.id
+          });
         }
       }
+    }
+  }
+}
 
-      // ૩. લેજરમાં ઇન્સર્ટ કરો
-      if (stockLedgerRows.length > 0) {
-        const { error: stockErr } = await supabase.from('stock_ledger').insert(stockLedgerRows);
-        if (stockErr) throw stockErr;
-      }
+// ૩. 🎯 બંને લેજરમાં ડેટા ઇન્સર્ટ કરો
+if (stockLedgerRows.length > 0) {
+  const { error: stockErr } = await supabase.from('stock_ledger').insert(stockLedgerRows);
+  if (stockErr) throw stockErr;
+}
+
+if (materialLedgerRows.length > 0) {
+  const { error: matErr } = await supabase.from('material_stock_ledger').insert(materialLedgerRows);
+  if (matErr) throw matErr;
+}
 
       alert("✅ સાઇટ મટીરિયલ રિટર્ન સફળતાપૂર્વક સેવ થઈ ગયું છે!");
 
@@ -529,42 +549,50 @@ export default function SiteMaterialReturnPage({ user }) {
 
                   {/* Items list */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {source.items.map((item, iIndex) => {
-                      const currentCategory = item.category || 'Finished Product';
-                      const isFinishedProduct = currentCategory === 'Finished Product';
-                      const uniqueProductNames = [...new Set(products.map(p => p.name))];
-                      
-                      const filteredMaterials = materials.filter(m => {
-                        if (!m.item_type) return true;
-                        return m.item_type.toLowerCase().trim() === currentCategory.toLowerCase().trim() ||
-                               m.item_type.toLowerCase().includes(currentCategory.toLowerCase().split(' ')[0]);
-                      });
+                   {source.items.map((item, iIndex) => {
+  const currentCategory = item.category || 'Finished Product';
+  const isFinishedProduct = currentCategory === 'Finished Product';
+  
+  const uniqueProductNames = [...new Set(products.map(p => p.name))];
+  
+  const filteredMaterials = materials.filter(m => {
+    if (!m.item_type) return true;  
+    return m.item_type.toLowerCase().trim() === currentCategory.toLowerCase().trim() ||
+           m.item_type.toLowerCase().includes(currentCategory.toLowerCase().split(' ')[0]);
+  });
 
-                      const isCustomItem = item.material === 'OTHER_MANUAL' || (item.material && !isFinishedProduct && !filteredMaterials.some(m => m.name.trim().toLowerCase() === item.material.trim().toLowerCase())) || (item.material && isFinishedProduct && !uniqueProductNames.map(n => n.trim().toLowerCase()).includes(item.material.trim().toLowerCase()));
+  const isMaterialInList = isFinishedProduct 
+    ? uniqueProductNames.map(n => n.trim().toLowerCase()).includes((item.material || '').trim().toLowerCase())
+    : filteredMaterials.some(m => m.name && m.name.trim().toLowerCase() === (item.material || '').trim().toLowerCase());
 
-                      const isPanel = item.material && item.material.toLowerCase().includes('panel');
-                      const isColumn = item.material && item.material.toLowerCase().includes('column');
+  // 🎯 કસ્ટમ/મેન્યુઅલ ચેક
+  const isCustomItem = Boolean(item.isManual) || item.material === 'OTHER_MANUAL' || (!isMaterialInList && item.material !== '');
+
+  // 🎯 Finished Product હોવું જોઈએ + મેન્યુઅલ ન હોવું જોઈએ + નામમાં Panel/Column હોવું જોઈએ
+  const isPanel = isFinishedProduct && !isCustomItem && item.material && item.material.toLowerCase().includes('panel');
+  const isColumn = isFinishedProduct && !isCustomItem && item.material && item.material.toLowerCase().includes('column');
 
                       return (
                         <div key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
                           
                           {/* Category Select */}
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <select 
-                              value={item.category || 'Finished Product'} 
-                              onChange={(e) => {
-                                updateReturnItem(sIndex, iIndex, 'category', e.target.value);
-                                updateReturnItem(sIndex, iIndex, 'material', '');
-                                updateReturnItem(sIndex, iIndex, 'size', '');
-                              }} 
-                              style={{ flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#f3e8ff', fontWeight: 'bold', color: '#7e22ce' }}
-                            >
-                              <option value="Finished Product">1. Finished Product</option>
-                              <option value="Raw Material">2. Raw Material</option>
-                              <option value="Consumable Item">3. Consumable Item</option>
-                              <option value="Tools and Hardware">4. Tools and Hardware</option>
-                            </select>
-
+                           {/* Category Select */}
+<select 
+  value={item.category || 'Finished Product'} 
+  onChange={(e) => {
+    updateReturnItem(sIndex, iIndex, 'category', e.target.value);
+    updateReturnItem(sIndex, iIndex, 'material', '');
+    updateReturnItem(sIndex, iIndex, 'size', '');
+  }} 
+  style={{ flex: 1, padding: '5px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#f3e8ff', fontWeight: 'bold', color: '#7e22ce' }}
+>
+  <option value="Finished Product">1. Finished Product</option>
+  <option value="Raw Material">2. Raw Material</option>
+  <option value="Consumable Item">3. Consumable Item</option>
+  <option value="Tools and Hardware">4. Tools and Hardware</option>
+  <option value="Asset">5. Asset</option>
+</select>
                             {source.items.length > 1 && (
                               <button type="button" onClick={() => removeReturnItem(sIndex, iIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}>
                                 <Trash2 size={13} />
@@ -713,64 +741,106 @@ export default function SiteMaterialReturnPage({ user }) {
                     </button>
                   </div>
 
-                  {/* Transporter & Vehicle No */}
-                  <div style={{ display: 'flex', gap: '8px', flexDirection: 'column', marginTop: '4px' }}>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <div style={{ flex: 1 }}>
-                        <select 
-                          value={isCustomTransporter ? 'OTHER_TRANSPORTER_MANUAL' : (source.transporter || '')} 
-                          onClick={handleDropdownClick} 
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === 'OTHER_TRANSPORTER_MANUAL') {
-                              updateReturnSource(sIndex, 'transporter', 'OTHER_TRANSPORTER_MANUAL');
-                              updateReturnSource(sIndex, 'vehicleNumber', '');
-                            } else {
-                              updateReturnSource(sIndex, 'transporter', val);
-                              updateReturnSource(sIndex, 'vehicleNumber', '');
-                            }
-                          }} 
-                          style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
-                        >
-                          <option value="">-- Select Transporter --</option>
-                          {transporters.map(t => (
-                            <option key={`trans-${t.id}`} value={t.transporter_name}>{t.transporter_name}</option>
-                          ))}
-                          <option value="OTHER_TRANSPORTER_MANUAL" style={{ fontWeight: 'bold', color: '#9333ea' }}>➕ Other (Type Manually...)</option>
-                        </select>
-                      </div>
+                 {/* Transporter & Vehicle No */}
+<div style={{ display: 'flex', gap: '8px', flexDirection: 'column', marginTop: '4px' }}>
+  <div style={{ display: 'flex', gap: '8px' }}>
+    
+    {/* 1. Transporter Selection */}
+    <div style={{ flex: 1 }}>
+      <select 
+        value={isCustomTransporter ? 'OTHER_TRANSPORTER_MANUAL' : (source.transporter || '')} 
+        onClick={handleDropdownClick} 
+        onChange={(e) => {
+          const val = e.target.value;
+          if (val === 'OTHER_TRANSPORTER_MANUAL') {
+            updateReturnSource(sIndex, 'transporter', 'OTHER_TRANSPORTER_MANUAL');
+            updateReturnSource(sIndex, 'vehicleNumber', '');
+            updateReturnSource(sIndex, 'isCustomVehicle', false);
+          } else {
+            updateReturnSource(sIndex, 'transporter', val);
+            updateReturnSource(sIndex, 'vehicleNumber', '');
+            updateReturnSource(sIndex, 'isCustomVehicle', false);
+          }
+        }} 
+        style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+      >
+        <option value="">-- Select Transporter --</option>
+        {transporters.map(t => (
+          <option key={`trans-${t.id}`} value={t.transporter_name}>{t.transporter_name}</option>
+        ))}
+        <option value="OTHER_TRANSPORTER_MANUAL" style={{ fontWeight: 'bold', color: '#9333ea' }}>➕ Other (Type Manually...)</option>
+      </select>
+    </div>
 
-                      <div style={{ flex: 1 }}>
-                        {isCustomTransporter ? (
-                          <input 
-                            type="text" 
-                            placeholder="Type vehicle number..." 
-                            value={source.vehicleNumber || ''} 
-                            onChange={(e) => updateReturnSource(sIndex, 'vehicleNumber', e.target.value)} 
-                            style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #9333ea', fontSize: '12px', backgroundColor: '#faf5ff', boxSizing: 'border-box' }} 
-                          />
-                        ) : (
-                          <select value={source.vehicleNumber || ''} onClick={handleDropdownClick} onChange={(e) => updateReturnSource(sIndex, 'vehicleNumber', e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                            <option value="">-- Select Vehicle Number --</option>
-                            {transporters.filter(t => t.transporter_name === source.transporter).flatMap(t => Array.isArray(t.vehicles_list) ? t.vehicles_list.map(v => v.vehicleNo).filter(Boolean) : []).map((vehNo, vIdx) => (
-                              <option key={`veh-${vIdx}`} value={vehNo}>{vehNo}</option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
-                    </div>
+    {/* 2. Vehicle Number Selection / Manual Input */}
+    <div style={{ flex: 1 }}>
+      {isCustomTransporter || source.isCustomVehicle ? (
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <input 
+            type="text" 
+            placeholder="Type vehicle number..." 
+            value={source.vehicleNumber || ''} 
+            onChange={(e) => updateReturnSource(sIndex, 'vehicleNumber', e.target.value)} 
+            autoFocus
+            style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #9333ea', fontSize: '12px', backgroundColor: '#faf5ff', boxSizing: 'border-box' }} 
+          />
+          {/* લિસ્ટવાળા ટ્રાન્સપોર્ટર માટે ડ્રોપડાઉન પાછું લાવવા Reset બટન */}
+          {!isCustomTransporter && (
+            <button
+              type="button"
+              onClick={() => {
+                updateReturnSource(sIndex, 'isCustomVehicle', false);
+                updateReturnSource(sIndex, 'vehicleNumber', '');
+              }}
+              title="Back to dropdown"
+              style={{ background: '#f3e8ff', border: '1px solid #d8b4fe', color: '#7e22ce', borderRadius: '6px', padding: '0 8px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+            >
+              ↩
+            </button>
+          )}
+        </div>
+      ) : (
+        <select 
+          value={source.vehicleNumber || ''} 
+          onClick={handleDropdownClick} 
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === 'OTHER_VEHICLE_MANUAL') {
+              updateReturnSource(sIndex, 'isCustomVehicle', true);
+              updateReturnSource(sIndex, 'vehicleNumber', '');
+            } else {
+              updateReturnSource(sIndex, 'isCustomVehicle', false);
+              updateReturnSource(sIndex, 'vehicleNumber', val);
+            }
+          }} 
+          style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+        >
+          <option value="">-- Select Vehicle Number --</option>
+          {transporters
+            .filter(t => t.transporter_name === source.transporter)
+            .flatMap(t => Array.isArray(t.vehicles_list) ? t.vehicles_list.map(v => v.vehicleNo).filter(Boolean) : [])
+            .map((vehNo, vIdx) => (
+              <option key={`veh-${vIdx}`} value={vehNo}>{vehNo}</option>
+            ))
+          }
+          <option value="OTHER_VEHICLE_MANUAL" style={{ fontWeight: 'bold', color: '#9333ea' }}>➕ Other (Type Manually...)</option>
+        </select>
+      )}
+    </div>
+  </div>
 
-                    {isCustomTransporter && (
-                      <input 
-                        type="text" 
-                        placeholder="Type custom transporter name..." 
-                        value={source.transporter === 'OTHER_TRANSPORTER_MANUAL' ? '' : source.transporter} 
-                        onChange={(e) => updateReturnSource(sIndex, 'transporter', e.target.value)} 
-                        autoFocus
-                        style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #9333ea', fontSize: '12px', backgroundColor: '#faf5ff', boxSizing: 'border-box' }} 
-                      />
-                    )}
-                  </div>
+  {/* 3. Custom Transporter Input Box */}
+  {isCustomTransporter && (
+    <input 
+      type="text" 
+      placeholder="Type custom transporter name..." 
+      value={source.transporter === 'OTHER_TRANSPORTER_MANUAL' ? '' : source.transporter} 
+      onChange={(e) => updateReturnSource(sIndex, 'transporter', e.target.value)} 
+      autoFocus
+      style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid #9333ea', fontSize: '12px', backgroundColor: '#faf5ff', boxSizing: 'border-box' }} 
+    />
+  )}
+</div>
 
                 </div>
               );
