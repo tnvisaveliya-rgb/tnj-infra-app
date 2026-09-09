@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { ClipboardList, Send, ArrowDownRight, Factory, Plus, Trash2, Clock } from 'lucide-react';
-
+import ConfirmModal from '../components/ConfirmModal';
 function PlantDprEntry({ user }) {
   const [plants, setPlants] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('');
   const [selectedPlantId, setSelectedPlantId] = useState('');
   const [dprDate, setDprDate] = useState(new Date().toISOString().split('T')[0]);
-  
+  const [showPreview, setShowPreview] = useState(false);
   const [labours, setLabours] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
@@ -41,6 +41,19 @@ const [editingId, setEditingId] = useState(null);
   ]);
 
   const [loading, setLoading] = useState(false);
+
+  const [alertModal, setAlertModal] = useState({
+  isOpen: false,
+  message: ''
+});
+
+// 🔔 alert() ની જગ્યાએ કોલ કરવા માટેનું ફંક્શન
+const triggerAlert = (msg) => {
+  setAlertModal({
+    isOpen: true,
+    message: msg
+  });
+};
   
 // 🔗 DPR પેજમાં URL અથવા LocalStorage માંથી approve_id પકડીને અનલોક કરવાનું પરફેક્ટ લોજિક
   useEffect(() => {
@@ -141,7 +154,7 @@ const [editingId, setEditingId] = useState(null);
 
   const handleDropdownClick = () => {
     if (!selectedPlant) {
-      alert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
       return false;
     }
     return true;
@@ -149,7 +162,7 @@ const [editingId, setEditingId] = useState(null);
 
   const handleLabourCheck = (sourceLabour) => {
     if (!sourceLabour) {
-      alert("⚠️ Please select labour first!");
+      triggerAlert("⚠️ Please select labour first!");
       return false;
     }
     return true;
@@ -236,10 +249,10 @@ const [editingId, setEditingId] = useState(null);
         ]);
       }
 
-      alert("✏️ એડિટ મોડ ચાલુ થઈ ગયો છે!");
+      triggerAlert("✏️ એડિટ મોડ ચાલુ થઈ ગયો છે!");
     } catch (err) {
       console.error("Error fetching items for edit:", err.message);
-      alert("એરર: ડેટા લોડ કરવામાં સમસ્યા થઈ છે.");
+      triggerAlert("એરર: ડેટા લોડ કરવામાં સમસ્યા થઈ છે.");
     }
   };
  const handleEditClickWithTimeCheck = (entry) => {
@@ -287,11 +300,11 @@ const [editingId, setEditingId] = useState(null);
     console.log("DPR Supabase Response - Data:", data, "Error:", error);
 
     if (error) {
-      alert("Database Error: " + error.message);
+      triggerAlert("Database Error: " + error.message);
     } else if (!data || data.length === 0) {
-      alert("⚠️ DPR એન્ટ્રી મળી નહીં!");
+      triggerAlert("⚠️ DPR એન્ટ્રી મળી નહીં!");
     } else {
-      alert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
+      triggerAlert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
       window.history.replaceState({}, document.title, window.location.pathname);
       fetchRecentHistory();
     }
@@ -470,10 +483,10 @@ const [editingId, setEditingId] = useState(null);
     await updateBomM3ForSource(sIdx, updated);
   };
 
-  const handleSubmitAll = async (e) => {
-    e.preventDefault();
+ const handleOpenPreview = (e) => {
+  e.preventDefault();
     if (!selectedPlant) {
-      alert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
       return;
     }
 
@@ -481,7 +494,7 @@ const [editingId, setEditingId] = useState(null);
       const src = productionSources[sIdx];
       const hasProductionData = src.items.some(i => i.product || i.qty || i.lineOfCasting);
       if (hasProductionData && !src.labour) {
-        alert(`⚠️ Production Source #${sIdx + 1}: Please select labour first!`);
+        triggerAlert(`⚠️ Production Source #${sIdx + 1}: Please select labour first!`);
         return;
       }
     }
@@ -497,12 +510,19 @@ const [editingId, setEditingId] = useState(null);
           const mainTotalLines = Number(item.lineOfCasting) || 0;
           const sumOfSteelLines = item.steelRows.reduce((acc, steel) => acc + (Number(steel.totalLines) || 0), 0);
           if (mainTotalLines !== sumOfSteelLines) {
-            alert(`⚠️ Error in ${item.product}: Number of Line (${mainTotalLines}) અને Steel Details ની કુલ લાઈનો (${sumOfSteelLines}) સરખી હોવી જોઈએ!`);
+           triggerAlert(`⚠️ Error in ${item.product}: Number of Line (${mainTotalLines}) અને Steel Details ની કુલ લાઈનો (${sumOfSteelLines}) સરખી હોવી જોઈએ!`);
             return;
           }
         }
       }
     }
+// ✅ બધું બરાબર હોય તો પ્રિવ્યૂ મોડલ ખોલો
+  setShowPreview(true);
+};
+
+    const handleSubmitAll = async () => {
+  // e.preventDefault() અહીંથી હટાવી દીધું છે
+  setShowPreview(false); //
 
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Supervisor';
@@ -892,12 +912,12 @@ if (item.steelRows && item.steelRows.length > 0) {
       fetchRecentHistory(); // 📜 હિસ્ટ્રી રિફ્રેશ કરો
       
       if (wasEditing) {
-        alert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અપડેટ થઈ ગઈ છે!");
+        triggerAlert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અપડેટ થઈ ગઈ છે!");
       } else {
-        alert("✅ બધી જ એન્ટ્રીઓ અને સ્પેસિફિકેશન સાથે સફળતાપૂર્વક સબમિટ થઈ ગયું છે!");
+        triggerAlert("✅ બધી જ એન્ટ્રીઓ અને સ્પેસિફિકેશન સાથે સફળતાપૂર્વક સબમિટ થઈ ગયું છે!");
       }
     } catch (err) {
-      alert("એરર: " + err.message);
+      triggerAlert("એરર: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -938,7 +958,7 @@ if (item.steelRows && item.steelRows.length > 0) {
         </div>
       </div>
 
-      <form onSubmit={handleSubmitAll} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <form onSubmit={handleOpenPreview} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
         {/* 2. Modern Plant & Date Selection Card */}
         <div style={{ 
@@ -1146,7 +1166,7 @@ if (item.steelRows && item.steelRows.length > 0) {
                             }} 
                             onChange={(e) => {
                               if (!source.labour) {
-                                alert("⚠️ Please select labour first!");
+                                triggerAlert("⚠️ Please select labour first!");
                                 return;
                               }
                               updateProductionItem(sIndex, iIndex, 'product', e.target.value);
@@ -1580,7 +1600,7 @@ if (item.steelRows && item.steelRows.length > 0) {
 
                       if (headerErr) throw new Error("Header ડિલીટ નથી થતું: " + headerErr.message);
 
-                      alert("✅ આખી એન્ટ્રી (RMC/Cement સાથે) સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+                      triggerAlert("✅ આખી એન્ટ્રી (RMC/Cement સાથે) સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
                       
                       // 🔄 ફોર્મ રીસેટ કરો
                       setEditingId(null);
@@ -1597,7 +1617,7 @@ if (item.steelRows && item.steelRows.length > 0) {
                       fetchRecentHistory(); 
 
                     } catch (err) {
-                      alert("❌ એરર: " + err.message);
+                      triggerAlert("❌ એરર: " + err.message);
                       console.error("Delete Error: ", err);
                     }
                   }
@@ -1622,6 +1642,231 @@ if (item.steelRows && item.steelRows.length > 0) {
           )}
         </div>
       </form>
+      {/* 🔔 Existing ConfirmModal Integration */}
+<ConfirmModal
+  isOpen={alertModal.isOpen}
+  message={alertModal.message}
+  onConfirm={() => setAlertModal({ isOpen: false, message: '' })}
+  onCancel={() => setAlertModal({ isOpen: false, message: '' })}
+/>
+      {/* 🔍 DPR PREVIEW MODAL */}
+{showPreview && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    padding: '16px',
+    boxSizing: 'border-box'
+  }}>
+    <div style={{
+      backgroundColor: '#ffffff',
+      borderRadius: '16px',
+      width: '100%',
+      maxWidth: '550px',
+      maxHeight: '90vh',
+      display: 'flex',
+      flexDirection: 'column',
+      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+      overflow: 'hidden'
+    }}>
+      {/* Modal Header */}
+      <div style={{
+        backgroundColor: '#f8fafc',
+        padding: '14px 18px',
+        borderBottom: '1px solid #e2e8f0',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
+            📋 DPR Entry Preview
+          </h3>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>સબમિટ કરતાં પહેલાં વિગતો ચકાસી લો</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{ background: 'none', border: 'none', fontSize: '18px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer' }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Modal Content */}
+      <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        
+        {/* Plant & Date Summary */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', backgroundColor: '#f1f5f9', padding: '10px 12px', borderRadius: '10px', fontSize: '12px' }}>
+          <div><strong>પ્લાન્ટ:</strong> {selectedPlant}</div>
+          <div><strong>તારીખ:</strong> {dprDate}</div>
+        </div>
+
+        {/* Sources & Items Summary */}
+        {productionSources.map((src, sIdx) => (
+          <div key={src.id} style={{ border: '1px solid #cbd5e1', borderRadius: '10px', padding: '10px', backgroundColor: '#fafafa', fontSize: '12px' }}>
+            <div style={{ fontWeight: 'bold', color: '#1d4ed8', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px', marginBottom: '6px' }}>
+              #{sIdx + 1} - {src.labour || 'No Labour Selected'} ({src.workType})
+            </div>
+
+            {src.workType === 'Other Work' ? (
+              <div style={{ color: '#92400e' }}>
+                <div><strong>કામ:</strong> {src.otherWorkName}</div>
+                <div><strong>દિવસો:</strong> {src.otherWorkDays} Days</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ fontSize: '11px', color: '#475569' }}>
+                  <strong>કોન્ક્રીટ:</strong> {src.concreteSource} | 
+                  {src.concreteSource === 'Site Mix' ? ` Actual Cement: ${src.actualCementUsed || 0} Bags` : ` Actual RMC: ${src.actualCementUsed || 0} M3`}
+                </div>
+
+                <div style={{ backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '6px' }}>
+             {src.items.map((item, iIdx) => {
+  const isCol = (item.product || '').toLowerCase().includes('column');
+  const isPan = (item.product || '').toLowerCase().includes('panel');
+
+  return (
+    <div key={item.id} style={{ borderBottom: iIdx < src.items.length - 1 ? '1px dashed #e2e8f0' : 'none', paddingBottom: '6px', marginBottom: '6px' }}>
+      
+      {/* ૧. પ્રોડક્ટનું નામ અને લાઈન્સ (જો હોય તો) */}
+      <div style={{ fontWeight: '700', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{item.product || 'No Product'}</span>
+        {item.lineOfCasting && (
+          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>
+            Lines: <strong>{item.lineOfCasting}</strong>
+          </span>
+        )}
+      </div>
+{/* ૨. PANEL: કુલ ઉત્પાદન + લાઈન વાઈઝ સ્ટીલ ડિટેલ્સ */}
+{isPan && (
+  <div style={{ marginTop: '3px', display: 'flex', flexDirection: 'column', gap: '3px', paddingLeft: '4px' }}>
+    <div style={{ color: '#475569', fontSize: '11px' }}>
+      {item.sizeVariant && <span>સાઇઝ: <strong>{item.sizeVariant}</strong> | </span>}
+      કુલ ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{(Number(item.lineOfCasting) || 0) * 30} Nos</strong>
+    </div>
+
+    {/* 🛠️ Panel Steel Rows (લાઈન વાઇઝ સ્ટીલ અને નંગ) */}
+    {item.steelRows && item.steelRows.length > 0 && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px', marginTop: '2px' }}>
+        {item.steelRows.map((st, sIndex) => {
+          const lines = Number(st.totalLines) || 0;
+          const nos = lines * 30;
+          return (
+            <div key={sIndex} style={{ fontSize: '10.5px', color: '#334155' }}>
+              ↳ સ્ટીલ: <strong>{st.wireSize || '3mm'}</strong> ({st.wireCount || '4'} Wires)
+              {' '}— <strong>{lines} Line</strong> ({nos} Nos)
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+
+      {/* ૩. COLUMN: સાઈઝ વાઇઝ અલગ-અલગ Qty અને વાયર્સ */}
+      {isCol && (
+        <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px', paddingLeft: '8px' }}>
+          {item.steelRows && item.steelRows.length > 0 ? (
+            item.steelRows.map((st, sIndex) => (
+              <div key={sIndex} style={{ fontSize: '11px', color: '#334155' }}>
+                • સાઇઝ: <strong style={{ color: '#0f172a' }}>{st.productSize || item.sizeVariant || 'Standard'}</strong> 
+                {' '}({st.wireSize || '3mm'} - {st.wireCount || '4'} Wires) 
+                {' '}— ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{st.qty || 0} Nos</strong>
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: '11px', color: '#334155' }}>
+              • સાઇઝ: <strong style={{ color: '#0f172a' }}>{item.sizeVariant || 'Standard'}</strong> 
+              {' '}— ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{item.qty || 0} Nos</strong>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ૪. GENERAL / UDRAIN: સાચું ઉત્પાદન (item.qty) + સ્ટીલ વજન (Kg/Pc) */}
+      {!isPan && !isCol && (
+        <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '4px' }}>
+          <div style={{ fontSize: '11px', color: '#334155' }}>
+            • સાઇઝ: <strong style={{ color: '#0f172a' }}>{item.sizeVariant || 'Standard'}</strong>
+            {' '}— ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{item.qty || 0} Nos</strong>
+          </div>
+          {item.steelRows && item.steelRows.length > 0 && item.steelRows.map((st, sIndex) => (
+            st.qty ? (
+              <div key={sIndex} style={{ fontSize: '10.5px', color: '#64748b', paddingLeft: '10px' }}>
+                ↳ સ્ટીલ: {st.wireSize || 'Steel'} — <strong>{st.qty} Kg/Pc</strong>
+              </div>
+            ) : null
+          ))}
+        </div>
+      )}
+
+      {/* ૫. તૂટેલ માલ (Broken Qty) */}
+      {Number(item.brokenQty) > 0 && (
+        <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: 'bold', marginTop: '3px', paddingLeft: '6px' }}>
+          ⚠️ Broken / Damaged: {item.brokenQty} Nos
+        </div>
+      )}
+
+    </div>
+  );
+})}
+                  
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Modal Actions */}
+      <div style={{ padding: '12px 16px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#e2e8f0',
+            color: '#334155',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          ✏️ સુધારો કરવો છે (Edit)
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmitAll}
+          disabled={loading}
+          style={{
+            padding: '8px 18px',
+            backgroundColor: '#16a34a',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          {loading ? 'સેવ થાય છે...' : '✅ બરાબર છે, સબમિટ કરો'}
+        </button>
+      </div>
+
+    </div>
+  </div>
+)}
 
       {/* 📜 Recent DPR History (24 Hours Editable & Request Edit Logic) */}
       {recentHistory.length > 0 && (

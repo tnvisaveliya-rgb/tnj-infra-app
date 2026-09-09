@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { ArrowUpRight, Send, Plus, Trash2 } from 'lucide-react';
 import { COMPANY_LOGO_BASE64 } from '../services/logoConfig';
+import ConfirmModal from '../components/ConfirmModal';
 export default function PlantOutwardPage({ user }) {
   const [plants, setPlants] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('');
@@ -10,7 +11,8 @@ export default function PlantOutwardPage({ user }) {
   const [parties, setParties] = useState([]);
   const [sites, setSites] = useState([]);
   const [products, setProducts] = useState([]);
-  
+  const [showPreview, setShowPreview] = useState(false);
+  const [availableSpecs, setAvailableSpecs] = useState({}); // { "itemKey": ["3mm - 4 wires", ...] }
   
   const [loading, setLoading] = useState(false);
   const [transporters, setTransporters] = useState([]);
@@ -50,7 +52,18 @@ const [existingBills, setExistingBills] = useState([]);
     const { data } = await supabase.from('plants').select('*');
     setPlants(data || []);
   };
+const [alertModal, setAlertModal] = useState({
+  isOpen: false,
+  message: ''
+});
 
+// 🔔 alert() ની જગ્યાએ કોલ કરવા માટેનું ફંક્શન
+const triggerAlert = (msg) => {
+  setAlertModal({
+    isOpen: true,
+    message: msg
+  });
+};
   const fetchMasters = async (plantId) => {
     const { data: partData } = await supabase.from('site_outward_parties').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);
     setParties(partData || []);
@@ -230,11 +243,58 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
   };
    const handleDropdownClick = () => {
     if (!selectedPlant) {
-      alert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
       return false;
     }
     return true;
   };
+  const fetchAvailableSteelSpecs = async (sIndex, iIndex, productName, productSize) => {
+  if (!selectedPlant || !productName || !productSize) return;
+
+  try {
+    // 🎯 stock_ledger માંથી તે જ પ્લાન્ટ, પ્રોડક્ટ અને સાઈઝ ધરાવતી રો લાવો
+    const { data, error } = await supabase
+      .from('stock_ledger')
+      .select('size_variant')
+      .eq('plant_name', selectedPlant)
+      .ilike('product_name', productName.trim())
+      .ilike('size_variant', `${productSize.trim()}%`);
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      const extractedSpecs = new Set();
+
+      data.forEach(row => {
+        const variant = row.size_variant || '';
+        // દા.ત. "2950x150x150 (3mm - 5 wires)" માંથી કૌંસ અંદરની વિગત અલગ પાડો
+        if (variant.includes('(') && variant.includes(')')) {
+          const spec = variant.substring(variant.indexOf('(') + 1, variant.lastIndexOf(')')).trim();
+          if (spec) extractedSpecs.add(spec);
+        }
+      });
+
+      const specsList = Array.from(extractedSpecs);
+      setAvailableSpecs(prev => ({
+        ...prev,
+        [`${sIndex}-${iIndex}`]: specsList
+      }));
+
+      // જો ફક્ત એક જ સ્પેસિફિકેશન સ્ટોકમાં હોય, તો ઓટોમેટિક સિલેક્ટ કરી દેવું
+      if (specsList.length === 1) {
+        updateOutwardItem(sIndex, iIndex, 'steelSpec', specsList[0]);
+      }
+    } else {
+      // જો સ્ટોકમાં કોઈ ખાસ સ્પેક ન મળે
+      setAvailableSpecs(prev => ({
+        ...prev,
+        [`${sIndex}-${iIndex}`]: []
+      }));
+    }
+  } catch (err) {
+    console.error("Error fetching stock steel specs:", err);
+  }
+};
   // 🎯 આગામી DC નંબર ડેટાબેઝમાંથી શોધીને લાવવાનું મુખ્ય ફંક્શન
   const fetchNextDcNumber = async (plantName) => {
     if (!plantName) return '';
@@ -264,6 +324,7 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
       return `DC-${plantName.substring(0, 3).toUpperCase()}-1001`;
     }
   };
+  
 
 const addOutwardSource = async () => {
     let nextDc = '';
@@ -331,12 +392,39 @@ const handleCancelEdit = async () => {
       }
     ]);
   };
+const handleOpenPreview = (e) => {
+  e.preventDefault();
 
+  if (!selectedPlant) {
+    triggerAlert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+    return;
+  }
+
+  for (let sIdx = 0; sIdx < outwardSources.length; sIdx++) {
+    const src = outwardSources[sIdx];
+    if (!src.party || src.party === 'OTHER_PARTY_MANUAL') {
+      triggerAlert(`⚠️ Source #${sIdx + 1}: કૃપા કરીને Party / Client પસંદ કરો!`);
+      return;
+    }
+    if (!src.site) {
+      triggerAlert(`⚠️ Source #${sIdx + 1}: કૃપા કરીને Site પસંદ કરો!`);
+      return;
+    }
+
+    const hasItem = src.items.some(it => it.material && Number(it.qty) > 0);
+    if (!hasItem) {
+      triggerAlert(`⚠️ Source #${sIdx + 1}: ઓછામાં ઓછી એક મટીરિયલ આઇટમ અને જથ્થો (Qty) દાખલ કરો!`);
+      return;
+    }
+  }
+
+  setShowPreview(true);
+};
   
 const handleSubmitOutward = async (e) => {
-    e.preventDefault();
+   setShowPreview(false); // 👈 મોડલ બંધ થશે
     if (!selectedPlant) {
-      alert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
       return;
     }
 
@@ -405,7 +493,7 @@ const handleSubmitOutward = async (e) => {
       }
 
       if (rowsToInsert.length === 0) {
-        alert("કૃપા કરીને ઓછામાં ઓછી એક મટીરિયલ આઇટમ અને જથ્થો ભરો!");
+        triggerAlert("કૃપા કરીને ઓછામાં ઓછી એક મટીરિયલ આઇટમ અને જથ્થો ભરો!");
         setLoading(false);
         return;
       }
@@ -485,9 +573,9 @@ const handleSubmitOutward = async (e) => {
       setEditingId(null);
       
       if (wasEditing) {
-        alert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક અપડેટ થઈ ગઈ છે!");
+        triggerAlert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક અપડેટ થઈ ગઈ છે!");
       } else {
-        alert("✅ મટીરિયલ આઉટવર્ડ સફળતાપૂર્વક સેવ થઈ ગયું છે!");
+        triggerAlert("✅ મટીરિયલ આઉટવર્ડ સફળતાપૂર્વક સેવ થઈ ગયું છે!");
       }
 
       let nextDc = '';
@@ -510,7 +598,7 @@ const handleSubmitOutward = async (e) => {
       fetchRecentHistory();
 
     } catch (err) {
-      alert("એરર: " + err.message);
+      triggerAlert("એરર: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -538,7 +626,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
     const printWindow = window.open('', '_blank', 'width=1000,height=750');
     
     if (!printWindow) {
-      alert("કૃપા કરીને પૉપ-અપ બ્લોકર બંધ કરો.");
+     triggerAlert("કૃપા કરીને પૉપ-અપ બ્લોકર બંધ કરો.");
       return;
     }
 
@@ -782,7 +870,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
         </div>
       </div>
 
-      <form onSubmit={handleSubmitOutward} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+<form onSubmit={handleOpenPreview} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
         {/* 2. Modern Plant & Date Selection Card */}
         <div style={{ 
@@ -1080,18 +1168,30 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
               />
             ) : (
               <select 
-                value={item.size || ''} 
-                onChange={(e) => updateOutwardItem(sIndex, iIndex, 'size', e.target.value)} 
-                style={{ flex: '1', minWidth: '0', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#f8fafc', fontWeight: 'bold', color: '#0f172a', boxSizing: 'border-box' }}
-              >
-                <option value="">-- Select Size --</option>
-                {products
-                  .filter(p => p.name && item.material && p.name.trim().toLowerCase() === item.material.trim().toLowerCase() && p.product_size)
-                  .map((p, sIdx) => (
-                    <option key={`sz-${sIdx}`} value={p.product_size}>{p.product_size}</option>
-                  ))
-                }
-              </select>
+  value={item.size || ''} 
+  onChange={(e) => {
+    const newSize = e.target.value;
+    updateOutwardItem(sIndex, iIndex, 'size', newSize);
+    updateOutwardItem(sIndex, iIndex, 'steelSpec', ''); // સ્પેક રીસેટ કરો
+    
+    // 🎯 જો પ્રોડક્ટ Column કે Panel હોય તો સ્ટોકમાંથી સ્ટીલ ડિટેલ્સ લાવો
+    const isColOrPan = (item.material || '').toLowerCase().includes('column') || 
+                       (item.material || '').toLowerCase().includes('panel');
+                       
+    if (isColOrPan && newSize) {
+      fetchAvailableSteelSpecs(sIndex, iIndex, item.material, newSize);
+    }
+  }} 
+  style={{ flex: '1', minWidth: '0', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#f8fafc', fontWeight: 'bold', color: '#0f172a', boxSizing: 'border-box' }}
+>
+  <option value="">-- Select Size --</option>
+  {products
+    .filter(p => p.name && item.material && p.name.trim().toLowerCase() === item.material.trim().toLowerCase() && p.product_size)
+    .map((p, sIdx) => (
+      <option key={`sz-${sIdx}`} value={p.product_size}>{p.product_size}</option>
+    ))
+  }
+</select>
             )
           )}
           
@@ -1135,31 +1235,42 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
     </div>
   );
 })()}
-                 {/* Column Spec */}
-                  {isColumn && (
-                    <div style={{ backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#334155' }}>🛠️ Column Spec:</span>
-                      <select 
-                        value={item.steelSpec || ''} 
-                        onChange={(e) => updateOutwardItem(sIndex, iIndex, 'steelSpec', e.target.value)} 
-                        style={{ flex: 1, padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
-                      >
-                        <option value="">-- Select Column Steel Spec --</option>
-                        <optgroup label="Dia 3mm">
-                          <option value="3mm - 5 wires">3mm - 5 wires</option>
-                          <option value="3mm - 7 wires">3mm - 7 wires</option>
-                          <option value="3mm - 10 wires">3mm - 10 wires</option>
-                        </optgroup>
-                        <optgroup label="Dia 4mm">
-                          <option value="4mm - 5 wires">4mm - 5 wires</option>
-                          <option value="4mm - 7 wires">4mm - 7 wires</option>
-                          <option value="4mm - 10 wires">4mm - 10 wires</option>
-                        </optgroup>
-                      </select>
-                    </div>
-                  )}
+                {/* Dynamic Column Spec from Stock */}
+{isColumn && (
+  <div style={{ backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#334155' }}>🛠️ Column Spec:</span>
+    <select 
+      value={item.steelSpec || ''} 
+      onChange={(e) => updateOutwardItem(sIndex, iIndex, 'steelSpec', e.target.value)} 
+      style={{ flex: 1, padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
+    >
+      <option value="">-- Select Steel Spec from Stock --</option>
+      
+      {/* 🎯 જો સ્ટોકમાંથી સ્પેસિફિકેશન મળ્યા હોય તો એ બતાવશે */}
+      {(availableSpecs[`${sIndex}-${iIndex}`] || []).map((spec, spIdx) => (
+        <option key={spIdx} value={spec}>
+          {spec} (In Stock)
+        </option>
+      ))}
 
-                 {/* Panel Spec (Optgroup વાળા ઓરિજિનલ ડિઝાઇન સાથે) */}
+      {/* જો સ્ટોકમાં કઈં ન મળ્યું હોય અથવા મેન્યુઅલ સિલેક્શન કરવું હોય તેના માટે બેકઅપ */}
+      {(!availableSpecs[`${sIndex}-${iIndex}`] || availableSpecs[`${sIndex}-${iIndex}`].length === 0) && (
+        <>
+          <option value="" disabled>⚠️ આ સાઈઝ માટે સ્ટોકમાં કોઈ સ્પેક નથી</option>
+          <optgroup label="Manual Selection (General)">
+            <option value="3mm - 4 wires">3mm - 4 wires</option>
+            <option value="3mm - 5 wires">3mm - 5 wires</option>
+            <option value="3mm - 7 wires">3mm - 7 wires</option>
+            <option value="4mm - 4 wires">4mm - 4 wires</option>
+            <option value="4mm - 5 wires">4mm - 5 wires</option>
+          </optgroup>
+        </>
+      )}
+    </select>
+  </div>
+)}
+
+              {/* 🛠️ Dynamic Panel Spec from Stock */}
 {isPanel && (
   <div style={{ backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
     <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#334155' }}>🛠️ Panel Spec:</span>
@@ -1169,14 +1280,26 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
       style={{ flex: 1, padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
     >
       <option value="">-- Select Panel Steel Spec --</option>
-      <optgroup label="Dia 3mm">
-        <option value="3mm - 3 wires">3mm - 3 wires</option>
-        <option value="3mm - 4 wires">3mm - 4 wires</option>
-      </optgroup>
-      <optgroup label="Dia 4mm">
-        <option value="4mm - 3 wires">4mm - 3 wires</option>
-        <option value="4mm - 4 wires">4mm - 4 wires</option>
-      </optgroup>
+
+      {/* 🎯 જો સ્ટોકમાંથી સ્પેસિફિકેશન મળ્યા હોય તો માત્ર એ જ બતાવશે */}
+      {(availableSpecs[`${sIndex}-${iIndex}`] || []).map((spec, spIdx) => (
+        <option key={spIdx} value={spec}>
+          {spec} (In Stock)
+        </option>
+      ))}
+
+      {/* 🛡️ બેકઅપ: જો સ્ટોકમાં એન્ટ્રી ન મળી હોય ત્યારે જ મેન્યુઅલ ઓપ્શન આપશે */}
+      {(!availableSpecs[`${sIndex}-${iIndex}`] || availableSpecs[`${sIndex}-${iIndex}`].length === 0) && (
+        <>
+          <option value="" disabled>⚠️ આ સાઇઝ માટે સ્ટોકમાં કોઈ સ્પેક નથી</option>
+          <optgroup label="Manual Selection (General)">
+            <option value="3mm - 3 wires">3mm - 3 wires</option>
+            <option value="3mm - 4 wires">3mm - 4 wires</option>
+            <option value="4mm - 3 wires">4mm - 3 wires</option>
+            <option value="4mm - 4 wires">4mm - 4 wires</option>
+          </optgroup>
+        </>
+      )}
     </select>
   </div>
 )}
@@ -1212,32 +1335,14 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                   }} 
                 />
                 
-                {/* 📄 Create DC / Attach DC Button */}
-                <label 
-                  htmlFor={`outward-dc-upload-${sIndex}`} 
-                  style={{ backgroundColor: '#fff7ed', color: '#c2410c', border: '1px dashed #ea580c', padding: '5px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  📄 {source.billFiles && source.billFiles.length > 0 ? `${source.billFiles.length} DC Attached` : 'Create DC'}
-                </label>
-
+               
                 {/* સિલેક્ટ થયેલી ફાઇલોની યાદી અને હટાવવા માટેનું ✕ બટન */}
                 {source.billFiles && source.billFiles.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
                     {source.billFiles.map((file, fIndex) => (
                       <div key={fIndex} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '10px', border: '1px solid #cbd5e1' }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }} title={file.name}>
-                          📄 {file.name}
-                        </span>
-                        <button 
-                          type="button" 
-                          onClick={() => {
-                            const updatedFiles = source.billFiles.filter((_, idx) => idx !== fIndex);
-                            updateOutwardSource(sIndex, 'billFiles', updatedFiles);
-                          }} 
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', padding: '0 4px' }}
-                        >
-                          ✕
-                        </button>
+                       
+                     
                       </div>
                     ))}
                   </div>
@@ -1449,7 +1554,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
           if (delErr) throw delErr;
         }
 
-        alert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+       triggerAlert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
 
         // ૩. ફોર્મ રિસેટ કરો અને નવો DC નંબર મેળવો
         let nextDc = '';
@@ -1477,7 +1582,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
         fetchRecentHistory();
 
       } catch (err) {
-        alert("એરર: " + err.message);
+        triggerAlert("એરર: " + err.message);
       }
     }
   }}
@@ -1490,6 +1595,161 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
         )}
       </div>
       </form>
+      {/* 🔍 OUTWARD PREVIEW MODAL */}
+{showPreview && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    padding: '16px',
+    boxSizing: 'border-box'
+  }}>
+    <div style={{
+      backgroundColor: '#ffffff',
+      borderRadius: '16px',
+      width: '100%',
+      maxWidth: '560px',
+      maxHeight: '90vh',
+      display: 'flex',
+      flexDirection: 'column',
+      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+      overflow: 'hidden'
+    }}>
+      
+      {/* Modal Header */}
+      <div style={{
+        backgroundColor: '#fff7ed',
+        padding: '14px 18px',
+        borderBottom: '1px solid #fed7aa',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#9a3412' }}>
+            📋 Outward Entry Preview
+          </h3>
+          <span style={{ fontSize: '11px', color: '#c2410c' }}>સબમિટ કરતાં પહેલાં આઉટવર્ડ વિગતો ચકાસી લો</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{ background: 'none', border: 'none', fontSize: '18px', fontWeight: 'bold', color: '#9a3412', cursor: 'pointer' }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Modal Content */}
+      <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        
+        {/* Plant & Date Card */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', backgroundColor: '#f8fafc', padding: '10px 12px', borderRadius: '10px', fontSize: '12px', border: '1px solid #e2e8f0' }}>
+          <div><strong>પ્લાન્ટ:</strong> {selectedPlant}</div>
+          <div><strong>તારીખ:</strong> {dprDate}</div>
+        </div>
+
+        {/* Sources & Dispatched Items */}
+        {outwardSources.map((src, sIdx) => (
+          <div key={src.id} style={{ border: '1px solid #fed7aa', borderRadius: '10px', padding: '12px', backgroundColor: '#fffaf5', fontSize: '12px' }}>
+            
+            {/* Header: DC & Party Info */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fed7aa', paddingBottom: '6px', marginBottom: '8px' }}>
+              <span style={{ fontWeight: 'bold', color: '#ea580c' }}>
+                📄 {src.dcNumber || 'No DC'}
+              </span>
+              <span style={{ fontSize: '11px', color: '#475569' }}>
+                Vehicle: <strong>{src.vehicleNumber || '-'}</strong>
+              </span>
+            </div>
+
+            <div style={{ color: '#334155', marginBottom: '8px', fontSize: '11.5px', lineHeight: '1.5' }}>
+              <div><strong>પાર્ટી:</strong> {src.party}</div>
+              <div><strong>સાઇટ:</strong> {src.site}</div>
+              {src.transporter && src.transporter !== 'OTHER_TRANSPORTER_MANUAL' && (
+                <div><strong>ટ્રાન્સપોર્ટર:</strong> {src.transporter}</div>
+              )}
+            </div>
+
+            {/* Items Table / List */}
+            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #fed7aa', padding: '8px' }}>
+              <div style={{ fontWeight: '700', fontSize: '11px', color: '#9a3412', marginBottom: '4px' }}>
+                જતાં માલની વિગત (Dispatched Items):
+              </div>
+              {src.items.filter(it => it.material && it.qty).map((it, iIdx) => (
+                <div key={iIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: iIdx < src.items.length - 1 ? '1px dashed #f1f5f9' : 'none', padding: '4px 0', fontSize: '11px' }}>
+                  <div>
+                    <span style={{ fontWeight: '600', color: '#0f172a' }}>{it.material}</span>
+                    {it.size ? ` - ${it.size}` : ''}
+                    {it.steelSpec ? ` (${it.steelSpec})` : ''}
+                    <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '6px' }}>[{it.category || 'Finished Product'}]</span>
+                  </div>
+                  <div style={{ fontWeight: 'bold', color: '#ea580c', whiteSpace: 'nowrap' }}>
+                    {it.qty} {it.unit || 'Nos'}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+          </div>
+        ))}
+      </div>
+
+      {/* Modal Footer Actions */}
+      <div style={{ padding: '12px 16px', backgroundColor: '#fff7ed', borderTop: '1px solid #fed7aa', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#e2e8f0',
+            color: '#334155',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          ✏️ સુધારો કરવો છે (Edit)
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmitOutward}
+          disabled={loading}
+          style={{
+            padding: '8px 18px',
+            backgroundColor: '#ea580c',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          {loading ? 'સેવ થાય છે...' : '✅ બરાબર છે, સબમિટ કરો'}
+        </button>
+      </div>
+
+    </div>
+  </div>
+)}
+{/* 🔔 Existing ConfirmModal Integration */}
+<ConfirmModal
+  isOpen={alertModal.isOpen}
+  message={alertModal.message}
+  onConfirm={() => setAlertModal({ isOpen: false, message: '' })}
+  onCancel={() => setAlertModal({ isOpen: false, message: '' })}
+/>
 {/* 📜 Recent Outward History (Grouped by DC Number) */}
 {recentHistory.length > 0 && (() => {
   // 🎯 ૧. એક જ DC નંબર વાળા બધા રેકૉર્ડ્સને ભેગા (Group) કરવાનું લોજિક

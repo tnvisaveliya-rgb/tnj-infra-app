@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X, Layers, Box, ArrowLeft } from 'lucide-react';
+import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X, Layers, Box, ArrowLeft,Bell  } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import SupervisorDashboard from './SupervisorDashboard';
@@ -11,7 +11,7 @@ import PlantOutwardPage from './PlantOutwardPage';
 import SiteMaterialReturn from './SiteMaterialReturn';
 import IssueReturn from './IssueReturn';
 import PlantExpensesPage from './PlantExpensesPage';
-
+import SupervisorFundRequest from './SupervisorFundRequest';
 
 
 // ❌ પહેલા આવું હતું:
@@ -532,10 +532,12 @@ export default function PlantEmployeeDashboard() {
   const [rawMaterialsStock, setRawMaterialsStock] = useState([]);
   const [plantList, setPlantList] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('All');
+  const [notifications, setNotifications] = useState([]);
+const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isExpensePopupOpen, setIsExpensePopupOpen] = useState(false);
   const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense');
-  const [incomeInitialTab, setIncomeInitialTab] = useState('expense');
+  const [incomeInitialTab, setIncomeInitialTab] = useState('supervisiorfundrequest');
 
   const [attendanceInfo, setAttendanceInfo] = useState({
     status: 'Punched In',
@@ -587,51 +589,117 @@ export default function PlantEmployeeDashboard() {
 
     fetchPlantList();
   }, []);
+const fetchNotifications = async () => {
+  try {
+    const list = [];
 
-  const fetchDashboardData = async () => {
+    // ટેબલમાંથી જરૂરી કોલમ્સ ફેચ કરવી
+    let fundQuery = supabase
+      .from('plant_fund_transfers')
+      .select('id, plant_name, purpose, requested_amount, approved_amount, status, approved_by, received_by, admin_remarks');
+
+    if (selectedPlant && selectedPlant !== 'All') {
+      fundQuery = fundQuery.eq('plant_name', selectedPlant.trim());
+    }
+
+    // PENDING અને SENT બંને સ્ટેટસ લાવવા
+    fundQuery = fundQuery
+      .in('status', ['PENDING', 'SENT', 'pending', 'sent'])
+      .order('id', { ascending: false })
+      .limit(10);
+
+    const { data: fundReq, error: fundErr } = await fundQuery;
+
+    if (fundErr) {
+      console.error('Supabase Query Error:', fundErr.message);
+      return;
+    }
+
+    if (fundReq && fundReq.length > 0) {
+      fundReq.forEach(item => {
+        const st = (item.status || '').toUpperCase();
+        const amt = Number(item.approved_amount || item.requested_amount || 0);
+
+        // એડમિને મોકલી દીધા હોય (SENT) પણ સુપરવાઇઝરે હજુ સ્વીકારવાના બાકી હોય
+        if (st === 'SENT') {
+          list.push({
+            id: `fund-${item.id}`,
+            title: `🎉 Admin Approved: ₹${amt.toLocaleString('en-IN')}`,
+            subText: `${item.purpose || 'ફંડ'} - સ્વીકારો (Receive)`,
+            tab: 'supervisiorfundrequest',
+            time: 'Payment Sent',
+            color: '#16a34a' // Green
+          });
+        } 
+        // સુપરવાઇઝરે રિક્વેસ્ટ મોકલેલી હોય પણ Admin એ હજુ અપ્રૂવ ન કરી હોય
+        else if (st === 'PENDING') {
+          list.push({
+            id: `fund-${item.id}`,
+            title: `⏳ Pending Approval: ₹${amt.toLocaleString('en-IN')}`,
+            subText: item.purpose || 'ફંડ રિક્વેસ્ટ',
+            tab: 'supervisiorfundrequest',
+            time: 'Waiting Admin',
+            color: '#ea580c' // Orange
+          });
+        }
+      });
+    }
+
+    setNotifications(list);
+  } catch (err) {
+    console.error('Error fetching notifications:', err);
+  }
+};
+useEffect(() => {
+  fetchNotifications();
+}, [user, selectedPlant]);
+const fetchDashboardData = async () => {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
-      const userEmail = user?.email;
+      const userEmail = (user?.email || '').toLowerCase().trim();
 
       if (!userEmail) return;
 
       let totalIncome = 0;
-      let totalPlantExpense = 0;
-      let totalSiteExpense = 0;
+      let totalExpense = 0;
       let todayExpSum = 0;
 
-      // ૧. SITE TRANSACTIONS
-      const { data: siteTxData, error: siteTxErr } = await supabase
-        .from('site_transactions')
+      // =========================================================
+      // ૧. યુઝરને મળેલી તમામ ફંડ આવક (USER ID SPECIFIC)
+      // =========================================================
+      const { data: fundData, error: fundErr } = await supabase
+        .from('plant_fund_transfers')
         .select('*');
 
-      if (!siteTxErr && siteTxData) {
-        const userSiteTx = siteTxData.filter(item => 
-          item.created_by === userEmail ||
-          item.user_id === userEmail ||
-          item.email === userEmail
-        );
+      if (!fundErr && fundData) {
+        fundData.forEach(item => {
+          const status = (item.status || '').toUpperCase();
+          const recBy = (item.received_by || '').toLowerCase().trim();
 
-        userSiteTx.forEach(item => {
-          const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
-          const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
-          const typeStr = (item.type || item.transaction_type || '').toLowerCase();
-
-          if (
-            typeStr.includes('income') || 
-            typeStr.includes('credit') || 
-            typeStr.includes('fund') || 
-            typeStr.includes('receive') || 
-            typeStr.includes('deposit')
-          ) {
+          // માત્ર આ યુઝરને મળેલ અને સ્વીકારેલ (RECEIVED) ફંડ
+          if (status === 'RECEIVED' && recBy === userEmail) {
+            const amt = parseFloat(item.approved_amount || item.requested_amount || 0);
             totalIncome += amt;
-          } else if (
-            typeStr.includes('expense') || 
-            typeStr.includes('debit') || 
-            typeStr.includes('payment') || 
-            typeStr.includes('cash')
-          ) {
-            totalSiteExpense += amt;
+          }
+        });
+      }
+
+      // =========================================================
+      // ૨. યુઝરે કરેલા પ્લાન્ટ ખર્ચા (PLANT EXPENSES BY USER)
+      // =========================================================
+      const { data: plantExpData, error: plantExpErr } = await supabase
+        .from('plant_expenses')
+        .select('*');
+
+      if (!plantExpErr && plantExpData) {
+        plantExpData.forEach(item => {
+          const subBy = (item.submitted_by || item.created_by || '').toLowerCase().trim();
+          
+          if (subBy === userEmail) {
+            const amt = parseFloat(item.amount || 0);
+            const itemDate = item.expense_date || (item.created_at ? item.created_at.split('T')[0] : '');
+
+            totalExpense += amt;
             if (itemDate === todayStr) {
               todayExpSum += amt;
             }
@@ -639,32 +707,50 @@ export default function PlantEmployeeDashboard() {
         });
       }
 
-      // ૨. PLANT EXPENSES
-      const { data: plantExpData, error: plantExpErr } = await supabase
-        .from('plant_expenses')
+      // =========================================================
+      // ૩. સાઇટ ટ્રાન્ઝેક્શન્સ (SITE TRANSACTIONS BY USER)
+      // =========================================================
+      const { data: siteTxData, error: siteTxErr } = await supabase
+        .from('site_transactions')
         .select('*');
 
-      if (!plantExpErr && plantExpData) {
-        const userPlantExp = plantExpData.filter(item => 
-          item.submitted_by === userEmail ||
-          item.created_by === userEmail
-        );
+      if (!siteTxErr && siteTxData) {
+        siteTxData.forEach(item => {
+          const creator = (item.created_by || item.user_id || item.email || '').toLowerCase().trim();
 
-        userPlantExp.forEach(item => {
-          const amt = parseFloat(item.amount || 0);
-          const itemDate = item.expense_date || (item.created_at ? item.created_at.split('T')[0] : '');
+          if (creator === userEmail) {
+            const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
+            const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
+            const typeStr = (item.type || item.transaction_type || '').toLowerCase();
 
-          totalPlantExpense += amt;
-          if (itemDate === todayStr) {
-            todayExpSum += amt;
+            if (
+              typeStr.includes('income') || 
+              typeStr.includes('credit') || 
+              typeStr.includes('fund') || 
+              typeStr.includes('receive') || 
+              typeStr.includes('deposit')
+            ) {
+              totalIncome += amt;
+            } else if (
+              typeStr.includes('expense') || 
+              typeStr.includes('debit') || 
+              typeStr.includes('payment') || 
+              typeStr.includes('cash')
+            ) {
+              totalExpense += amt;
+              if (itemDate === todayStr) {
+                todayExpSum += amt;
+              }
+            }
           }
         });
       }
 
-      const grandTotalExpense = totalPlantExpense + totalSiteExpense;
-      setWorkingBalance(totalIncome - grandTotalExpense);
+      // 🌟 લાઈવ શિલક (Live Cash in Hand with logged-in user)
+      setWorkingBalance(totalIncome - totalExpense);
       setTodayExpense(todayExpSum);
 
+      // (ઇન્વેન્ટરી અને એટેન્ડન્સનો આગળનો કોડ એમ જ રહેશે...)
       // ૪. RAW MATERIAL, STORE & ASSETS STOCK
       let matQuery = supabase.from('material_stock_ledger').select('*');
       if (selectedPlant && selectedPlant !== 'All') {
@@ -824,9 +910,143 @@ export default function PlantEmployeeDashboard() {
                 </h2>
               </div>
             </div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#16a34a', backgroundColor: '#f0fdf4', padding: '4px 8px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-              ● Active
+           {/* 🔔 Notification Bell Icon & Dropdown */}
+<div style={{ position: 'relative' }}>
+  <div 
+    onClick={() => setIsNotifOpen(!isNotifOpen)}
+    style={{ 
+      width: '38px', 
+      height: '38px', 
+      borderRadius: '10px', 
+      backgroundColor: isNotifOpen ? '#eff6ff' : '#f8fafc', 
+      border: '1px solid #cbd5e1', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      cursor: 'pointer',
+      position: 'relative'
+    }}
+  >
+    <Bell size={18} color={notifications.length > 0 ? '#2563eb' : '#64748b'} />
+    
+    {/* નોટિફિકેશન કાઉન્ટ બેજ */}
+    {notifications.length > 0 && (
+      <span style={{
+        position: 'absolute',
+        top: '-4px',
+        right: '-4px',
+        backgroundColor: '#dc2626',
+        color: '#ffffff',
+        fontSize: '9px',
+        fontWeight: '900',
+        borderRadius: '50%',
+        width: '18px',
+        height: '18px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        border: '2px solid #ffffff'
+      }}>
+        {notifications.length}
+      </span>
+    )}
+  </div>
+
+  {/* 📋 Notification Dropdown List */}
+  {isNotifOpen && (
+    <div style={{
+      position: 'absolute',
+      right: 0,
+      top: '46px',
+      width: '280px',
+      backgroundColor: '#ffffff',
+      borderRadius: '14px',
+      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.15)',
+      border: '1px solid #e2e8f0',
+      padding: '10px',
+      zIndex: 1000
+    }}>
+      {/* Header */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        paddingBottom: '8px', 
+        borderBottom: '1px solid #f1f5f9',
+        marginBottom: '8px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Bell size={14} color="#2563eb" />
+          <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
+            NOTIFICATIONS ({notifications.length})
+          </span>
+        </div>
+        <button 
+          onClick={() => setIsNotifOpen(false)}
+          style={{ 
+            background: '#f1f5f9', 
+            border: 'none', 
+            borderRadius: '50%', 
+            width: '22px', 
+            height: '22px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            cursor: 'pointer', 
+            color: '#64748b' 
+          }}
+        >
+          <X size={13} strokeWidth={2.5} />
+        </button>
+      </div>
+
+      {/* List Container */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
+        {notifications.length === 0 ? (
+          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>
+            કોઈ નવી રિક્વેસ્ટ કે નોટિફિકેશન નથી.
+          </div>
+        ) : (
+          notifications.map((notif) => (
+            <div 
+              key={notif.id}
+              onClick={() => {
+                setActiveTab(notif.tab);
+                setIsNotifOpen(false);
+              }}
+              style={{
+                padding: '8px 10px',
+                borderRadius: '8px',
+                backgroundColor: '#f8fafc',
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                border: '1px solid #f1f5f9',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#1e293b' }}>
+                  {notif.title}
+                </p>
+                {notif.subText && (
+                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '500' }}>
+                    {notif.subText}
+                  </span>
+                )}
+                <span style={{ fontSize: '9px', color: notif.color || '#dc2626', fontWeight: '700', marginTop: '2px' }}>
+                  ● {notif.time}
+                </span>
+              </div>
+              <ChevronRight size={14} color="#94a3b8" />
             </div>
+          ))
+        )}
+      </div>
+    </div>
+  )}
+</div>
           </div>
 
           {/* Wallet Balance Card */}
@@ -1108,7 +1328,7 @@ export default function PlantEmployeeDashboard() {
 
       {activeTab === 'dpr' && <PlantDprEntry />}
       {activeTab === 'attendance' && <AttendancePage />}
-      {activeTab === 'expense' && <SupervisorExpenses defaultType={incomeInitialTab} />}
+      {activeTab === 'supervisiorfundrequest' && <SupervisorFundRequest defaultType={incomeInitialTab} />}
       {activeTab === 'inward' && <PlantInwardPage />}
       {activeTab === 'outward' && <PlantOutwardPage />}
       {activeTab === 'site_return' && <SiteMaterialReturn />}
@@ -1230,7 +1450,7 @@ export default function PlantEmployeeDashboard() {
             <div 
               onClick={() => {
                 setIncomeInitialTab('income');
-                setActiveTab('expense');
+                setActiveTab('supervisiorfundrequest');
                 setIsExpensePopupOpen(false);
               }} 
               style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer' }}

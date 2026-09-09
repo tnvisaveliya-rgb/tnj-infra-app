@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { ArrowDownRight, Send, Plus, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
+import ConfirmModal from '../components/ConfirmModal';  
 export default function PlantInwardPage({ user }) {
     const [searchParams] = useSearchParams();
   const approveIdFromRouter = searchParams.get('approve_id');
@@ -116,6 +117,20 @@ const fetchPlants = async () => {
     }
   ]);
 
+  const [showPreview, setShowPreview] = useState(false);
+const [alertModal, setAlertModal] = useState({
+  isOpen: false,
+  message: ''
+});
+
+// 🔔 alert() ની જગ્યાએ કસ્ટમ મોડલ ખોલવા માટેનું ફંક્શન
+const triggerAlert = (msg) => {
+  setAlertModal({
+    isOpen: true,
+    message: msg
+  });
+};
+
   useEffect(() => {
     fetchPlants();
   }, []);
@@ -194,7 +209,7 @@ useEffect(() => {
 
   const handleDropdownClick = () => {
     if (!selectedPlant) {
-      alert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
       return false;
     }
     return true;
@@ -211,10 +226,10 @@ useEffect(() => {
     setInwardSources(updated);
   };
 
- const handleSubmitInward = async (e) => {
-    e.preventDefault();
+const handleOpenPreview = async (e) => {
+  e.preventDefault();
     if (!selectedPlant) {
-      alert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
       return;
     }
 
@@ -223,13 +238,13 @@ useEffect(() => {
       const hasAnyData = src.supplier || src.dcNumber || src.vehicleNumber || src.items.some(i => i.material || i.qty);
       if (hasAnyData) {
         if (!src.supplier) {
-          alert(`⚠️ Inward Source #${sIdx + 1}: કૃપા કરીને સપ્લાયર સિલેક્ટ કરો!`);
+         triggerAlert(`⚠️ Inward Source #${sIdx + 1}: કૃપા કરીને સપ્લાયર સિલેક્ટ કરો!`);
           return;
         }
         for (let iIdx = 0; iIdx < src.items.length; iIdx++) {
           const item = src.items[iIdx];
           if (!item.material || !item.qty) {
-            alert(`⚠️ Inward Source #${sIdx + 1} (Item #${iIdx + 1}): મટીરિયલ અને Qty બંને ભરવા ફરજિયાત છે!`);
+            triggerAlert(`⚠️ Inward Source #${sIdx + 1} (Item #${iIdx + 1}): મટીરિયલ અને Qty બંને ભરવા ફરજિયાત છે!`);
             return;
           }
 
@@ -244,7 +259,7 @@ useEffect(() => {
               .maybeSingle();
 
             if (existingDc) {
-              alert(`❌ ડુપ્લિકેટ એન્ટ્રી અટકાવાઈ: Inward DC Number "${cleanDc}" આ પ્લાન્ટમાં પહેલેથી જ મોજૂદ છે!`);
+              triggerAlert(`❌ ડુપ્લિકેટ એન્ટ્રી અટકાવાઈ: Inward DC Number "${cleanDc}" આ પ્લાન્ટમાં પહેલેથી જ મોજૂદ છે!`);
               return;
             }
           } else {
@@ -258,13 +273,17 @@ useEffect(() => {
               .maybeSingle();
 
             if (existingMat) {
-              alert(`❌ ડુપ્લિકેટ એન્ટ્રી અટકાવાઈ: તારીખ ${dprDate} પર આ પ્લાન્ટમાં "${item.material}" ની એન્ટ્રી પહેલેથી જ થયેલ છે!`);
+             triggerAlert(`❌ ડુપ્લિકેટ એન્ટ્રી અટકાવાઈ: તારીખ ${dprDate} પર આ પ્લાન્ટમાં "${item.material}" ની એન્ટ્રી પહેલેથી જ થયેલ છે!`);
               return;
             }
           }
         }
       }
     }
+    setShowPreview(true); // ✅ બધું બરાબર હોય તો પ્રિવ્યૂ મોડલ ખોલો
+};
+const handleSubmitInward = async () => {
+  setShowPreview(false); //
 
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Supervisor';
@@ -312,7 +331,7 @@ useEffect(() => {
      
             if (uploadErr) {
               console.error("Upload Error Details:", uploadErr);
-              alert("Bill Upload Error: " + uploadErr.message);
+             triggerAlert("Bill Upload Error: " + uploadErr.message);
               setLoading(false);
               return;
             }
@@ -462,12 +481,12 @@ useEffect(() => {
       fetchRecentHistory();
 
       if (wasEditing) {
-        alert("✅ મટીરિયલ ઇનવર્ડ સફળતાપૂર્વક અપડેટ થઈ ગયું છે!");
+        triggerAlert("✅ મટીરિયલ ઇનવર્ડ સફળતાપૂર્વક અપડેટ થઈ ગયું છે!");
       } else {
-        alert("✅ મટીરિયલ ઇનવર્ડ સફળતાપૂર્વક સેવ થઈ ગયું છે!");
+        triggerAlert("✅ મટીરિયલ ઇનવર્ડ સફળતાપૂર્વક સેવ થઈ ગયું છે!");
       }
     } catch (err) {
-      alert("એરર: " + err.message);
+      triggerAlert("એરર: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -528,11 +547,11 @@ const handleDeleteExistingBill = async (billUrlToRemove) => {
     console.log("Supabase Response - Data:", data, "Error:", error);
 
     if (error) {
-      alert("Database Error: " + error.message);
+      triggerAlert("Database Error: " + error.message);
     } else if (!data || data.length === 0) {
-      alert("⚠️ એન્ટ્રી મળી નહીં અથવા RLS પોલીસીના લીધે અપડેટ થઈ શકી નથી!");
+      triggerAlert("⚠️ એન્ટ્રી મળી નહીં અથવા RLS પોલીસીના લીધે અપડેટ થઈ શકી નથી!");
     } else {
-      alert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
+      triggerAlert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
       window.history.replaceState({}, document.title, window.location.pathname);
       fetchRecentHistory();
     }
@@ -583,7 +602,7 @@ return (
         </div>
       </div>
 
-      <form onSubmit={handleSubmitInward} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+     <form onSubmit={handleOpenPreview} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* 2. Modern Plant & Date Selection Card */}
       <div style={{ 
         backgroundColor: '#ffffff', 
@@ -1133,13 +1152,13 @@ return (
 
                     if (delErr) throw delErr;
 
-                    alert("✅ ઇનવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+                    triggerAlert("✅ ઇનવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
                     
                     handleCancelEdit();
                     fetchRecentHistory();
 
                   } catch (err) {
-                    alert("એરર: એન્ટ્રી ડિલીટ કરવામાં સમસ્યા આવી રહી છે - " + err.message);
+                    triggerAlert("એરર: એન્ટ્રી ડિલીટ કરવામાં સમસ્યા આવી રહી છે - " + err.message);
                   }
                 }
               }}
@@ -1161,7 +1180,145 @@ return (
           </>
         )}
       </div>
-      
+      {/* 🔔 1. SINGLE OK BUTTON ALERT MODAL */}
+<ConfirmModal
+  isOpen={alertModal.isOpen}
+  message={alertModal.message}
+  singleButton={true}
+  onConfirm={() => setAlertModal({ isOpen: false, message: '' })}
+/>
+
+{/* 🔍 2. INWARD ENTRY PREVIEW MODAL */}
+{showPreview && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    padding: '16px',
+    boxSizing: 'border-box'
+  }}>
+    <div style={{
+      backgroundColor: '#ffffff',
+      borderRadius: '16px',
+      width: '100%',
+      maxWidth: '560px',
+      maxHeight: '90vh',
+      display: 'flex',
+      flexDirection: 'column',
+      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+      overflow: 'hidden'
+    }}>
+      {/* Header */}
+      <div style={{
+        backgroundColor: '#f0fdf4',
+        padding: '14px 18px',
+        borderBottom: '1px solid #bbf7d0',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#14532d' }}>
+            📋 Inward Entry Preview
+          </h3>
+          <span style={{ fontSize: '11px', color: '#15803d' }}>સબમિટ કરતાં પહેલાં ઇનવર્ડ વિગતો ચકાસી લો</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{ background: 'none', border: 'none', fontSize: '18px', fontWeight: 'bold', color: '#14532d', cursor: 'pointer' }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', backgroundColor: '#f8fafc', padding: '10px 12px', borderRadius: '10px', fontSize: '12px', border: '1px solid #e2e8f0' }}>
+          <div><strong>પ્લાન્ટ:</strong> {selectedPlant}</div>
+          <div><strong>તારીખ:</strong> {dprDate}</div>
+        </div>
+
+        {inwardSources.map((src, sIdx) => (
+          <div key={src.id} style={{ border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px', backgroundColor: '#fafffb', fontSize: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #dcfce7', paddingBottom: '6px', marginBottom: '8px' }}>
+              <span style={{ fontWeight: 'bold', color: '#16a34a' }}>
+                🏢 {src.supplier || 'No Supplier'}
+              </span>
+              <span style={{ fontSize: '11px', color: '#475569' }}>
+                DC: <strong>{src.dcNumber || '-'}</strong> | Veh: <strong>{src.vehicleNumber || '-'}</strong>
+              </span>
+            </div>
+
+            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #dcfce7', padding: '8px' }}>
+              <div style={{ fontWeight: '700', fontSize: '11px', color: '#14532d', marginBottom: '4px' }}>
+                આવેલ મટીરિયલ (Incoming Items):
+              </div>
+              {src.items.filter(it => it.material && it.qty).map((it, iIdx) => (
+                <div key={iIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: iIdx < src.items.length - 1 ? '1px dashed #f1f5f9' : 'none', padding: '4px 0', fontSize: '11px' }}>
+                  <div>
+                    <span style={{ fontWeight: '600', color: '#0f172a' }}>{it.material}</span>
+                    {it.size ? ` - ${it.size}` : ''}
+                    {it.steelSpec ? ` (${it.steelSpec})` : ''}
+                    <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '6px' }}>[{it.category || 'Raw Material'}]</span>
+                  </div>
+                  <div style={{ fontWeight: 'bold', color: '#16a34a' }}>
+                    {it.qty} {it.unit || 'Nos'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer Actions */}
+      <div style={{ padding: '12px 16px', backgroundColor: '#f0fdf4', borderTop: '1px solid #bbf7d0', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => setShowPreview(false)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#e2e8f0',
+            color: '#334155',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          ✏️ સુધારો કરવો છે (Edit)
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmitInward}
+          disabled={loading}
+          style={{
+            padding: '8px 18px',
+            backgroundColor: '#16a34a',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          {loading ? 'સેવ થાય છે...' : '✅ બરાબર છે, સબમિટ કરો'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 {/* 📜 Recent Inward History (Clean Look & 24h Edit) */}
 {recentHistory.length > 0 && (
   <div style={{ marginTop: '15px' }}>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Receipt, Send, Plus, Trash2, Clock, Upload, X } from 'lucide-react';
+import ConfirmModal from '../components/ConfirmModal';
 export default function PlantExpensesPage({ user }) {
   const [plants, setPlants] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('');
@@ -9,6 +10,7 @@ export default function PlantExpensesPage({ user }) {
   const [expensesHistory, setExpensesHistory] = useState([]);
   const [activeModalRowIndex, setActiveModalRowIndex] = useState(null);
   const [editingExpenseId, setEditingExpenseId] = useState(null);
+  
 
   // 🌟 રિપોર્ટના તમામ સ્ટેટ્સ અહીં ઉપર જ ડીકલેર કરો
   const [reportPlantFilter, setReportPlantFilter] = useState('All');
@@ -27,7 +29,18 @@ export default function PlantExpensesPage({ user }) {
   const [plantLabours, setPlantLabours] = useState([]);
   const [availableMaterials, setAvailableMaterials] = useState([]);
 const [showPreviewModal, setShowPreviewModal] = useState(false);
+const [alertModal, setAlertModal] = useState({
+  isOpen: false,
+  message: ''
+});
 
+// 🔔 alert() ની જગ્યાએ કોલ કરવા માટેનું ફંક્શન
+const triggerAlert = (msg) => {
+  setAlertModal({
+    isOpen: true,
+    message: msg
+  });
+};
 const filteredReportList = expensesHistory.filter(item => {
     // ૧. તારીખ ફિલ્ટર
     const itemDate = item.expense_date;
@@ -143,7 +156,7 @@ const [expenseRows, setExpenseRows] = useState([
 const handleOpenPreview = (e) => {
     e.preventDefault();
     if (!selectedPlant) {
-      alert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
+      triggerAlert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
       return;
     }
 
@@ -152,32 +165,32 @@ const handleOpenPreview = (e) => {
       const isHardware = (row.expenseCategory || '').toLowerCase().includes('hardware') || (row.expenseCategory || '').toLowerCase().includes('tool');
 
       if (!row.amount || Number(row.amount) <= 0) {
-        alert(`⚠️ એક્સપેન્સ #${i + 1}: કૃપા કરીને સાચી રકમ (Amount) દાખલ કરો!`);
+        triggerAlert(`⚠️ એક્સપેન્સ #${i + 1}: કૃપા કરીને સાચી રકમ (Amount) દાખલ કરો!`);
         return;
       }
 
       if ((isHardware || row.addToStock) && !row.billFile) {
-        alert(`⚠️ એક્સપેન્સ #${i + 1}: હાર્ડવેર/ટૂલ્સ માટે બિલ/ફોટો અપલોડ કરવો ફરજિયાત છે!`);
+        triggerAlert(`⚠️ એક્સપેન્સ #${i + 1}: હાર્ડવેર/ટૂલ્સ માટે બિલ/ફોટો અપલોડ કરવો ફરજિયાત છે!`);
         return;
       }
 
       if (row.addToStock) {
         if (!row.stockItems || row.stockItems.length === 0) {
-          alert(`⚠️ એક્સપેન્સ #${i + 1}: કૃપા કરીને ઓછામાં ઓછું એક મટીરીયલ ઉમેરો!`);
+          triggerAlert(`⚠️ એક્સપેન્સ #${i + 1}: કૃપા કરીને ઓછામાં ઓછું એક મટીરીયલ ઉમેરો!`);
           return;
         }
         for (let s = 0; s < row.stockItems.length; s++) {
           const item = row.stockItems[s];
           if (!item.selectedMaterial) {
-            alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): મટીરીયલ પસંદ કરો!`);
+            triggerAlert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): મટીરીયલ પસંદ કરો!`);
             return;
           }
           if (item.selectedMaterial === '__OTHER__' && !item.manualMaterialName?.trim()) {
-            alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): મેન્યુઅલ નામ દાખલ કરો!`);
+            triggerAlert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): મેન્યુઅલ નામ દાખલ કરો!`);
             return;
           }
           if (!item.qty || Number(item.qty) <= 0) {
-            alert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): સાચી સંખ્યા (Qty) દાખલ કરો!`);
+            triggerAlert(`⚠️ એક્સપેન્સ #${i + 1} (Item #${s + 1}): સાચી સંખ્યા (Qty) દાખલ કરો!`);
             return;
           }
         }
@@ -358,7 +371,7 @@ const handleDeleteCurrentExpense = async () => {
         throw new Error("ડેટાબેઝ ડિલીટ એરર: " + delErr.message);
       }
 
-      alert("✅ ખર્ચ સફળતાપૂર્વક ડિલીટ થઈ ગયો છે!");
+      triggerAlert("✅ ખર્ચ સફળતાપૂર્વક ડિલીટ થઈ ગયો છે!");
 
       // ૪. ફોર્મ રીસેટ કરવું
       setEditingExpenseId(null);
@@ -383,7 +396,7 @@ const handleDeleteCurrentExpense = async () => {
       await fetchExpensesHistory();
 
     } catch (err) {
-      alert("Delete Error: " + err.message);
+      triggerAlert("Delete Error: " + err.message);
       console.error("Delete process error:", err);
     } finally {
       setLoading(false);
@@ -504,9 +517,9 @@ const fetchExpensesHistory = async () => {
         .getPublicUrl(filePath);
 
       updated[index].billFile = publicURLData.publicUrl;
-      alert("✅ બિલ સફળતાપૂર્વક અપલોડ થઈ ગયું છે!");
+      triggerAlert("✅ બિલ સફળતાપૂર્વક અપલોડ થઈ ગયું છે!");
     } catch (err) {
-      alert("Upload Error: " + err.message);
+      triggerAlert("Upload Error: " + err.message);
     } finally {
       updated[index].uploading = false;
       setExpenseRows(updated);
@@ -588,7 +601,7 @@ const handleFinalSubmit = async () => {
         }
 
         setEditingExpenseId(null);
-        alert("✅ ખર્ચ અને સ્ટોક સફળતાપૂર્વક અપડેટ થઈ ગયા છે!");
+        triggerAlert("✅ ખર્ચ અને સ્ટોક સફળતાપૂર્વક અપડેટ થઈ ગયા છે!");
 
       } else {
         // ૨. નવી એન્ટ્રી
@@ -630,8 +643,7 @@ const handleFinalSubmit = async () => {
             }
           }
         }
-
-        alert("✅ ખર્ચ સફળતાપૂર્વક સેવ થઈ ગયો છે અને સ્ટોક જમા થઈ ગયો છે!");
+triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થઈ ગયો છે અને સ્ટોક જમા થઈ ગયો છે!");
       }
 
       setExpenseRows([
@@ -656,7 +668,7 @@ const handleFinalSubmit = async () => {
 
       await fetchExpensesHistory();
     } catch (err) {
-      alert("Error: " + err.message);
+      triggerAlert("Error: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -1085,7 +1097,7 @@ const handleFinalSubmit = async () => {
           type="button"
           onClick={() => {
             if (!selectedPlant) {
-              alert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
+              triggerAlert("⚠️ કૃપા કરીને પહેલા ઉપરથી પ્લાન્ટ સિલેક્ટ કરો!");
               return;
             }
             setShowReportModal(true);
@@ -1591,15 +1603,15 @@ const handleFinalSubmit = async () => {
             for (let s = 0; s < row.stockItems.length; s++) {
               const item = row.stockItems[s];
               if (!item.selectedMaterial) {
-                alert(`⚠️ Item #${s + 1}: મટીરીયલ પસંદ કરો!`);
+                triggerAlert(`⚠️ Item #${s + 1}: મટીરીયલ પસંદ કરો!`);
                 return;
               }
               if (item.selectedMaterial === '__OTHER__' && !item.manualMaterialName?.trim()) {
-                alert(`⚠️ Item #${s + 1}: મેન્યુઅલ નામ લખો!`);
+                triggerAlert(`⚠️ Item #${s + 1}: મેન્યુઅલ નામ લખો!`);
                 return;
               }
               if (!item.qty || Number(item.qty) <= 0) {
-                alert(`⚠️ Item #${s + 1}: સાચી સંખ્યા (Qty) લખો!`);
+              triggerAlert(`⚠️ Item #${s + 1}: સાચી સંખ્યા (Qty) લખો!`);
                 return;
               }
             }
@@ -1617,7 +1629,13 @@ const handleFinalSubmit = async () => {
     </div>
   </div>
 )}
-
+{/* 🔔 Existing ConfirmModal Integration */}
+<ConfirmModal
+  isOpen={alertModal.isOpen}
+  message={alertModal.message}
+  onConfirm={() => setAlertModal({ isOpen: false, message: '' })}
+  onCancel={() => setAlertModal({ isOpen: false, message: '' })}
+/>
 {/* 🔍 EXPENSE PREVIEW MODAL (ભૂલ અટકાવવા માટે - સ્વતંત્ર મોડલ) */}
 {showPreviewModal && (
   <div style={{
