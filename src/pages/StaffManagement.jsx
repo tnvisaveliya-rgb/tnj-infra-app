@@ -13,9 +13,11 @@ const AVAILABLE_TABS = [
 export default function StaffManagement() {
   const [staffList, setStaffList] = useState([])
   const [allSites, setAllSites] = useState([])
+  const [plantsList, setPlantsList] = useState([]) // 👈 બધો પ્લાન્ટ ડેટા
+  const [assignedPlants, setAssignedPlants] = useState([]) // 👈 સિલેક્ટ કરેલા પ્લાન્ટ
+
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [showLeaveSection, setShowLeaveSection] = useState(false) // 👈 લીવ સેક્શન ઓપન/ક્લોઝ કરવા માટેનું સ્ટેટ
-  
+  const [showLeaveSection, setShowLeaveSection] = useState(false)
   // Edit Modal States
   const [editingStaff, setEditingStaff] = useState(null)
   const [editForm, setEditForm] = useState({
@@ -26,8 +28,10 @@ export default function StaffManagement() {
   })
   const [editTabs, setEditTabs] = useState([])
   const [editSites, setEditSites] = useState([])
+  const [editPlants, setEditPlants] = useState([])
   const [updating, setUpdating] = useState(false)
   const [editStateFilter, setEditStateFilter] = useState('All')
+ const [editPlantStateFilter, setEditPlantStateFilter] = useState('All') // 👈 Plant Filter (Edit)
 
   // Add Staff Modal States
   const [formData, setFormData] = useState({
@@ -37,9 +41,11 @@ export default function StaffManagement() {
     mobile: '',
     role: 'Staff',
     allowed_tabs: ['site_progress', 'plant_report'],
-    assigned_sites: []
+    assigned_sites: [],
+    assigned_plants: []
   })
   const [addStateFilter, setAddStateFilter] = useState('All')
+  const [addPlantStateFilter, setAddPlantStateFilter] = useState('All')   // 👈 Plant Filter (Add)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -47,6 +53,7 @@ export default function StaffManagement() {
   useEffect(() => {
     fetchStaff()
     fetchSites()
+    loadPlants()
   }, [])
 
   const fetchStaff = async () => {
@@ -59,7 +66,16 @@ export default function StaffManagement() {
     if (!error && data) setAllSites(data)
   }
 
-  const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolean))]
+
+// આ ફંક્શનને તમારા useEffect માં કૉલ કરો
+const loadPlants = async () => {
+  const { data, error } = await supabase.from('plants').select('*');
+  if (!error && data) {
+    setPlantsList(data);
+  }
+};
+const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolean))]
+  const uniquePlantStates = ['All', ...new Set(plantsList.map(p => p.state).filter(Boolean))] // 👈 Plant માટે રાજ્યોનું લિસ્ટ
 
   const deleteStaff = async (id) => {
     if (confirm("શું તમે આ સ્ટાફને ડિલીટ કરવા માંગો છો?")) {
@@ -72,7 +88,7 @@ export default function StaffManagement() {
     }
   }
 
-  const openEditModal = (staff) => {
+ const openEditModal = (staff) => {
     setEditingStaff(staff)
     setEditForm({
       full_name: staff.full_name || '',
@@ -81,8 +97,25 @@ export default function StaffManagement() {
       password: ''
     })
     setEditTabs(staff.allowed_tabs || [])
-    setEditSites(staff.assigned_sites || [])
+
+    // 🧹 ૧. Sites માટે સફાઈ: જો સાઇટ ડીલીટ થઈ ગઈ હશે (જેમ કે ghv mh), તો તેને ઓટોમેટિક કાઢી નાખશે
+    const cleanSites = (staff.assigned_sites || []).filter(siteName => 
+      allSites.some(s => s.site_name === siteName)
+    );
+    setEditSites(cleanSites);
+
+    // 🧹 ૨. Plants માટે સફાઈ: બધો જ કચરો ('[', '"' વગેરે) અને ડીલીટ થયેલા પ્લાન્ટ્સ સાફ કરી દેશે
+    let cleanPlants = [];
+    if (Array.isArray(staff.assigned_plants)) {
+      cleanPlants = staff.assigned_plants.filter(plantName => 
+        // માત્ર સાચા અને અસ્તિત્વ ધરાવતા પ્લાન્ટના નામ જ પાસ થવા દેશે
+        plantName && plantName.length > 2 && plantsList.some(p => p.plant_name === plantName)
+      );
+    }
+    setEditPlants(cleanPlants);
+
     setEditStateFilter('All')
+    setEditPlantStateFilter('All')
   }
 
   const handleEditChange = (e) => {
@@ -108,6 +141,16 @@ export default function StaffManagement() {
     }
     setEditSites(updatedSites)
   }
+  // ૧. Edit Modal માટેનું ફંક્શન
+  const handleEditPlantCheckboxChange = (plantName) => {
+    let updatedPlants = [...editPlants]
+    if (updatedPlants.includes(plantName)) {
+      updatedPlants = updatedPlants.filter(p => p !== plantName)
+    } else {
+      updatedPlants.push(plantName)
+    }
+    setEditPlants(updatedPlants)
+  }
 
   const handleUpdatePermissions = async (e) => {
     e.preventDefault()
@@ -121,7 +164,8 @@ export default function StaffManagement() {
           mobile: editForm.mobile,
           role: editForm.role,
           allowed_tabs: editTabs,
-          assigned_sites: editSites 
+          assigned_sites: editSites,
+          assigned_plants: editPlants 
         })
         .eq('user_id', editingStaff.user_id)
 
@@ -170,6 +214,16 @@ export default function StaffManagement() {
     setFormData({ ...formData, assigned_sites: updatedSites })
   }
 
+ // ૨. Add New Staff Modal માટેનું ફંક્શન
+  const handlePlantCheckboxChange = (plantName) => {
+    let updatedPlants = [...formData.assigned_plants]
+    if (updatedPlants.includes(plantName)) {
+      updatedPlants = updatedPlants.filter(p => p !== plantName)
+    } else {
+      updatedPlants.push(plantName)
+    }
+    setFormData({ ...formData, assigned_plants: updatedPlants })
+  }
   const handleAddStaff = async (e) => {
     e.preventDefault()
     setError('')
@@ -207,7 +261,8 @@ export default function StaffManagement() {
             mobile: formData.mobile,
             role: formData.role,
             allowed_tabs: formData.allowed_tabs,
-            assigned_sites: formData.assigned_sites
+            assigned_sites: formData.assigned_sites,
+            assigned_plants: formData.assigned_plants
           }
         ]);
 
@@ -222,20 +277,24 @@ export default function StaffManagement() {
         mobile: '',
         role: 'Staff',
         allowed_tabs: ['site_progress', 'plant_report'],
-        assigned_sites: []
+        assigned_sites: [],
+        assigned_plants: []
       });
+      setAssignedPlants([]);
       fetchStaff();
 
     } catch (err) {
       console.error('Error adding staff:', err)
       setError(err.message || 'સ્ટાફ ઉમેરવામાં નિષ્ફળતા મળી.')
-    } finally {
+    } finally { 
       setLoading(false)
     }
   }
 
   const filteredEditSites = allSites.filter(site => editStateFilter === 'All' || site.state === editStateFilter)
   const filteredAddSites = allSites.filter(site => addStateFilter === 'All' || site.state === addStateFilter)
+  const filteredEditPlants = plantsList.filter(plant => editPlantStateFilter === 'All' || plant.state === editPlantStateFilter) // 👈 Filter Logic
+  const filteredAddPlants = plantsList.filter(plant => addPlantStateFilter === 'All' || plant.state === addPlantStateFilter)     // 👈 Filter Logic
 
   return (
     <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
@@ -266,7 +325,8 @@ export default function StaffManagement() {
             onClick={() => { setIsModalOpen(true); setAddStateFilter('All'); }}
             style={{ backgroundColor: '#2563eb', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
           >
-            <UserPlus size5={18} /> Add New Staff
+
+Add New Staff
           </button>
 
         </div>
@@ -407,6 +467,22 @@ export default function StaffManagement() {
                   ))
                 )}
               </div>
+               {/* Plants (Add) 👈 ભૂલ સુધારી: આ બોક્સ Add માં મિસિંગ હતું */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#fff7ed', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#ea580c', margin: 0 }}>🏭 Assign Plants</h3>
+                  <select value={addPlantStateFilter} onChange={(e) => setAddPlantStateFilter(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #fb923c', fontSize: '11px', backgroundColor: '#fff', color: '#ea580c', fontWeight: 'bold', cursor: 'pointer' }}>
+                    {uniquePlantStates.map(st => <option key={st} value={st}>{st === 'All' ? '🌐 All States' : st}</option>)}
+                  </select>
+                </div>
+                {filteredAddPlants.length === 0 ? <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0' }}>આ રાજ્યમાં કોઈ પ્લાન્ટ ઉપલબ્ધ નથી.</p> : (
+                  filteredAddPlants.map((plant) => (
+                    <label key={plant.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#334155', cursor: 'pointer', backgroundColor: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fdba74' }}>
+                      <input type="checkbox" checked={editPlants.includes(plant.plant_name)} onChange={() => handleEditPlantCheckboxChange(plant.plant_name)} style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: '#ea580c' }} /> {plant.plant_name} {plant.state ? `(${plant.state})` : ''}
+                    </label>  
+                  ))
+                )} 
+              </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
                 <button type="button" onClick={() => setEditingStaff(null)} style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}>Cancel</button>
@@ -492,6 +568,22 @@ export default function StaffManagement() {
                     <label key={site.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#334155', cursor: 'pointer', backgroundColor: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                       <input type="checkbox" checked={formData.assigned_sites.includes(site.site_name)} onChange={() => handleSiteCheckboxChange(site.site_name)} style={{ cursor: 'pointer', width: '15px', height: '15px' }} />
                       {site.site_name} {site.state ? `(${site.state})` : ''}
+                    </label>
+                  ))
+                )}
+              </div>
+              {/* Plants (Add) 👈 ભૂલ સુધારી: આ બોક્સ Add માં મિસિંગ હતું */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#fff7ed', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#ea580c', margin: 0 }}>🏭 Assign Plants</h3>
+                  <select value={addPlantStateFilter} onChange={(e) => setAddPlantStateFilter(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #fb923c', fontSize: '11px', backgroundColor: '#fff', color: '#ea580c', fontWeight: 'bold', cursor: 'pointer' }}>
+                    {uniquePlantStates.map(st => <option key={st} value={st}>{st === 'All' ? '🌐 All States' : st}</option>)}
+                  </select>
+                </div>
+                {filteredAddPlants.length === 0 ? <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0' }}>આ રાજ્યમાં કોઈ પ્લાન્ટ ઉપલબ્ધ નથી.</p> : (
+                  filteredAddPlants.map((plant) => (
+                    <label key={plant.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#334155', cursor: 'pointer', backgroundColor: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #fdba74' }}>
+                      <input type="checkbox" checked={formData.assigned_plants.includes(plant.plant_name)} onChange={() => handlePlantCheckboxChange(plant.plant_name)} style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: '#ea580c' }} /> {plant.plant_name} {plant.state ? `(${plant.state})` : ''}
                     </label>
                   ))
                 )}

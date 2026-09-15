@@ -59,11 +59,49 @@ const totalInwardAmount = filteredInwardReport.reduce(
     }
   }, [selectedPlant]);
 
-  const fetchPlants = async () => {
-    const { data } = await supabase.from('plants').select('*');
-    setPlants(data || []);
-  };
+const fetchPlants = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
+      const userId = user?.id || session?.user?.id;
+      
+      // 1. ADMIN માટે (બધા જ Plants બતાવો)
+      if (userEmail === 'infra.tnj@gmail.com') {
+        const { data } = await supabase.from('plants').select('*');
+        setPlants(data || []);
+        return;
+      }
 
+      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
+      let permQuery = supabase.from('user_permissions').select('assigned_plants');
+      if (userId) {
+        permQuery = permQuery.eq('user_id', userId);
+      } else {
+        permQuery = permQuery.eq('user_id', userEmail);
+      }
+
+      const { data: permData, error: permError } = await permQuery.single();
+
+      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
+      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
+        setPlants([]); 
+        return;
+      }
+
+      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
+      const assignedPlantNames = permData.assigned_plants;
+      const { data: allowedPlantsData } = await supabase
+        .from('plants')
+        .select('*')
+        .in('plant_name', assignedPlantNames);
+
+      setPlants(allowedPlantsData || []);
+
+    } catch (err) {
+      console.error('Error fetching plants:', err);
+      setPlants([]);
+    }
+  };
   const fetchMyRequests = async () => {
     const { data } = await supabase
       .from('plant_fund_transfers')

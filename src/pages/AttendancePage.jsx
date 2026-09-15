@@ -52,19 +52,28 @@ function AttendancePage({ sites = [], user }) {
     }
   }, [supervisorEmail]);
 
-  const loadSites = async () => {
+const loadSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
+      // 1. ADMIN માટે (બધી Site અને Plant બતાવો)
       if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setFetchedSites(data || []);
+    
+        const { data: plantsData } = await supabase.from('plants').select('*');
+        
+        // બંનેના ડેટાને સરખા ફોર્મેટમાં લાવીએ જેથી ડ્રોપડાઉનમાં ગોઠવી શકાય
+
+        const formattedPlants = (plantsData || []).map(p => ({ id: `plant_${p.id}`, name: p.plant_name }));
+
+    setFetchedSites(formattedPlants);
         return;
       }
 
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
+      // 2. SUPERVISOR માટે (તેમને અસાઇન કરેલી સાઇટ અને પ્લાન્ટ)
+      // અહીં 'assigned_plants' પણ સિલેક્ટ કર્યું છે
+      let permQuery = supabase.from('user_permissions').select('assigned_sites, assigned_plants');
       if (userId) {
         permQuery = permQuery.eq('user_id', userId);
       } else {
@@ -73,28 +82,35 @@ function AttendancePage({ sites = [], user }) {
 
       const { data: permData, error: permError } = await permQuery.single();
 
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
+      if (permError || !permData) {
         setFetchedSites([]); 
         return;
       }
 
-      const assignedSiteNames = permData.assigned_sites;
-      const { data: siteData, error: siteError } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSiteNames);
+  
+      const assignedPlantNames = permData.assigned_plants || [];
 
-      if (!siteError && siteData) {
-        setFetchedSites(siteData);
-      } else {
-        setFetchedSites([]);
+     let allowedPlants = [];
+
+     // અસાઇન કરેલા Plants ફેચ કરો
+      if (assignedPlantNames.length > 0) {
+        const { data: plantData } = await supabase.from('plants').select('*').in('plant_name', assignedPlantNames);
+        if (plantData) {
+          allowedPlants = plantData.map(p => ({ 
+            id: `plant_${p.id}`, 
+            name: p.plant_name 
+          }));
+        }
       }
+
+   
+
+     setFetchedSites(allowedPlants);
     } catch (err) {
-      console.error('Error loading assigned sites:', err);
+      console.error('Error loading assigned plants:', err);
       setFetchedSites([]);
     }
-  };
-
+  }
   const availableSites = (sites && sites.length > 0) ? sites : fetchedSites;
 
   const checkLocation = () => {
@@ -478,15 +494,19 @@ return (
         boxShadow: '0 4px 12px rgba(0,0,0,0.05)', 
         marginTop: '-6px'
       }}>
-        <select 
-          value={attendanceSite} 
-          onChange={handleSiteSelection} 
-          disabled={currentStatus === 'IN'}
-          style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: currentStatus === 'IN' ? '#f1f5f9' : '#fff', fontWeight: '500', outline: 'none' }}>
-          <option value="">-- Select Site for Attendance --</option>
-          {(availableSites || []).map(s => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
-        </select>
-
+       <select 
+  value={attendanceSite} 
+  onChange={handleSiteSelection} 
+  disabled={currentStatus === 'IN'}
+  style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: currentStatus === 'IN' ? '#f1f5f9' : '#fff', fontWeight: '500', outline: 'none' }}>
+  <option value="">-- Select Plant for Attendance --</option>
+  {/* અહિયાં fetchedSites વાપર્યું છે */}
+  {(fetchedSites || []).map(loc => (
+    <option key={loc.id} value={loc.name || loc.site_name}>
+      {loc.name || loc.site_name}
+    </option>
+  ))}
+</select>
         {currentStatus === 'IN' && (
           <p style={{ fontSize: '11px', color: '#dc2626', marginTop: '8px', marginBottom: 0, fontWeight: 'bold' }}>
             🔒 જ્યાં સુધી તમે Punch Out નહીં કરો, ત્યાં સુધી સાઇટ બદલી શકાશે નહીં.

@@ -539,14 +539,13 @@ const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense');
   const [incomeInitialTab, setIncomeInitialTab] = useState('supervisiorfundrequest');
 
-  const [attendanceInfo, setAttendanceInfo] = useState({
-    status: 'Punched In',
-    time: '09:30 AM',
-    badgeText: 'On Time',
-    badgeBg: '#f0fdf4',
-    badgeColor: '#15803d'
+const [attendanceInfo, setAttendanceInfo] = useState({
+    status: 'Not Punched',
+    time: '',
+    badgeText: 'Pending',
+    badgeBg: '#fee2e2', 
+    badgeColor: '#dc2626' 
   });
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const approveId = params.get('approve_id');
@@ -833,12 +832,14 @@ const fetchDashboardData = async () => {
         setRawMaterialsStock(Object.values(stockMap));
       }
 
-      // ૫. ATTENDANCE FETCH
+// ૫. ATTENDANCE FETCH
       const { data: attData, error: attError } = await supabase
         .from('site_attendance')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false }); // 👈 માત્ર આ એક નવી લાઈન ઉમેરો!
 
       if (!attError && attData && attData.length > 0) {
+        // હવે નવો ડેટા (OUT) પહેલા આવશે, એટલે find() સાચો જ પંચ પકડશે
         const userAtt = attData.find(a => 
           (a.employee_name === userEmail || a.created_by === userEmail) && 
           (a.created_at && a.created_at.split('T')[0] === todayStr)
@@ -1074,20 +1075,42 @@ const fetchDashboardData = async () => {
 
            {/* Quick Cards Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <div 
+         <div 
               onClick={() => setActiveTab('attendance')} 
-              style={{ backgroundColor: '#ffffff', padding: '12px', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', cursor: 'pointer' }}
+              style={{ backgroundColor: '#ffffff', padding: '10px 10px', borderRadius: '14px', border: `1px solid ${attendanceInfo.status === 'Not Punched' ? '#fecaca' : '#bbf7d0'}`, boxShadow: '0 2px 6px rgba(0,0,0,0.02)', cursor: 'pointer', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <div style={{ backgroundColor: '#f0fdf4', color: '#16a34a', padding: '6px', borderRadius: '8px' }}><Clock size={14} /></div>
-                <span style={{ fontSize: '9px', backgroundColor: attendanceInfo.badgeBg, color: attendanceInfo.badgeColor, padding: '2px 6px', borderRadius: '6px', fontWeight: '800' }}>
+              {/* 🌟 બેકગ્રાઉન્ડમાં વોટરમાર્ક આઇકોન (સાઈઝ નાની કરી) */}
+              <div style={{ position: 'absolute', right: '-10px', top: '-10px', opacity: 0.04 }}>
+                <Clock size={70} /> 
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px', position: 'relative', zIndex: 1 }}>
+                <div style={{ backgroundColor: attendanceInfo.status === 'Not Punched' ? '#fef2f2' : '#f0fdf4', color: attendanceInfo.status === 'Not Punched' ? '#dc2626' : '#16a34a', padding: '5px', borderRadius: '8px' }}>
+                  <Clock size={14} />
+                </div>
+                <span style={{ fontSize: '9px', backgroundColor: attendanceInfo.badgeBg, color: attendanceInfo.badgeColor, padding: '2px 6px', borderRadius: '6px', fontWeight: '800', letterSpacing: '0.2px', border: `1px solid ${attendanceInfo.badgeColor}30` }}>
                   {attendanceInfo.badgeText}
                 </span>
               </div>
-              <h4 style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Attendance</h4>
-              <p style={{ margin: '2px 0 0 0', fontSize: '13px', fontWeight: '900', color: '#0f172a' }}>
-                {attendanceInfo.status}
-              </p>
+
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <h4 style={{ margin: '0 0 2px 0', fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Attendance</h4>
+                
+                <p style={{ margin: '0', fontSize: '13px', fontWeight: '900', color: attendanceInfo.status === 'Not Punched' ? '#dc2626' : '#0f172a' }}>
+                  {attendanceInfo.status}
+                </p>
+
+                {/* 🌟 અહીં સમય દેખાશે (પેડિંગ અને માર્જિન ઓછું કર્યું) */}
+                {attendanceInfo.time ? (
+                  <div style={{ marginTop: '4px', fontSize: '10px', fontWeight: '800', color: attendanceInfo.status === 'Punched Out' ? '#475569' : '#16a34a', display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: attendanceInfo.status === 'Punched Out' ? '#f1f5f9' : '#dcfce7', padding: '3px 6px', borderRadius: '6px' }}>
+                    🕒 {attendanceInfo.time}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '4px', fontSize: '10px', fontWeight: '700', color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#fef2f2', padding: '3px 6px', borderRadius: '6px' }}>
+                    ⚠️ પંચિંગ બાકી છે
+                  </div>
+                )}
+              </div>
             </div>
 
             <div 
@@ -1167,6 +1190,30 @@ const fetchDashboardData = async () => {
               </span>
             </div>
 
+             {/* STORE & TOOLS (Assets Filtered Out) */}
+            <div>
+              <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+                🛠️ Store & Daily Tools ({storeItems.length})
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                {storeItems.length === 0 ? (
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', gridColumn: 'span 2' }}>No store items found</span>
+                ) : (
+                  storeItems.map((item, idx) => (
+                    <div key={idx} style={{ backgroundColor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '10px', padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#92400e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '65%' }}>{item.name}</span>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock <= 0 ? '#dc2626' : '#78350f' }}>{item.stock.toLocaleString('en-IN')}</span>
+                        <span style={{ fontSize: '9px', fontWeight: '700', color: '#b45309', marginLeft: '3px' }}>{item.unit}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px dashed #e2e8f0', margin: '2px 0' }} />
+
             {/* RAW MATERIALS */}
             <div>
               <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
@@ -1191,29 +1238,7 @@ const fetchDashboardData = async () => {
 
             <div style={{ borderTop: '1px dashed #e2e8f0', margin: '2px 0' }} />
 
-            {/* STORE & TOOLS (Assets Filtered Out) */}
-            <div>
-              <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
-                🛠️ Store & Daily Tools ({storeItems.length})
-              </span>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-                {storeItems.length === 0 ? (
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', gridColumn: 'span 2' }}>No store items found</span>
-                ) : (
-                  storeItems.map((item, idx) => (
-                    <div key={idx} style={{ backgroundColor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '10px', padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#92400e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '65%' }}>{item.name}</span>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock <= 0 ? '#dc2626' : '#78350f' }}>{item.stock.toLocaleString('en-IN')}</span>
-                        <span style={{ fontSize: '9px', fontWeight: '700', color: '#b45309', marginLeft: '3px' }}>{item.unit}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div style={{ borderTop: '1px dashed #e2e8f0', margin: '2px 0' }} />
+           
 
             {/* 🏗️ SEPARATE ASSETS CLICKABLE CARD */}
             <div 
