@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import SupervisorDashboard from './SupervisorDashboard';
 import AttendancePage from './AttendancePage';
-import SupervisorExpenses from './SupervisorExpenses';
+import SupervisorExpenses from './siteexpensepage';
 import PlantDprEntry from './PlantDprEntry';
 import PlantInwardPage from './PlantInwardPage';
 import PlantOutwardPage from './PlantOutwardPage';

@@ -966,17 +966,17 @@ if (item.steelRows && item.steelRows.length > 0) {
       
       {/* 1. Modern Green Header */}
       <div style={{ 
-        background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', 
+        background: '#eff6ff',
         padding: '14px 18px', 
         borderRadius: '16px', 
-        border: '1px solid #bbf7d0', 
+        border: '1px solid #cbd5e1',
         display: 'flex', 
         alignItems: 'center', 
         gap: '12px',
         boxShadow: '0 4px 12px rgba(22, 163, 74, 0.08)'
       }}>
         <div style={{ 
-          backgroundColor: '#22c55e', 
+          backgroundColor: '#1d4ed8',
           padding: '8px', 
           borderRadius: '10px', 
           display: 'flex', 
@@ -987,10 +987,10 @@ if (item.steelRows && item.steelRows.length > 0) {
           <ClipboardList size={20} color="#ffffff" strokeWidth={2.5} />
         </div>
         <div>
-          <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#14532d', margin: 0, letterSpacing: '0.2px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#1d4ed8', margin: 0, letterSpacing: '0.2px' }}>
             Plant Daily Progress Report (DPR)
           </h3>
-          <span style={{ fontSize: '11px', color: '#15803d', fontWeight: '600' }}>
+          <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '600' }}>
             Manage daily plant production and work progress efficiently
           </span>
         </div>

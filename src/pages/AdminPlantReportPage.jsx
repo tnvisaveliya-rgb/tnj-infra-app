@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Calendar, MapPin, Package, Truck, ChevronDown, ChevronUp, RefreshCcw, Globe, FileDown, ArrowUpRight } from 'lucide-react';
+import { Calendar, MapPin, Package, Truck, ChevronDown, ChevronUp, RefreshCcw, Globe, FileDown, ArrowUpRight,ArrowLeft } from 'lucide-react';
 // --- Date Formatting Helper ---
 const formatDateToDDMMYYYY = (dateString) => {
   if (!dateString || dateString === '-') return '-';
@@ -531,15 +531,34 @@ useEffect(() => {
   };
 
   return (
-    <div style={{ backgroundColor: '#f4f6f8', minHeight: '100vh', fontFamily: 'Inter, sans-serif', paddingBottom: '20px' }}>
+    <div style={{ backgroundColor: 'transparent', maxWidth: '650px', fontFamily: 'Inter, sans-serif' }}>
       
       {/* --- Top Header & Master Filters --- */}
-      <div style={{ position: 'sticky', top: 0, backgroundColor: '#fff', padding: '15px', zIndex: 10, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-        <h2 style={{ margin: '0 0 15px 0', fontSize: '18px', color: '#1e293b', fontWeight: 'bold' }}>T&J Infra Master Report</h2>
+     <div style={{ position: 'sticky', top: 0, backgroundColor: 'transparent',  zIndex: 10,  maxWidth: '650px', margin: '0 auto', }}>
+{/* --- Top Header Card (નવી પ્રીમિયમ ડિઝાઇન) --- */}
+<div style={{ display: 'flex', alignItems: 'center', gap: '15px', backgroundColor: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '15px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+  
+  <button 
+    onClick={() => window.history.back()}
+    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px', fontWeight: '600', color: '#334155', cursor: 'pointer' }}
+  >
+    <ArrowLeft size={16} /> Back
+  </button>
+  
+  <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <h2 style={{ margin: 0, fontSize: '17px', color: '#0f172a', fontWeight: 'bold' }}>
+    T&J Infra Master Report
+    </h2>
+    <span style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+      Corporate Dashboard & Operations Center
+    </span>
+  </div>
+  
+</div>
         
         {/* Date Filter */}
-        <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 'bold', color: '#1e293b', marginBottom: isAllDates ? '0' : '10px' }}>
+       <div style={{ backgroundColor: 'transparent', maxWidth: '650px', boxSizing: 'border-box', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '10px', }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', fontWeight: 'bold', color: '#1e293b', marginBottom: isAllDates ? '0' : '10px' }}>
             <input type="checkbox" checked={isAllDates} onChange={(e) => setIsAllDates(e.target.checked)} style={{ width: '16px', height: '16px' }} />
             બધી તારીખનો ડેટા (All Dates)
           </label>
@@ -586,7 +605,7 @@ useEffect(() => {
         </div>
       </div>
 
-      <div style={{ padding: '15px', maxWidth: '600px', margin: '0 auto' }}>
+     <div style={{maxWidth: '650px',  marginTop: '8px' , boxSizing: 'border-box' }}>
         
         {/* --- Main Tabs --- */}
         <div style={{ display: 'flex', backgroundColor: '#e2e8f0', borderRadius: '10px', padding: '4px', marginBottom: '20px', gap: '4px' }}>
@@ -602,7 +621,7 @@ useEffect(() => {
         </div>
 
         {loadingReports ? (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#64748b' }}>Live Data Loading...</div>
+          <div style={{ textAlign: 'center', maxWidth: '650px', color: '#64748b' }}>Live Data Loading...</div>
         ) : (
           <>
             {/* ----------------------------------------------------------- */}
@@ -610,7 +629,7 @@ useEffect(() => {
             {/* ----------------------------------------------------------- */}
             {activeTab === 'FinishedGoods' && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '15px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', maxWidth: '650px' }}>
                   <button onClick={() => setStockTabMode(stockTabMode === 'FG' ? 'RM' : 'FG')} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', color: '#334155', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                     <RefreshCcw size={14} color="#2563eb" />
                     {stockTabMode === 'FG' ? 'કાચો માલ સ્ટોક જોવો છે?' : 'ફિનિશ્ડ ગુડ્સ સ્ટોક જોવો છે?'}
@@ -635,7 +654,7 @@ useEffect(() => {
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px', whiteSpace: 'nowrap' }}>
                         <thead>
                           <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '2px solid #cbd5e1' }}>
-                            <th style={thStyle}>ITEM NAME</th>
+                            <th style={thStyle}>PRODUCTS NAME</th>
                             <th style={thStyle}>SIZE</th>
                             <th style={thStyle}>opening stock</th>
                             <th style={thStyle}>production</th>
@@ -980,7 +999,7 @@ useEffect(() => {
         )}
       </div>
     </div>
-  );
+  );  
 };
 
 // --- Styles ---
