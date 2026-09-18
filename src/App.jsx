@@ -68,12 +68,12 @@ function AppRoutes() {
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </>
       ) : (
         /* ૨. સ્ટાફ અને સુપરવાઈઝર માટે ડાયનેમિક રાઉટ્સ */
         <>
-          <Route path="/Dashboard" element={<SiteEmployeeDashboard />} />
+          <Route path="/Dashboard" element={<Dashboard />} />
           <Route path="/crm" element={<CRM />} />
           <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
           <Route path="/plantemployee-dashboard" element={<PlantEmployeeDashboard />} />
