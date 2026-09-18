@@ -80,7 +80,15 @@ function AppRoutes() {
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
-
+  <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
+          <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
+          <Route path="/site-report" element={<SiteReportPage />} />
+          <Route path="/Admin-plant-report" element={<AdminPlantReportPage />} />
+          <Route path="/crm-report" element={<CrmReportPage />} />
+          <Route path="/employee-report" element={<EmployeeReportPage />} />
+          <Route path="/staff-management" element={<StaffManagement />} />
+          <Route path="/site-transaction" element={<SiteTransactionPage />} />
+          <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           <Route path="*" element={<Navigate to="/siteemployee-dashboard" replace />} />
         </>
       )}
