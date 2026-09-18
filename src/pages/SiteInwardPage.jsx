@@ -150,7 +150,7 @@ export default function SiteMaterialInward({ user }) {
       supplier: '',
       dcNumber: '',
       vehicleNumber: '',
-      items: [{ id: 1, material: '', size: '', qty: '', unit: 'Bags', category: 'Raw Material', steelSpec: '' }],
+      items: [{ id: 1, material: '', size: '', qty: '', unit: 'Bags', category: 'Finished Product', steelSpec: '' }],
       billFiles: []
     }
   ]);
@@ -166,15 +166,17 @@ export default function SiteMaterialInward({ user }) {
     fetchSites();
   }, []);
 
+ // 🌟 સાઇટ સિલેક્ટ થાય એટલે તરત જ માસ્ટર ડેટા ફેચ કરવા માટે
   useEffect(() => {
-    if (selectedSiteId) {
-      fetchMasters(selectedSiteId);
+    if (selectedSite) {
+      fetchMasters(selectedSite);
+      fetchRecentHistory();
     } else {
       setSuppliers([]);
       setMaterials([]);
       setProducts([]);
     }
-  }, [selectedSiteId]);
+  }, [selectedSite]);
 
   useEffect(() => {
     fetchSites();
@@ -214,23 +216,103 @@ export default function SiteMaterialInward({ user }) {
       .limit(10);
     setRecentHistory(data || []);
   };
+const fetchMasters = async (siteName) => {
+    if (!siteName) {
+      setSuppliers([]); setMaterials([]); setProducts([]);
+      return;
+    }
 
-  const fetchMasters = async (siteId) => {
-    const { data: supData } = await supabase.from('site_vendors').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
-    setSuppliers(supData || []);
-    const { data: matData } = await supabase.from('site_materials_master').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
-    setMaterials(matData || []);
-    const { data: prodData } = await supabase.from('plant_work_descriptions').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
-    setProducts(prodData || []);
+    try {
+      const { data: outwardData, error } = await supabase
+        .from('plant_material_outward')
+        .select('*')
+        .ilike('site_name', `%${siteName.trim()}%`);
+
+      if (error) {
+        console.error('Error fetching outward data:', error);
+        return;
+      }
+
+      if (outwardData && outwardData.length > 0) {
+        // ૧. સપ્લાયર / વેન્ડર 
+        const outwardSuppliers = outwardData
+          .filter(o => o.plant_name && o.plant_name.trim() !== '')
+          .map(o => ({
+            id: `out_sup_${Math.random()}`,
+            name: o.plant_name.trim(),
+            site_name: siteName
+          })).filter((v, i, arr) => arr.findIndex(t => t.name === v.name) === i);
+
+        // ૨. મટીરિયલ (નામ અને સાઇઝ છૂટા પાડવાનું લોજીક)
+        const parsedMaterials = [];
+        
+        outwardData.forEach(o => {
+          if (o.material_name && o.material_name.trim() !== '') {
+            const rawName = o.material_name.trim();
+            const itemType = o.item_type ? o.item_type.trim() : 'Finished Product';
+            
+            let parsedName = rawName;
+            let parsedSize = '';
+            
+            if (itemType === 'Finished Product') {
+              // ૧. કૌંસ (...) અને તેમાં લખેલી Steel details કાઢી નાખો
+              const noBrackets = rawName.replace(/\s*\(.*?\)\s*/g, '').trim();
+              
+              // ૨. સ્પેસથી છૂટું પાડો 
+              const parts = noBrackets.split(' ');
+              const lastPart = parts[parts.length - 1];
+              
+              // ૩. જો છેલ્લા ભાગમાં કોઈ નંબર હોય (દા.ત. 7, 2950x150, 3m), તો તેને સાઇઝ માનો
+              if (/\d/.test(lastPart) && parts.length > 1) {
+                parsedSize = lastPart;
+                parsedName = parts.slice(0, -1).join(' '); // સાઇઝ સિવાયનું બધું જ નામ ગણાશે
+              } else {
+                parsedName = noBrackets;
+              }
+            }
+            
+            parsedMaterials.push({
+              id: `out_mat_${Math.random()}`,
+              name: parsedName,
+              product_size: parsedSize, // 🌟 સાઇઝ અલગ સેવ થશે એટલે સાઇઝના બોક્સમાં દેખાશે
+              item_type: itemType,
+              site_name: siteName
+            });
+          }
+        });
+
+        // ડુપ્લિકેટ કાઢવા (મટીરિયલનું નામ અને સાઇઝ બંને સરખા હોય તેને જ ડુપ્લિકેટ ગણશે)
+        const uniqueMaterials = parsedMaterials.filter((v, i, arr) => 
+          arr.findIndex(t => t.name === v.name && t.product_size === v.product_size) === i
+        );
+
+        setSuppliers(outwardSuppliers);
+        setMaterials(uniqueMaterials);
+        setProducts(uniqueMaterials); 
+      } else {
+        setSuppliers([]); setMaterials([]); setProducts([]);
+      }
+    } catch (err) {
+      console.error('Error in fetchMasters:', err);
+      setSuppliers([]); setMaterials([]); setProducts([]);
+    }
   };
-
-  const handleSiteChange = (e) => {
+const handleSiteChange = (e) => {
     const siteName = e.target.value;
     setSelectedSite(siteName);
-    const foundSite = sites.find(s => s.site_name === siteName);
-    setSelectedSiteId(foundSite ? foundSite.id : '');
+    const foundSite = sites.find(s => (s.site_name || s.plant_name || s.name) === siteName);
+    const siteId = foundSite ? foundSite.id : '';
+    setSelectedSiteId(siteId);
+    
+    // 🌟 અહીં siteId ની જગ્યાએ સીધું siteName પાસ કરો
+    if (siteName) {
+      fetchMasters(siteName);
+    } else {
+      setSuppliers([]);
+      setMaterials([]);
+      setProducts([]);
+    }
   };
-
   const handleDropdownClick = () => {
     if (!selectedSite) {
       triggerAlert("⚠️ કૃપા કરીને પહેલા ઉપરથી સાઇટ સિલેક્ટ કરો!");
@@ -239,9 +321,9 @@ export default function SiteMaterialInward({ user }) {
     return true;
   };
 
-  const addInwardSource = () => setInwardSources([...inwardSources, { id: Date.now(), supplier: '', dcNumber: '', vehicleNumber: '', items: [{ id: Date.now(), material: '', qty: '', unit: 'Bags', category: 'Raw Material', steelSpec: '' }], billFiles: [] }]);
+  const addInwardSource = () => setInwardSources([...inwardSources, { id: Date.now(), supplier: '', dcNumber: '', vehicleNumber: '', items: [{ id: Date.now(), material: '', qty: '', unit: 'Bags', category: 'Finished Product', steelSpec: '' }], billFiles: [] }]);
   const updateInwardSource = (sIdx, field, val) => { const updated = [...inwardSources]; updated[sIdx][field] = val; setInwardSources(updated); };
-  const addInwardItem = (sIdx) => { const updated = [...inwardSources]; updated[sIdx].items.push({ id: Date.now(), material: '', qty: '', unit: 'Bags', category: 'Raw Material', steelSpec: '' }); setInwardSources(updated); };
+  const addInwardItem = (sIdx) => { const updated = [...inwardSources]; updated[sIdx].items.push({ id: Date.now(), material: '', qty: '', unit: 'Bags', category: 'Finished Product', steelSpec: '' }); setInwardSources(updated); };
   const updateInwardItem = (sIdx, iIdx, field, val) => { const updated = [...inwardSources]; updated[sIdx].items[iIdx][field] = val; setInwardSources(updated); };
   const removeInwardSource = (index) => setInwardSources(inwardSources.filter((_, i) => i !== index));
   const removeInwardItem = (sIdx, iIdx) => {
@@ -514,7 +596,7 @@ export default function SiteMaterialInward({ user }) {
         dcNumber: '',
         vehicleNumber: '',
         description: '',
-        items: [{ id: Date.now(), material: '', qty: '', unit: 'Nos', category: 'Raw Material', steelSpec: '' }],
+        items: [{ id: Date.now(), material: '', qty: '', unit: 'Nos', category: 'Finished Product', steelSpec: '' }],
         billFiles: []
       }
     ]);
@@ -772,7 +854,7 @@ export default function SiteMaterialInward({ user }) {
                           
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'space-between' }}>
                             <select 
-                              value={item.category || 'Raw Material'} 
+                              value={item.category || 'Finished Product'} 
                               onChange={(e) => {
                                 updateInwardItem(sIndex, iIndex, 'category', e.target.value);
                                 updateInwardItem(sIndex, iIndex, 'material', ''); 
@@ -894,49 +976,7 @@ export default function SiteMaterialInward({ user }) {
                             )}
                           </div>
 
-                          {isColumn && (
-                            <div style={{ backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#334155' }}>🛠️ Column Spec:</span>
-                              <select 
-                                value={item.steelSpec || ''} 
-                                onChange={(e) => updateInwardItem(sIndex, iIndex, 'steelSpec', e.target.value)} 
-                                style={{ flex: 1, padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
-                              >
-                                <option value="">-- Select Column Steel Spec --</option>
-                                <optgroup label="Dia 3mm">
-                                  <option value="3mm - 5 wires">3mm - 5 wires</option>
-                                  <option value="3mm - 7 wires">3mm - 7 wires</option>
-                                  <option value="3mm - 10 wires">3mm - 10 wires</option>
-                                </optgroup>
-                                <optgroup label="Dia 4mm">
-                                  <option value="4mm - 5 wires">4mm - 5 wires</option>
-                                  <option value="4mm - 7 wires">4mm - 7 wires</option>
-                                  <option value="4mm - 10 wires">4mm - 10 wires</option>
-                                </optgroup>
-                              </select>
-                            </div>
-                          )}
-
-                          {isPanel && (
-                            <div style={{ backgroundColor: '#f8fafc', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#334155' }}>🛠️ Panel Spec:</span>
-                              <select 
-                                value={item.steelSpec || ''} 
-                                onChange={(e) => updateInwardItem(sIndex, iIndex, 'steelSpec', e.target.value)} 
-                                style={{ flex: 1, padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff' }}
-                              >
-                                <option value="">-- Select Panel Steel Spec --</option>
-                                <optgroup label="Dia 3mm">
-                                  <option value="3mm - 3 wires">3mm - 3 wires</option>
-                                  <option value="3mm - 4 wires">3mm - 4 wires</option>
-                                </optgroup>
-                                <optgroup label="Dia 4mm">
-                                  <option value="4mm - 3 wires">4mm - 3 wires</option>
-                                  <option value="4mm - 4 wires">4mm - 4 wires</option>
-                                </optgroup>
-                              </select>
-                            </div>
-                          )}
+                        
 
                         </div>
                       );

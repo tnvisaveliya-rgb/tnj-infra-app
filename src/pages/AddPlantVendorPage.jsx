@@ -83,6 +83,10 @@ const [transporterVehicles, setTransporterVehicles] = useState([
   const [materials, setMaterials] = useState([])
   const [workDescriptions, setWorkDescriptions] = useState([])
   const [products, setProducts] = useState([]) 
+const [WorkName, setWorkName] = useState('');
+  const [WorkSize, setWorkSize] = useState('');
+  const [WorkCategory, setWorkCategory] = useState('');
+
 
   const [productName, setProductName] = useState('') 
   const [productSize, setProductSize] = useState('') 
@@ -130,6 +134,19 @@ setExpenseCategories(expCatData || []);
 
     const { data: sitesData } = await supabase.from('sites').select('*, plants(plant_name)')
     setSites(sitesData || [])
+    // 🌟 2. દરેક સાઇટ માટે તેના તમામ Work અને BOM ફેચ કરો
+    if (sitesData) {
+      for (let site of sitesData) {
+        const { data: bomData } = await supabase
+          .from('site_bom')
+          .select('*')
+          .eq('site_name', site.site_name);
+        
+        site.works_list = bomData || [];
+      }
+    }
+    setSites(sitesData || [])
+
 
     const { data: vData } = await supabase.from('site_vendors').select('*')
     setVendors(vData || [])
@@ -243,40 +260,76 @@ const handleUpdateExpenseCategory = async (id) => {
     loadAllData();
   }
 };
- const handleSaveSite = async () => {
+const handleSaveSite = async () => {
     if (!selectedPlantId) { showAlert("કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!"); return; }
-    if (!sitePartyName) { showAlert("કૃપા કરીને પાર્ટી સિલેક્ટ કરો!"); return; } // 👈 પાર્ટી સિલેક્ટ કરવી ફરજિયાત છે
+    if (!sitePartyName) { showAlert("કૃપા કરીને પાર્ટી સિલેક્ટ કરો!"); return; } 
     if (!siteName.trim()) { showAlert("Please enter site name!"); return; }
     if (!siteState) { showAlert("Please select state!"); return; }
     
+    // 🌟 જો Work Name કે Work Size ભરેલી હોય તો તેનું પણ વેલિડેશન કરી શકાય
+    if (!WorkName.trim()) { showAlert("Please enter Work Name!"); return; }
+    if (!WorkSize.trim()) { showAlert("Please enter Work Size!"); return; }
+
     const exists = sites.some(s => s.site_name.trim().toLowerCase() === siteName.trim().toLowerCase())
     if (exists) { showAlert("This site is already existing!"); return; }
 
-    const payload = { 
+    // ૧. પહેલો પેલોડ: મેઈન સાઇટ 'sites' ટેબલ માટે
+    const sitePayload = { 
       plant_id: selectedPlantId, 
-      party_name: sitePartyName.trim(), // 👈 પાર્ટીનું નામ સેવ થશે
+      party_name: sitePartyName.trim(), 
       site_name: siteName.trim(), 
       address: siteAddress.trim() || '', 
       state: siteState.trim(), 
       phone: sitePhone.trim() || ''
     }
 
-    const { error } = await supabase.from('sites').insert([payload])
+    const { error: siteError } = await supabase.from('sites').insert([sitePayload])
     
-    if (error) {
-      showAlert("Error: " + error.message);
-    } else { 
-      showAlert("Site Added Successfully!"); 
-      setSelectedPlantId(''); 
-      setSitePartyName(''); // 👈 સક્સેસ થયા પછી પાર્ટી રીસેટ થઈ જશે
-      setSiteName(''); 
-      setSiteAddress(''); 
-      setSiteState(''); 
-      setSitePhone(''); 
-      setActiveModal(null); 
-      await loadAllData(); 
+    if (siteError) {
+      showAlert("Error saving site: " + siteError.message);
+      return;
+    } 
+
+    // ૨. બીજો પેલોડ: BOM અને Work ની વિગતો 'site_bom' ટેબલ માટે
+    if (WorkName.trim() && WorkSize.trim()) {
+      const bomPayload = {
+        site_name: siteName.trim(),
+        work_name: WorkName.trim(),
+        work_size: WorkSize.trim(),
+        work_category: WorkCategory ? WorkCategory.trim() : '',
+        expected_m3: expectedM3 ? parseFloat(expectedM3) : null,
+        effective_date: effectiveDate || new Date().toISOString().split('T')[0],
+        bom_items: bomItems || [] // 🌟 મટીરિયલનું આખું લિસ્ટ JSON ફોર્મેટમાં સેવ થશે
+      }
+
+      const { error: bomError } = await supabase.from('site_bom').insert([bomPayload]);
+      
+      if (bomError) {
+        console.error("Error saving site BOM:", bomError);
+        showAlert("સાઇટ સેવ થઈ ગઈ, પણ BOM ડેટા સેવ કરવામાં એરર આવી: " + bomError.message);
+        return;
+      }
     }
+
+    // ૩. સફળતાપૂર્વક બધું સેવ થયા પછી ફોર્મ રિસેટ કરવું
+    showAlert("Site & BOM Added Successfully!"); 
+    setSelectedPlantId(''); 
+    setSitePartyName(''); 
+    setSiteName(''); 
+    setSiteAddress(''); 
+    setSiteState(''); 
+    setSitePhone(''); 
+    setWorkName('');
+    setWorkSize('');
+    setWorkCategory('');
+    setExpectedM3('');
+    setEffectiveDate(new Date().toISOString().split('T')[0]);
+    setBomItems([{ material: '', consumption: '', unit: 'Nos' }]);
+    setActiveModal(null); 
+    await loadAllData(); 
   }
+
+
 const handleSaveModalData = async () => {
     if (!formName.trim()) { showAlert("Please enter name!"); return; }
     
@@ -536,12 +589,12 @@ const handleUpdateSite = async (id) => {
       return; 
     }
 
-    // 🎯 ૧. એ જ નામની બીજી કોઈ સાઈટ પહેલેથી અવેલેબલ છે કે નહીં તે ચેક કરવું (પોતાની આઈડી છોડીને)
+    // 🎯 ૧. ડુપ્લિકેટ નામ ચેક કરવું (પોતાની આઈડી છોડીને)
     const { data: duplicateCheck, error: checkErr } = await supabase
       .from('sites')
       .select('id, site_name')
       .ilike('site_name', editSiteForm.site_name.trim())
-      .neq('id', id); // 👈 પોતાની આઈડી સિવાય બાકીની સાઈટ્સ ચેક કરશે
+      .neq('id', id);
 
     if (checkErr) {
       showAlert("Error checking duplicate: " + checkErr.message);
@@ -553,24 +606,48 @@ const handleUpdateSite = async (id) => {
       return;
     }
 
-    // 🎯 ૨. જો ડુપ્લિકેટ ન હોય તો અપડેટ કરવું
-    const { error } = await supabase
+    // 🎯 ૨. 'sites' ટેબલ અપડેટ કરવું
+    const { error: siteErr } = await supabase
       .from('sites')
       .update({
         site_name: editSiteForm.site_name.trim(),
-        address: editSiteForm.address.trim() || '',
+        address: editSiteForm.address ? editSiteForm.address.trim() : '',
         state: editSiteForm.state,
-        phone: editSiteForm.phone.trim() || ''
+        phone: editSiteForm.phone ? editSiteForm.phone.trim() : ''
       })
       .eq('id', id);
 
-    if (error) {
-      showAlert("Error updating site: " + error.message);
-    } else {
-      showAlert("✅ Site Successfully Updated!");
-      setEditingSiteId(null);
-      loadAllData();
+    if (siteErr) {
+      showAlert("Error updating site: " + siteErr.message);
+      return;
     }
+
+    // 🎯 ૩. 'site_bom' ટેબલ માટે જૂના રેકોર્ડ ડિલીટ કરી નવા બધા જ વર્ક ઇન્સર્ટ કરવા
+    const oldSiteName = sites.find(s => s.id === id)?.site_name;
+    if (oldSiteName) {
+      await supabase.from('site_bom').delete().eq('site_name', oldSiteName);
+    }
+
+    if (Array.isArray(editSiteForm.works_list) && editSiteForm.works_list.length > 0) {
+      const rowsToInsert = editSiteForm.works_list.map(w => ({
+        site_name: editSiteForm.site_name.trim(),
+        work_name: w.work_name ? w.work_name.trim() : 'General Work',
+        work_size: w.work_size ? w.work_size.trim() : '-',
+        work_category: w.work_category ? w.work_category.trim() : '-',
+        expected_m3: w.expected_m3 ? parseFloat(w.expected_m3) : null,
+        effective_date: new Date().toISOString().split('T')[0],
+        bom_items: w.bom_items || []
+      }));
+
+      const { error: bomErr } = await supabase.from('site_bom').insert(rowsToInsert);
+      if (bomErr) {
+        console.error("Error inserting BOM works:", bomErr);
+      }
+    }
+
+    showAlert("✅ Site & All Works BOM Successfully Updated!");
+    setEditingSiteId(null);
+    loadAllData();
   };
  const handleGenericUpdate = async (tableName, id, formData) => {
     if (!formData.name || !formData.name.trim()) { 
@@ -1381,43 +1458,155 @@ return (
                   const plantObj = (plants || []).find(p => p.id === s.plant_id);
                   return (
                     <div key={s.id} style={{ display: 'flex', flexDirection: 'column', padding: '14px', backgroundColor: '#fff', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '12px', gap: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', boxSizing: 'border-box' }}>
-                      {editingSiteId === s.id ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <input placeholder="Site Name" value={editSiteForm.site_name || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, site_name: e.target.value })} style={{ padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
-                          <input placeholder="Address" value={editSiteForm.address || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, address: e.target.value })} style={{ padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            
-                            <input placeholder="Phone" value={editSiteForm.phone || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, phone: e.target.value })} style={{ flex: 1, padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
-                          </div>
-                         {/* 🎯 બટન્સ: Delete (ડાબી બાજુ) અને Update & Cancel (જમણી બાજુ) */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
-                            
-                            {/* ડાબી બાજુનું ડીલીટ બટન */}
-                            <button 
-                              onClick={() => handleDeleteSite(s.id)} 
-                              style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <Trash2 size={14} /> Delete
-                            </button>
-                            
-                            {/* જમણી બાજુના Update અને Cancel બટન */}
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button 
-                                onClick={() => setEditingSiteId(null)} 
-                                style={{ backgroundColor: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-                              >
-                                Cancel
-                              </button>
-                              <button 
-                                onClick={() => handleUpdateSite(s.id)} 
-                                style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                              >
-                                <Check size={14} /> Update
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
+          {editingSiteId === s.id ? (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <input placeholder="Site Name" value={editSiteForm.site_name || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, site_name: e.target.value })} style={{ padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
+    <input placeholder="Address" value={editSiteForm.address || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, address: e.target.value })} style={{ padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
+    <input placeholder="Phone" value={editSiteForm.phone || ''} onChange={(e) => setEditSiteForm({ ...editSiteForm, phone: e.target.value })} style={{ padding: '8px', fontSize: '12px', borderRadius: '6px', border: '1px solid #94a3b8' }} />
+
+    {/* 🌟 મલ્ટીપલ વર્ક સોર્સ લિસ્ટ */}
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+      <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#0369a1' }}>🏗️ Work & BOM Sources</span>
+      <button type="button" onClick={() => {
+        const currentWorks = Array.isArray(editSiteForm.works_list) ? editSiteForm.works_list : [];
+        setEditSiteForm({
+          ...editSiteForm,
+          works_list: [...currentWorks, { work_name: '', work_size: '', work_category: '', expected_m3: '', bom_items: [{ material: '', consumption: '', unit: 'Nos' }] }]
+        });
+      }} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>+ Add Source (Work)</button>
+    </div>
+
+    {(Array.isArray(editSiteForm.works_list) ? editSiteForm.works_list : []).map((work, wIdx) => (
+      <div key={wIdx} style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569' }}>Work Source #{wIdx + 1}</span>
+          {editSiteForm.works_list.length > 1 && (
+            <button type="button" onClick={() => {
+              const updated = editSiteForm.works_list.filter((_, i) => i !== wIdx);
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>Remove Source</button>
+          )}
+        </div>
+
+        {/* Work Name & Work Size */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          <div>
+            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Work Name *</label>
+            <input placeholder="e.g. Column" value={work.work_name || ''} onChange={(e) => {
+              const updated = [...editSiteForm.works_list];
+              updated[wIdx].work_name = e.target.value;
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ padding: '6px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Work Size *</label>
+            <input placeholder="e.g. 8" value={work.work_size || ''} onChange={(e) => {
+              const updated = [...editSiteForm.works_list];
+              updated[wIdx].work_size = e.target.value;
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ padding: '6px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+        </div>
+
+        {/* Work Category & Expected M3 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          <div>
+            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Category *</label>
+            <input placeholder="Category" value={work.work_category || ''} onChange={(e) => {
+              const updated = [...editSiteForm.works_list];
+              updated[wIdx].work_category = e.target.value;
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ padding: '6px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Expected M³ *</label>
+            <input type="number" step="0.001" placeholder="M3" value={work.expected_m3 || ''} onChange={(e) => {
+              const updated = [...editSiteForm.works_list];
+              updated[wIdx].expected_m3 = e.target.value;
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ padding: '6px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+        </div>
+
+        {/* 🌟 1. નવું: Effective Date ઇનપુટ બોક્સ */}
+        <div>
+          <label style={{ fontSize: '9px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Effective From Date *</label>
+          <input type="date" value={work.effective_date || new Date().toISOString().split('T')[0]} onChange={(e) => {
+            const updated = [...editSiteForm.works_list];
+            updated[wIdx].effective_date = e.target.value;
+            setEditSiteForm({ ...editSiteForm, works_list: updated });
+          }} style={{ padding: '6px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff', width: '100%', boxSizing: 'border-box' }} />
+        </div>
+
+        {/* BOM Items for this Work */}
+        <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#0891b2' }}>📦 BOM Materials</span>
+            <button type="button" onClick={() => {
+              const updated = [...editSiteForm.works_list];
+              updated[wIdx].bom_items.push({ material: '', consumption: '', unit: 'Nos' });
+              setEditSiteForm({ ...editSiteForm, works_list: updated });
+            }} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '2px 6px', borderRadius: '3px', fontSize: '9px', cursor: 'pointer' }}>+ Add Material</button>
+          </div>
+
+          {(work.bom_items || []).map((bom, bIdx) => (
+            <div key={bIdx} style={{ display: 'flex', gap: '4px', marginBottom: '4px', alignItems: 'center' }}>
+              <select value={bom.material || ''} onChange={(e) => {
+                const updated = [...editSiteForm.works_list];
+                updated[wIdx].bom_items[bIdx].material = e.target.value;
+                setEditSiteForm({ ...editSiteForm, works_list: updated });
+              }} style={{ flex: 2, padding: '4px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>
+                <option value="">-- Material --</option>
+                {(materials || []).map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
+              </select>
+              
+              <input type="number" placeholder="Qty" value={bom.consumption || ''} onChange={(e) => {
+                const updated = [...editSiteForm.works_list];
+                updated[wIdx].bom_items[bIdx].consumption = e.target.value;
+                setEditSiteForm({ ...editSiteForm, works_list: updated });
+              }} style={{ flex: 1, padding: '4px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }} />
+
+              <select value={bom.unit || 'Nos'} onChange={(e) => {
+                const updated = [...editSiteForm.works_list];
+                updated[wIdx].bom_items[bIdx].unit = e.target.value;
+                setEditSiteForm({ ...editSiteForm, works_list: updated });
+              }} style={{ flex: 1, padding: '4px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>
+                <option value="Nos">Nos</option>
+                <option value="Bags">Bags</option>
+                <option value="Kg">Kg</option>
+                <option value="Tons">Tons</option>
+              </select>
+
+              {work.bom_items.length > 1 && (
+                <button type="button" onClick={() => {
+                  const updated = [...editSiteForm.works_list];
+                  updated[wIdx].bom_items = updated[wIdx].bom_items.filter((_, i) => i !== bIdx);
+                  setEditSiteForm({ ...editSiteForm, works_list: updated });
+                }} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}>✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+
+      </div>
+    ))}
+
+    {/* Buttons */}
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+      <button onClick={() => handleDeleteSite(s.id)} style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <Trash2 size={14} /> Delete
+      </button>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button onClick={() => setEditingSiteId(null)} style={{ backgroundColor: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
+        <button onClick={() => handleUpdateSite(s.id)} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <Check size={14} /> Update
+        </button>
+      </div>
+    </div>
+  </div>
+) : (
+  
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
                             <span style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '14px' }}>{s.site_name}</span>
@@ -1427,8 +1616,23 @@ return (
                           </div>
                          {/* 🎯 ફક્ત Edit બટન (બહારથી Delete કાઢી નાખ્યું છે) */}
                           <div style={{ display: 'flex' }}>
-                            <button 
-                              onClick={() => { setEditingSiteId(s.id); setEditSiteForm({ site_name: s.site_name, address: s.address || '', state: s.state || '', phone: s.phone || '' }); }} 
+                           <button 
+  onClick={() => { 
+    setEditingSiteId(s.id); 
+    setEditSiteForm({ 
+      site_name: s.site_name, 
+      address: s.address || '', 
+      state: s.state || '', 
+      phone: s.phone || '',
+      works_list: s.works_list && s.works_list.length > 0 ? s.works_list : [{
+        work_name: '',
+        work_size: '',
+        work_category: '',
+        expected_m3: '',
+        bom_items: [{ material: '', consumption: '', unit: 'Nos' }]
+      }]
+    }); 
+  }}
                               style={{ 
                                 background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', 
                                 padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', 
@@ -2673,72 +2877,168 @@ return (
                 </div>
               </div>
             ) : activeModal === 'site' ? (
-              /* 🏗️ 6. SITE MODAL FORM */
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant State *</label>
-                  <select value={selectedPlantState} onChange={(e) => {
-                    setSelectedPlantState(e.target.value);
-                    setSelectedPlantId('');
-                  }} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                    <option value="">🌐 All States (General)</option>
-                    {statesList.map(st => <option key={st} value={st}>{st}</option>)}
-                  </select>
+           /* 🏗️ 6. SITE MODAL FORM (COMPACT) */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                
+                {/* Row 1: Plant State & Plant */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Select Plant State *</label>
+                    <select value={selectedPlantState} onChange={(e) => {
+                      setSelectedPlantState(e.target.value);
+                      setSelectedPlantId('');
+                    }} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                      <option value="">🌐 All States (General)</option>
+                      {statesList.map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Select Plant *</label>
+                    <select value={selectedPlantId} onChange={(e) => setSelectedPlantId(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                      {filteredPlantsForSite.length === 0 ? (
+                        <option value="" disabled>⚠️ No Plant Available</option>
+                      ) : (
+                        <>
+                          <option value="">🌐 All Plants</option>
+                          {filteredPlantsForSite.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
+                        </>
+                      )}
+                    </select>
+                  </div>
                 </div>
 
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Plant *</label>
-                  <select value={selectedPlantId} onChange={(e) => setSelectedPlantId(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                    {filteredPlantsForSite.length === 0 ? (
-                      <option value="" disabled>⚠️ No Plant Available in this State</option>
-                    ) : (
-                      <>
-                        <option value="">🌐 All Plants (General)</option>
-                        {filteredPlantsForSite.map(p => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
-                      </>
-                    )}
-                  </select>
+                {/* Row 2: Party & Site Name */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Select Party / Client *</label>
+                    <select value={sitePartyName} onChange={(e) => setSitePartyName(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                      <option value="">-- Choose Party --</option>
+                      {(outwardParties || [])
+                        .filter(p => {
+                          if (!selectedPlantId) return !p.plant_id || p.plant_id === 'All Plants (General)';
+                          return p.plant_id == selectedPlantId || p.plant_id === 'All Plants (General)';
+                        })
+                        .map(p => (
+                          <option key={p.id} value={p.name}>{p.name} {p.company_name ? `(${p.company_name})` : ''}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Site Name *</label>
+                    <input placeholder="Enter site name..." value={siteName} onChange={(e) => setSiteName(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
                 </div>
 
+                {/* Row 3: Address (Single Row) */}
                 <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Select Party / Client *</label>
-                  <select value={sitePartyName} onChange={(e) => setSitePartyName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                    <option value="">-- Choose Party --</option>
-                    {(outwardParties || [])
-                      .filter(p => {
-                        if (!selectedPlantId) return !p.plant_id || p.plant_id === 'All Plants (General)';
-                        return p.plant_id == selectedPlantId || p.plant_id === 'All Plants (General)';
-                      })
-                      .map(p => (
-                        <option key={p.id} value={p.name}>{p.name} {p.company_name ? `(${p.company_name})` : ''}</option>
-                      ))}
-                  </select>
+                  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Address</label>
+                  <input placeholder="Enter full address..." value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
                 </div>
 
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Site Name *</label>
-                  <input placeholder="Enter site name..." value={siteName} onChange={(e) => setSiteName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+                {/* Row 4: State & Phone (2 Columns) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>State *</label>
+                    <select value={siteState} onChange={(e) => setSiteState(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+                      <option value="">-- State --</option>
+                      {statesList.map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Phone</label>
+                    <input type="tel" placeholder="Phone..." value={sitePhone} onChange={(e) => setSitePhone(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Address (Optional)</label>
-                  <input placeholder="Enter address..." value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+
+                {/* 🛑 DIVIDER & HIGHLIGHT FOR BOM SECTION 🛑 */}
+                <div style={{ borderTop: '2px dashed #cbd5e1', marginTop: '6px', paddingTop: '10px' }}>
+                  <div style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '6px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🛠️ Site Work & BOM Details
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>State *</label>
-                  <select value={siteState} onChange={(e) => setSiteState(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                    <option value="">-- Choose State --</option>
-                    {statesList.map(st => <option key={st} value={st}>{st}</option>)}
-                  </select>
+
+                {/* Row 5: Work Name & Work Size */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Work Name *</label>
+                    <input placeholder="e.g. U-Drain" value={WorkName} onChange={(e) => setWorkName(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Work Size *</label>
+                    <input placeholder="e.g. 600x600" value={WorkSize} onChange={(e) => setWorkSize(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Phone Number (Optional)</label>
-                  <input type="tel" placeholder="Enter phone number..." value={sitePhone} onChange={(e) => setSitePhone(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+
+                {/* Row 6: Work Category & Expected Concrete */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Work Category *</label>
+                    <input placeholder="e.g. Footing" value={WorkCategory} onChange={(e) => setWorkCategory(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Expected Concrete (M³)</label>
+                    <input type="number" step="0.001" placeholder="0.75" value={expectedM3} onChange={(e) => setExpectedM3(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                  <button onClick={handleSaveSite} style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Site</button>
-                  <button onClick={() => { setActiveModal(null); setSelectedPlantState(''); }} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>
+
+                {/* Row 7: Effective Date */}
+                <div>
+                  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Effective From Date *</label>
+                  <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} />
+                </div>
+
+                {/* BOM Section (Compact) */}
+                <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#0891b2' }}>📦 Bill of Materials (BOM)</span>
+                    <button type="button" onClick={() => setBomItems([...bomItems, { material: '', consumption: '', unit: 'Nos' }])} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '3px 6px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add</button>
+                  </div>
+
+                  {bomItems.map((bom, bIdx) => (
+                    <div key={bIdx} style={{ display: 'flex', gap: '4px', marginBottom: '4px', alignItems: 'center' }}>
+                      <select value={bom.material} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].material = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 2, padding: '5px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>
+                        <option value="">-- Material --</option>
+                        {availableMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
+                      </select>
+                      
+                      <input type="number" placeholder="Qty" value={bom.consumption} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].consumption = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 1, padding: '5px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1' }} />
+
+                      <select value={bom.unit} onChange={(e) => {
+                        const updated = [...bomItems];
+                        updated[bIdx].unit = e.target.value;
+                        setBomItems(updated);
+                      }} style={{ flex: 1, padding: '5px', fontSize: '10px', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#fff' }}>
+                        <option value="Nos">Nos</option>
+                        <option value="Bags">Bags</option>
+                        <option value="Kg">Kg</option>
+                        <option value="Tons">Tons</option>
+                      </select>
+
+                      {bomItems.length > 1 && (
+                        <button type="button" onClick={() => setBomItems(bomItems.filter((_, i) => i !== bIdx))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={12} /></button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                  <button onClick={handleSaveSite} style={{ flex: 1, backgroundColor: '#2563eb', color: '#fff', padding: '8px', borderRadius: '4px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>Save Site</button>
+                  <button onClick={() => { setActiveModal(null); setSelectedPlantState(''); }} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
                 </div>
               </div>
+
+
+
+
             ) : activeModal === 'labour' ? (
               /* 👷 7. LABOUR MODAL FORM */
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

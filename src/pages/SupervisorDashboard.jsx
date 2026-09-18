@@ -9,262 +9,64 @@ function SupervisorDashboard() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('site_report')
   const [sites, setSites] = useState([])
-  const [contractors, setContractors] = useState([]) 
-  const [materialsMaster, setMaterialsMaster] = useState([]) 
-  const [workDescriptions, setWorkDescriptions] = useState([]) 
+  const [contractors, setContractors] = useState([])
+  const [materialsMaster, setMaterialsMaster] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [siteBoms, setSiteBoms] = useState([]);
 
   const [filterSite, setFilterSite] = useState('all')
   const [filterDate, setFilterDate] = useState('')
   const [previewData, setPreviewData] = useState(null)
   const [reports, setReports] = useState([])
-  const [showReportForm, setShowReportForm] = useState(false)
   const [modal, setModal] = useState({ isOpen: false, message: '', onConfirm: null });
 
-  // આજની તારીખ કાઢવા માટેનું ફંક્શન (ભવિષ્યની તારીખ રોકવા)
   const getTodayString = () => {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().split('T')[0];
   };
+  const UOM_OPTIONS = ["NOS", "Bags", "KG", "Ton", "Ltr"];
 
   const [reportForm, setReportForm] = useState({
     siteName: '',
     reportDate: getTodayString(),
-    palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }], 
-    contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
-    finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
+ palingWorkRows: [],
+    contractorRows: [{ 
+      contractorName: '', 
+      labourCount: '', 
+      labourNotes: '', 
+      workItems: [{ 
+        workType: '', 
+        columnSize: '', 
+        concreteType: 'RMC', 
+        singleCastingQty: '', 
+        doubleCastingQty: '', 
+        runningFeet: '', 
+        height: '', 
+        cementBags: '', 
+        customWorkName: '', 
+        quantity: '', 
+        unit: 'NOS' 
+      }] 
+    }],
     description: ''
   })
 
-  const [siteProgressPhotos, setSiteProgressPhotos] = useState([])
 
-  const UOM_OPTIONS = ["NOS", "Bags", "KG", "Ton", "Ltr"]
-
-  useEffect(() => {
+// 🌟 સાઇટ બદલાય એટલે તેનું BOM ફેચ કરવા માટે
+useEffect(() => {
     loadSites()
     loadContractors()
     loadMaterialsMaster()
-    loadWorkDescriptions()
     loadReports()
+    loadSiteBoms() // 🌟 આ નવું ફંક્શન ઉમેરવાનું છે
   }, [])
 
-  // Image Compression Function
-  const compressImage = (file) => {
-    return new Promise((resolve) => {
-      if (!file || !(file instanceof Blob || file instanceof File)) {
-        resolve(file);
-        return;
-      }
-      if (file.type === 'application/pdf') {
-        resolve(file);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onerror = () => resolve(file);
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target.result;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const MAX_WIDTH = 1200;
-          const MAX_HEIGHT = 1200;
-          if (width > height) {
-            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-          } else {
-            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob((blob) => {
-            if (!blob) { resolve(file); return; }
-            const compressedFile = new File([blob], file.name || 'image.jpg', {
-              type: 'image/jpeg',
-              lastModified: Date.now(),
-            });
-            resolve(compressedFile);
-          }, 'image/jpeg', 0.7);
-        };
-        img.onerror = () => resolve(file);
-      };
-    });
-  };
-
-  const deleteFileFromStorage = async (fileUrl) => {
-    try {
-      if (!fileUrl || typeof fileUrl !== 'string') return;
-      
-      let filePath = '';
-      if (fileUrl.includes('/site-photos/')) {
-        filePath = fileUrl.split('/site-photos/')[1];
-      } else {
-        filePath = fileUrl;
-      }
-
-      if (filePath.includes('?')) {
-        filePath = filePath.split('?')[0];
-      }
-
-      if (filePath) {
-        const { error } = await supabase.storage.from('site-photos').remove([filePath]);
-        if (error) {
-          console.error("Storage delete error:", error.message);
-        }
-      }
-    } catch (err) {
-      console.error("Error deleting file from storage:", err);
-    }
-  };
-
-  const uploadFilesToSupabase = async (fileArray, folderName) => {
-    if (!fileArray || !Array.isArray(fileArray)) return [];
-    let urls = [];
-    
-    const sitePrefix = reportForm.siteName ? reportForm.siteName.replace(/\s+/g, '_').toLowerCase() : 'unknown';
-    const datePrefix = reportForm.reportDate || 'date';
-
-    for (let i = 0; i < fileArray.length; i++) {
-      let file = fileArray[i];
-      
-      if (file instanceof File) {
-        const compressedFile = await compressImage(file);
-        const fileExt = compressedFile.name ? compressedFile.name.split('.').pop() : 'jpg';
-        
-        const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).substring(7)}_${i}`;
-        const fileName = `${folderName}/${sitePrefix}_${datePrefix}_${uniqueSuffix}.${fileExt}`;
-        
-        const { data, error } = await supabase.storage.from('site-photos').upload(fileName, compressedFile);
-        if (!error && data) {
-          const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName);
-          urls.push(publicUrl);
-        }
-      } else if (typeof file === 'string') {
-        urls.push(file); 
-      }
-    }
-    return urls;
-  };
-
-  // 1. Auto-Save Draft
-  useEffect(() => {
-    if (!showReportForm || !reportForm.siteName || !user?.id) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        let hasFileChanges = false; 
-
-        const updatedProgressPhotos = await uploadFilesToSupabase(siteProgressPhotos, 'site_progress');
-        if (JSON.stringify(updatedProgressPhotos) !== JSON.stringify(siteProgressPhotos)) hasFileChanges = true;
-
-        await supabase.from('site_drafts').upsert({
-          user_id: user.id,
-          site_id: reportForm.siteName,
-          report_data: { 
-            ...reportForm, 
-            draftPhotoUrls: updatedProgressPhotos 
-          },
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id, site_id' });
-
-        if (hasFileChanges) {
-          setSiteProgressPhotos(updatedProgressPhotos);
-        }
-
-      } catch (err) {
-        console.error("Draft auto-save error:", err);
-      }
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [reportForm, showReportForm, siteProgressPhotos, user]);
-
-  const isFormEmpty = () => {
-    const hasPaling = reportForm.palingWorkRows.some(p => p.qty && parseFloat(p.qty) > 0);
-    const hasContractor = reportForm.contractorRows.some(c => (c.labourCount && parseFloat(c.labourCount) > 0) || c.materials.some(m => m.quantity && parseFloat(m.quantity) > 0));
-    const hasFinalWork = reportForm.finalWorkRows.some(f => (f.runningFeet && parseFloat(f.runningFeet) > 0) || (f.height && parseFloat(f.height) > 0));
-    const hasPhotos = siteProgressPhotos.length > 0;
-    const hasDescription = reportForm.description.trim().length > 0;
-
-    return !(hasPaling || hasContractor || hasFinalWork || hasPhotos || hasDescription);
-  };
-
-  // 2. ConfirmAndSave
-  const confirmAndSave = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const supervisorEmail = user?.email || 'Supervisor'
-
-      let sitePhotoUrls = []
-      for (let file of siteProgressPhotos) {
-        if (file instanceof File) {
-          const compressedFile = await compressImage(file)
-          const fileExt = compressedFile.name.split('.').pop()
-          const fileName = `site_progress/site_prog_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
-          const { error: uploadError } = await supabase.storage.from('site-photos').upload(fileName, compressedFile)
-          if (uploadError) throw new Error("Progress photo upload failed: " + uploadError.message)
-          const { data: { publicUrl } } = supabase.storage.from('site-photos').getPublicUrl(fileName)
-          sitePhotoUrls.push(publicUrl)
-        } else if (typeof file === 'string') {
-          sitePhotoUrls.push(file)
-        }
-      }
-
-      const { error: repError } = await supabase.from('daily_reports').insert([{
-        site_name: reportForm.siteName,
-        contractor_details: reportForm.contractorRows,
-        paling_work: reportForm.palingWorkRows,
-        damage_items: [],
-        final_work: reportForm.finalWorkRows,
-        description: reportForm.description,
-        photo_urls: sitePhotoUrls,
-        report_date: reportForm.reportDate,
-        user_id: supervisorEmail
-      }])
-      if (repError) throw new Error("Daily report insert failed: " + repError.message)
-
-      await supabase
-        .from('site_drafts')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('site_id', reportForm.siteName);
-
-      await loadReports()
-      setShowReportForm(false)
-      setReportForm({
-        siteName: '',
-        reportDate: getTodayString(),
-        palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
-        contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
-        finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
-        description: ''
-      })
-      setSiteProgressPhotos([])
-      setPreviewData(null)
-      
-      setModal({ 
-        isOpen: true, 
-        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been submitted successfully.`, 
-        onConfirm: () => setModal({ isOpen: false }) 
-      });
-
-    } catch (err) {
-      setLoading(false)
-      const errorMsg = err?.message || 'Unknown error occurred while saving.'
-      setModal({ 
-        isOpen: true, 
-        message: 'Failed to save: ' + errorMsg + '. Your data is NOT lost, please try submitting again.', 
-        onConfirm: () => setModal({ isOpen: false }) 
-      });
-      setError(errorMsg)
-    } finally {
-      setLoading(false)
+  const loadSiteBoms = async () => {
+    const { data, error } = await supabase.from('site_bom').select('*');
+    if (!error) {
+      setSiteBoms(data || []);
     }
   }
 
@@ -291,7 +93,6 @@ function SupervisorDashboard() {
       }
 
       const assignedSiteNames = permData.assigned_sites;
-
       const { data: siteData, error: siteError } = await supabase
         .from('sites')
         .select('*')
@@ -313,28 +114,59 @@ function SupervisorDashboard() {
     if (!error) setContractors(data || []);
   }
 
-  const loadMaterialsMaster = async () => {
-    const { data, error } = await supabase.from('site_materials_master').select('*');
-    if (!error) setMaterialsMaster(data || []);
-  }
-
-  const loadWorkDescriptions = async () => {
+const loadMaterialsMaster = async () => {
     try {
-      const { data, error } = await supabase.from('site_work_descriptions').select('*');
-      if (!error) setWorkDescriptions(data || []);
+      // 🌟 ૧. ટેબલનું નામ બદલીને 'site_material_stock_ledger' કર્યું
+      const { data, error } = await supabase
+        .from('site_material_stock_ledger')
+        .select('material_name, site_name');
+
+      if (!error && data) {
+        // 🌟 ૨. લેજરમાંથી ડુપ્લિકેટ નામ દૂર કરીને યુનિક લિસ્ટ બનાવવું
+        const uniqueMaterials = [];
+        const seen = new Set();
+
+        data.forEach(item => {
+          if (item.material_name && item.site_name) {
+            // સાઇટ અને મટીરિયલના નામનું ભેગું કોમ્બિનેશન બનાવી ચેક કરીએ છીએ
+            const uniqueKey = `${item.site_name}_${item.material_name.trim()}`;
+            
+            if (!seen.has(uniqueKey)) {
+              seen.add(uniqueKey);
+              uniqueMaterials.push({
+                id: uniqueKey, 
+                name: item.material_name.trim(), // ફોર્મમાં 'name' વપરાય છે એટલે તેમાં મેપ કર્યું
+                site_name: item.site_name
+              });
+            }
+          }
+        });
+
+        setMaterialsMaster(uniqueMaterials);
+      } else {
+        setMaterialsMaster([]);
+        console.error("Ledger Fetch Error:", error);
+      }
     } catch (err) {
-      setWorkDescriptions([]);
+      console.error("Error loading materials from ledger:", err);
+      setMaterialsMaster([]);
     }
   }
-
   const loadReports = async () => {
     const { data } = await supabase.from('daily_reports').select('*').order('created_at', { ascending: false })
     setReports(data || [])
   }
 
   const currentSiteContractors = contractors.filter(c => c.site_name === reportForm.siteName || c.site_name === 'All Sites (General)')
-  const currentSiteMaterials = materialsMaster.filter(m => m.site_name === reportForm.siteName || m.site_name === 'All Sites (General)')
-  const currentSiteWorkDescriptions = workDescriptions.filter(w => w.site_name === reportForm.siteName || w.site_name === 'All Sites (General)')
+// 🌟 કેસ-ઇન્સિટિવ અને ટ્રીમ સરખામણી સાથે સાઇટના મટીરિયલ્સ ફિલ્ટર કરવા
+  const currentSiteMaterials = materialsMaster.filter(m => {
+    if (!m.site_name || !reportForm.siteName) return false;
+    
+    const dbSite = m.site_name.trim().toLowerCase();
+    const selectedSite = reportForm.siteName.trim().toLowerCase();
+    
+    return dbSite === selectedSite || dbSite === 'all sites (general)' || dbSite === 'plant level (general)';
+  });
 
   const triggerContractorChange = (type, index, newValue, selectedName) => {
     setModal({
@@ -349,10 +181,6 @@ function SupervisorDashboard() {
           const updated = [...reportForm.contractorRows];
           updated[index].contractorName = newValue;
           setReportForm({...reportForm, contractorRows: updated});
-        } else if (type === 'final') {
-          const updated = [...reportForm.finalWorkRows];
-          updated[index].contractorName = newValue;
-          setReportForm({...reportForm, finalWorkRows: updated});
         }
         setModal({ isOpen: false, message: '', onConfirm: null });
       },
@@ -360,24 +188,86 @@ function SupervisorDashboard() {
     });
   };
 
-  const addPalingWorkRow = () => setReportForm({...reportForm, palingWorkRows: [...reportForm.palingWorkRows, { contractorName: '', qty: '', nos: '', description: '' }]})
-  const removePalingWorkRow = (index) => setReportForm({...reportForm, palingWorkRows: reportForm.palingWorkRows.filter((_, i) => i !== index)})
-
-  const addContractorRow = () => setReportForm({...reportForm, contractorRows: [...reportForm.contractorRows, { contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }]})
-  const removeContractorRow = (index) => setReportForm({...reportForm, contractorRows: reportForm.contractorRows.filter((_, i) => i !== index)})
-  const addMaterialToContractor = (cIndex) => {
-    const updated = [...reportForm.contractorRows]
-    updated[cIndex].materials.push({ material: '', customMaterialName: '', quantity: '', unit: 'NOS' })
-    setReportForm({...reportForm, contractorRows: updated})
-  }
-  const removeMaterialFromContractor = (cIndex, mIndex) => {
-    const updated = [...reportForm.contractorRows]
-    updated[cIndex].materials = updated[cIndex].materials.filter((_, i) => i !== mIndex)
-    setReportForm({...reportForm, contractorRows: updated})
+  const addPalingWorkRow = () => {
+    setReportForm({
+      ...reportForm, 
+      palingWorkRows: [...reportForm.palingWorkRows, { contractorName: '', qty: '', description: '' }]
+    })
   }
 
-  const addFinalWorkRow = () => setReportForm({...reportForm, finalWorkRows: [...reportForm.finalWorkRows, { contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }]})
-  const removeFinalWorkRow = (index) => setReportForm({...reportForm, finalWorkRows: reportForm.finalWorkRows.filter((_, i) => i !== index)})
+  const removePalingWorkRow = (index) => {
+    setReportForm({
+      ...reportForm, 
+      palingWorkRows: reportForm.palingWorkRows.filter((_, i) => i !== index)
+    })
+  }
+
+  const updatePalingRow = (index, field, value) => {
+    const updated = [...reportForm.palingWorkRows];
+    updated[index][field] = value;
+    setReportForm({...reportForm, palingWorkRows: updated});
+  }
+
+  const addContractorRow = () => {
+    setReportForm({
+      ...reportForm,
+      contractorRows: [...reportForm.contractorRows, { 
+        contractorName: '', 
+        labourCount: '', 
+        labourNotes: '', 
+        workItems: [{ 
+          workType: '', 
+          columnSize: '', 
+          concreteType: 'RMC', 
+          singleCastingQty: '', 
+          doubleCastingQty: '', 
+          runningFeet: '', 
+          height: '', 
+          cementBags: '', 
+          customWorkName: '', 
+          quantity: '', 
+          unit: 'NOS' 
+        }] 
+      }]
+    })
+  }
+
+  const removeContractorRow = (index) => {
+    setReportForm({
+      ...reportForm,
+      contractorRows: reportForm.contractorRows.filter((_, i) => i !== index)
+    })
+  }
+
+  const addWorkItemToContractor = (cIndex) => {
+    const updated = [...reportForm.contractorRows]
+    updated[cIndex].workItems.push({ 
+      workType: '', 
+      columnSize: '', 
+      concreteType: 'RMC', 
+      singleCastingQty: '', 
+      doubleCastingQty: '', 
+      runningFeet: '', 
+      height: '', 
+      cementBags: '', 
+      customWorkName: '', 
+      quantity: '', 
+      unit: 'NOS' 
+    })
+    setReportForm({...reportForm, contractorRows: updated})
+  }
+
+  const removeWorkItemFromContractor = (cIndex, wIndex) => {
+    const updated = [...reportForm.contractorRows]
+    updated[cIndex].workItems = updated[cIndex].workItems.filter((_, i) => i !== wIndex)
+    setReportForm({...reportForm, contractorRows: updated})
+  }
+
+  const handleDropdownClick = () => {
+    if (!reportForm.siteName) {
+      setModal({ isOpen: true, message: 'કૃપા કરીને પહેલા સાઇટ સિલેક્ટ કરો!', onConfirm: () => setModal({ isOpen: false }) });
+    }
+  };
 
   const handleCombinedReportPreview = () => {
     if (!reportForm.siteName) {
@@ -385,20 +275,199 @@ function SupervisorDashboard() {
       return
     }
 
-    if (isFormEmpty()) {
-      setModal({ isOpen: true, message: '⚠️ ફોર્મ ખાલી છે! સબમિટ કરવા માટે કૃપા કરીને કોઈ વિગત ભરો.', onConfirm: () => setModal({ isOpen: false }) });
-      return;
-    }
-
     setPreviewData({
-      title: 'Complete Site Daily Report Preview',
+      title: 'Site Daily Report Preview',
       site: reportForm.siteName,
       date: reportForm.reportDate,
-      details: reportForm,
-      sitePhotosCount: siteProgressPhotos.length
+      details: reportForm
     })
   }
 
+const confirmAndSave = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const supervisorEmail = user?.email || 'Supervisor'
+
+      // ૧. દૈનિક રિપોર્ટ ઇન્સર્ટ કરો અને તેની ID મેળવો
+      const { data: insertedReport, error: repError } = await supabase
+        .from('daily_reports')
+        .insert([{
+          site_name: reportForm.siteName,
+          contractor_details: reportForm.contractorRows,
+          paling_work: reportForm.palingWorkRows,
+          damage_items: [],
+          final_work: [],
+          description: reportForm.description,
+          photo_urls: [],
+          report_date: reportForm.reportDate,
+          user_id: supervisorEmail
+        }])
+        .select('id')
+        .single();
+
+      if (repError) throw new Error("Daily report insert failed: " + repError.message);
+      
+      const reportId = insertedReport ? insertedReport.id : null; // 🌟 સેફ રિપોર્ટ આઈડી
+
+      // ૨. સાઇટ મટીરિયલ સ્ટોક લેજરમાં એન્ટ્રી કરવા માટે
+      const ledgerRows = [];
+
+      for (const cRow of reportForm.contractorRows) {
+        if (Array.isArray(cRow.workItems)) {
+          for (const wItem of cRow.workItems) {
+            
+            // Column Installation
+            if (wItem.workType === '1. Column Installation' && wItem.columnSize && wItem.quantity) {
+              ledgerRows.push({
+                site_name: reportForm.siteName,
+                date: reportForm.reportDate,
+                material_name: `Column ${wItem.columnSize}`,
+                qty: Math.abs(parseFloat(wItem.quantity) || 0),
+                unit: 'Nos',
+                transaction_type: 'Consumption',
+                reference_id: reportId
+              });
+            }
+
+            // Panel Erection
+            if (wItem.workType === '3. Panel Erection' && wItem.columnSize && wItem.quantity) {
+              ledgerRows.push({
+                site_name: reportForm.siteName,
+                date: reportForm.reportDate,
+                material_name: `Panel ${wItem.columnSize}`,
+                qty: Math.abs(parseFloat(wItem.quantity) || 0),
+                unit: 'Nos',
+                transaction_type: 'Consumption',
+                reference_id: reportId
+              });
+            }
+
+            // Column Concrete
+            if (wItem.workType === '2. Column Concrete') {
+              if (wItem.concreteType === 'RMC' && wItem.actualRmcQty) {
+                ledgerRows.push({
+                  site_name: reportForm.siteName,
+                  date: reportForm.reportDate,
+                  material_name: 'RMC Concrete',
+                  qty: Math.abs(parseFloat(wItem.actualRmcQty) || 0),
+                  unit: 'Cu.M',
+                  transaction_type: 'Consumption',
+                  reference_id: reportId
+                });
+              } else if (wItem.concreteType === 'Manual') {
+                const actualBags = parseFloat(wItem.actualCementBags) || 0;
+                if (actualBags > 0) {
+                  ledgerRows.push({
+                    site_name: reportForm.siteName,
+                    date: reportForm.reportDate,
+                    material_name: 'Cement',
+                    qty: Math.abs(actualBags),
+                    unit: 'Bags',
+                    transaction_type: 'Consumption',
+                    reference_id: reportId
+                  });
+                }
+
+                const singleQ = parseFloat(wItem.singleCastingQty) || 0;
+                const doubleQ = parseFloat(wItem.doubleCastingQty) || 0;
+
+                const matchedSingleBom = siteBoms.find(b => b.site_name === reportForm.siteName && b.work_name && b.work_name.toLowerCase().includes('single'));
+                const matchedDoubleBom = siteBoms.find(b => b.site_name === reportForm.siteName && b.work_name && b.work_name.toLowerCase().includes('double'));
+
+                if (matchedSingleBom && Array.isArray(matchedSingleBom.bom_items)) {
+                  matchedSingleBom.bom_items.forEach(item => {
+                    if (item.material && item.consumption && !item.material.toLowerCase().includes('cement')) {
+                      const totalConsump = singleQ * Number(item.consumption);
+                      if (totalConsump > 0) {
+                        ledgerRows.push({
+                          site_name: reportForm.siteName,
+                          date: reportForm.reportDate,
+                          material_name: item.material,
+                          qty: Math.abs(totalConsump),
+                          unit: item.unit || 'Nos',
+                          transaction_type: 'Consumption',
+                          reference_id: reportId
+                        });
+                      }
+                    }
+                  });
+                }
+
+                if (matchedDoubleBom && Array.isArray(matchedDoubleBom.bom_items)) {
+                  matchedDoubleBom.bom_items.forEach(item => {
+                    if (item.material && item.consumption && !item.material.toLowerCase().includes('cement')) {
+                      const totalConsump = doubleQ * Number(item.consumption);
+                      if (totalConsump > 0) {
+                        ledgerRows.push({
+                          site_name: reportForm.siteName,
+                          date: reportForm.reportDate,
+                          material_name: item.material,
+                          qty: Math.abs(totalConsump),
+                          unit: item.unit || 'Nos',
+                          transaction_type: 'Consumption',
+                          reference_id: reportId
+                        });
+                      }
+                    }
+                  });
+                }
+              }
+            }
+
+            // Finishing Work
+            if (wItem.workType === '4. Finishing Work' && wItem.cementBags) {
+              ledgerRows.push({
+                site_name: reportForm.siteName,
+                date: reportForm.reportDate,
+                material_name: 'Cement',
+                qty: Math.abs(parseFloat(wItem.cementBags) || 0),
+                unit: 'Bags',
+                transaction_type: 'Consumption',
+                reference_id: reportId
+              });
+            }
+
+          }
+        }
+      }
+
+      if (ledgerRows.length > 0) {
+        const { error: ledgerErr } = await supabase.from('site_material_stock_ledger').insert(ledgerRows);
+        if (ledgerErr) {
+          console.error("Ledger Insert Error:", ledgerErr);
+        }
+      }
+
+      await loadReports()
+      setReportForm({
+        siteName: '',
+        reportDate: getTodayString(),
+        palingWorkRows: [{ contractorName: '', qty: '', description: '' }],
+        contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', workItems: [{ workType: '', columnSize: '', concreteType: 'RMC', singleCastingQty: '', doubleCastingQty: '', runningFeet: '', height: '', cementBags: '', customWorkName: '', quantity: '', unit: 'NOS' }] }],
+        description: ''
+      })
+      setPreviewData(null)
+      
+      setModal({ 
+        isOpen: true, 
+        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been submitted & stock ledger updated successfully.`, 
+        onConfirm: () => setModal({ isOpen: false }) 
+      });
+
+    } catch (err) {
+      setLoading(false)
+      const errorMsg = err?.message || 'Unknown error occurred while saving.'
+      setModal({ 
+        isOpen: true, 
+        message: 'Failed to save: ' + errorMsg + '.', 
+        onConfirm: () => setModal({ isOpen: false }) 
+      });
+      setError(errorMsg)
+    } finally {
+      setLoading(false)
+    }
+  }
   const filteredReports = reports.filter(r => {
     const matchSite = filterSite === 'all' || r.site_name === filterSite
     const matchDate = !filterDate || r.report_date === filterDate
@@ -406,37 +475,8 @@ function SupervisorDashboard() {
   })
 
   return (
-    <div style={{ padding: '0px 8px 8px 8px', fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif', color: '#1e293b', maxWidth: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: '0px', fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif', color: '#1e293b', maxWidth: '650px', margin: '0 auto', boxSizing: 'border-box' }}>
       
-      {/* STICKY UNIQUE HEADER BOX */}
-      <div style={{ position: 'sticky', top: '64px', zIndex: 20, backgroundColor: '#f8fafc', paddingBottom: '6px', paddingTop: '8px', marginTop: '-8px' }}>
-        <div style={{
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          borderRadius: '16px', padding: '14px 18px', color: 'white',
-          boxShadow: '0 8px 20px -6px rgba(15, 23, 42, 0.4)', border: '1px solid rgba(255,255,255,0.1)',
-          position: 'relative', overflow: 'hidden', flexShrink: 0, boxSizing: 'border-box'
-        }}>
-          <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '90px', height: '90px', background: '#3b82f6', filter: 'blur(40px)', opacity: 0.4, borderRadius: '50%' }}></div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', opacity: 0.9, position: 'relative' }}>
-            <span style={{ fontSize: '14px' }}>⚡</span>
-            <span style={{ fontSize: '11px', fontWeight: '700', letterSpacing: '0.6px', textTransform: 'uppercase', color: '#ffffff' }}>T&J Infra Portal</span>
-          </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
-            <FileText size={20} color="#ffffff" />
-            <h1 style={{ margin: '2px 0 8px 0', fontSize: '20px', fontWeight: '700', letterSpacing: '0.8px', color: '#ffffff' }}>
-              Site Daily Progress Report
-            </h1>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)', position: 'relative', fontSize: '10px', color: '#94a3b8' }}>
-            <span>Status: Active & Live</span>
-            <span>DPR Terminal</span>
-          </div>
-        </div>
-      </div>
-
       {error && (
         <div style={{ backgroundColor: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '10px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <AlertCircle size={16} color="#e11d48" />
@@ -444,594 +484,776 @@ function SupervisorDashboard() {
         </div>
       )}
     
-      {/* REPORTS TAB */}
       {activeTab === 'site_report' && (
         <div>
-          {!showReportForm && (
-            <>
-              <div style={{ 
-                position: 'sticky', 
-                top: '180px', 
-                zIndex: 20, 
-                display: 'flex', 
-                justifyContent: 'center', 
-                marginBottom: '12px', 
-                boxSizing: 'border-box',
-                backgroundColor: '#f8f9fa', 
-                padding: '8px 0',         
-                width: '100%'
-              }}>
-                <button 
-                  onClick={() => {
-                    setReportForm({
-                      siteName: '',
-                      reportDate: getTodayString(),
-                      palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
-                      contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
-                      finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
-                      description: ''
-                    });
-                    setSiteProgressPhotos([]);
-                    setShowReportForm(true);
-                  }} 
-                  style={{ 
-                    background: 'linear-gradient(135deg, #0c9151 0%, #036f29 100%)', 
-                    color: '#fff', 
-                    border: 'none', 
-                    padding: '10px 22px', 
-                    borderRadius: '50px', 
-                    fontWeight: '700', 
-                    display: 'inline-flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    gap: '6px', 
-                    fontSize: '12px', 
-                    cursor: 'pointer', 
-                    boxShadow: '0 4px 15px rgba(58, 85, 237, 0.35)',
-                    letterSpacing: '0.3px'
-                  }}
-                >
-                  <Plus size={15} /> New Site Report
-                </button>
+          {/* TOP HEADER CARD WITH BLUE THEME */}
+          <div style={{
+            background: '#eff6ff',
+            borderRadius: '16px', padding: '16px', color: '#1e40af',
+            border: '1px solid #bfdbfe',
+            marginBottom: '12px', boxSizing: 'border-box',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ background: '#2563eb', color: '#ffffff', borderRadius: '12px', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <FileText size={24} />
               </div>
-
-              {/* Filter Section */}
-              <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '12px', boxSizing: 'border-box' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', fontSize: '11px', fontWeight: '700', color: '#475569', }}>
-                  <Filter size={13} color="#2563eb" /> SUMBITED DPR (Recent-7 log)
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '9px', fontWeight: '600', color: '#64748b', marginBottom: '3px' }}>SELECT SITE</label>
-                    <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', fontWeight: '500', boxSizing: 'border-box' }}>
-                      <option value="all">🌐 All Sites</option>
-                      {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '9px', fontWeight: '600', color: '#64748b', marginBottom: '3px' }}>REPORT DATE</label>
-                    <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                  </div>
-                </div>
+              <div>
+                <h1 style={{ margin: '0 0 2px 0', fontSize: '16px', fontWeight: '700', color: '#1e3a8a' }}>
+                  Site Daily Report
+                </h1>
+                <p style={{ margin: 0, fontSize: '11px', color: '#1d4ed8', fontWeight: '500' }}>
+                  Manage site daily installation and work progress efficiently
+                </p>
               </div>
+            </div>
+          </div>
 
-              {/* Historical Reports */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
-               {filteredReports.slice(0, 7).map(r => (
-                  <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px', boxSizing: 'border-box' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '12px' }}>{r.site_name}</span>
-                      <span style={{ fontSize: '10px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '4px' }}>
-                        📅 {r.report_date ? r.report_date.split('-').reverse().join('/') : ''}
-                      </span>
-                    </div>
-                    {r.description && <p style={{ fontSize: '12px', color: '#475569', margin: '2px 0' }}>📝 {r.description}</p>}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #f1f5f9', fontSize: '10px', color: '#64748b' }}>
-                      <span>👤 {r.user_id || 'N/A'}</span>
-                      <span>
-                        🕒 {r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : ''}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+          {/* SEPARATE SELECT SITE & DATE CARD */}
+          <div style={{ backgroundColor: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '10px', marginBottom: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '3px', color: '#475569' }}>Select Site *</label>
+              <select 
+                value={reportForm.siteName} 
+                onChange={(e) => setReportForm({...reportForm, siteName: e.target.value})} 
+                style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#fff', fontSize: '11px', boxSizing: 'border-box', fontWeight: 'bold' }}
+              >
+                <option value="">-- Choose Site --</option>
+                {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '3px', color: '#475569' }}>Date *</label>
+              <div style={{ position: 'relative' }}>
+                <input type="date" max={getTodayString()} value={reportForm.reportDate} onChange={(e) => setReportForm({...reportForm, reportDate: e.target.value})} style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} />
               </div>
-            </>
-          )}
+            </div>
+          </div>
 
-          {/* Form Section */}
-          {showReportForm && (
-            <div style={{ backgroundColor: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', boxSizing: 'border-box', width: '100%' }}>
-              
-              <div style={{ position: 'sticky', top: '180px', zIndex: 20, backgroundColor: '#ffffff', padding: '14px 16px', borderBottom: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(255,255,255,0.08)', boxSizing: 'border-box', borderRadius: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <h3 style={{ fontSize: '14px', fontWeight: '700', margin: 0, color: '#0f172a' }}>📋 Complete Site Report</h3>
-                  <button onClick={() => setShowReportForm(false)} style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                    ← Back
-                  </button>
-                </div>
-                
-                <div style={{ 
-                  backgroundColor: reportForm.siteName ? '#eff6ff' : '#fffbeb', 
-                  padding: '12px', 
-                  borderRadius: '12px', 
-                  border: reportForm.siteName ? '1px solid #2563eb' : '2px dashed #f59e0b', 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  gap: '8px', 
-                  boxSizing: 'border-box',
-                  boxShadow: reportForm.siteName ? '0 4px 12px rgba(37, 99, 235, 0.15)' : '0 2px 6px rgba(245, 158, 11, 0.1)'
-                }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: reportForm.siteName ? '#1e40af' : '#b45309' }}>
-                      {reportForm.siteName ? '🔵 Active Site Selected' : '⚠️ Please Select Site First *'}
-                    </label>
+  {/* 1. PALING WORK SECTION */}
+        <div style={{ backgroundColor: '#faf5ff', border: '1px solid #cbd5e1', borderRadius: '14px', padding: '12px', boxShadow: '0 2px 4px -1px rgba(0,0,0,0.05)', marginBottom: '12px', boxSizing: 'border-box', width: '100%' }}>
+            
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: reportForm.palingWorkRows.length > 0 ? '10px' : '0', borderBottom: reportForm.palingWorkRows.length > 0 ? '2px dashed #cbd5e1' : 'none', paddingBottom: reportForm.palingWorkRows.length > 0 ? '8px' : '0' }}>
+            <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#7e22ce', margin: 0, display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase' }}>
+              1. PALING WORK (પેલિંગ વર્ક)
+            </h4>
+            <button type="button" onClick={addPalingWorkRow} style={{ backgroundColor: '#9333ea', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Plus size={13} /> Add Source
+            </button>
+          </div>
+
+          {/* 🌟 જો Add Source બટન દબાવ્યું હશે અને રો હશે તો જ આ દેખાશે */}
+          {reportForm.palingWorkRows.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {reportForm.palingWorkRows.map((pRow, pIndex) => (
+                <div key={pIndex} style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: pIndex < reportForm.palingWorkRows.length - 1 ? '2px solid #cbd5e1' : 'none', paddingBottom: pIndex < reportForm.palingWorkRows.length - 1 ? '10px' : '0' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', backgroundColor: '#f3e8ff', color: '#6b21a8', padding: '2px 6px', borderRadius: '4px' }}>
+                      Source #{pIndex + 1}
+                    </span>
+                    <button type="button" onClick={() => removePalingWorkRow(pIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
+                      Remove Source
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <select 
-                      value={reportForm.siteName} 
-                      onChange={async (e) => {
-                        const newSite = e.target.value;
+                      value={currentSiteContractors.some(con => con.name === pRow.contractorName) ? pRow.contractorName : (pRow.contractorName ? 'OTHER_CONTRACTOR_MANUAL' : '')} 
+                      onClick={handleDropdownClick}
+                      onChange={(e) => {
+                        const val = e.target.value;
                         const selectedName = e.target.options[e.target.selectedIndex].text;
-                        if (!newSite) return;
-
-                        if (reportForm.siteName !== '' && reportForm.siteName !== newSite) {
-                          setModal({
-                            isOpen: true,
-                            message: `સાઇટ બદલતા પહેલા ડેટા સેવ થશે. શું તમે "${selectedName}" પર જવા માંગો છો?`,
-                            onConfirm: async () => {
-                              await supabase.from('site_drafts').upsert({
-                                user_id: user.id,
-                                site_id: reportForm.siteName,
-                                report_data: { ...reportForm, draftPhotoUrls: siteProgressPhotos }
-                              }, { onConflict: 'user_id, site_id' });
-
-                              const { data } = await supabase
-                                .from('site_drafts')
-                                .select('report_data')
-                                .eq('user_id', user.id)
-                                .eq('site_id', newSite)
-                                .maybeSingle();
-
-                              if (data) {
-                                setReportForm(data.report_data);
-                                setSiteProgressPhotos(data.report_data.draftPhotoUrls || []);
-                              } else {
-                                setReportForm({
-                                  siteName: newSite,
-                                  reportDate: getTodayString(),
-                                  palingWorkRows: [{ contractorName: '', qty: '', nos: '', description: '' }],
-                                  contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', materials: [{ material: '', customMaterialName: '', quantity: '', unit: 'NOS' }] }],
-                                  finalWorkRows: [{ contractorName: '', runningFeet: '', height: '', workDesc: '', customWorkDesc: '' }],
-                                  description: ''
-                                });
-                                setSiteProgressPhotos([]);
-                              }
-                              setModal({ isOpen: false });
-                            },
-                            onCancel: () => setModal({ isOpen: false })
-                          });
-                        } else if (reportForm.siteName === '') {
-                          setModal({
-                            isOpen: true,
-                            message: `Please confirm, select your site: "${selectedName}"?`,
-                            onConfirm: async () => {
-                              const { data } = await supabase
-                                .from('site_drafts')
-                                .select('report_data')
-                                .eq('user_id', user.id)
-                                .eq('site_id', newSite)
-                                .maybeSingle();
-
-                              if (data) {
-                                setReportForm(data.report_data);
-                                setSiteProgressPhotos(data.report_data.draftPhotoUrls || []);
-                              } else {
-                                setReportForm(prev => ({ ...prev, siteName: newSite }));
-                              }
-                              setModal({ isOpen: false });
-                            },
-                            onCancel: () => {
-                              setReportForm(prev => ({ ...prev, siteName: '' }));
-                              setModal({ isOpen: false });
-                            }
-                          });
+                        if (val === 'OTHER_CONTRACTOR_MANUAL') {
+                          updatePalingRow(pIndex, 'contractorName', 'OTHER_CONTRACTOR_MANUAL');
+                        } else if (val !== '') {
+                          triggerContractorChange('paling', pIndex, val, selectedName);
+                        } else {
+                          updatePalingRow(pIndex, 'contractorName', '');
                         }
                       }} 
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#fff', fontSize: '12px', boxSizing: 'border-box', fontWeight: 'bold' }}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box', fontWeight: 'bold' }}
                     >
-                      <option value="">-- Please Select Site First --</option>
-                      {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
+                      <option value="">-- Select Contractor --</option>
+                      {currentSiteContractors.map(con => <option key={con.id} value={con.name}>{con.name}</option>)}
+                      <option value="OTHER_CONTRACTOR_MANUAL" style={{ fontWeight: 'bold', color: '#2563eb' }}>➕ Other (Type Manually...)</option>
                     </select>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Report Date *</label>
-                    <input type="date" max={getTodayString()} value={reportForm.reportDate} onChange={(e) => setReportForm({...reportForm, reportDate: e.target.value})} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-                  </div>
-                </div>
-              </div>
 
-              <div style={{ padding: '16px', boxSizing: 'border-box' }}>
-                {!reportForm.siteName ? (
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>📋 Your Recent Submitted Reports (Last 7)</span>
-                    </div>
-
-                    {reports.filter(r => r.user_id === user?.email || r.user_id === user?.id || r.user_id === 'Supervisor').slice(0, 7).map(r => (
-                      <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '12px' }}>{r.site_name}</span>
-                          <span style={{ fontSize: '9px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
-                            📅 {r.report_date ? r.report_date.split('-').reverse().join('/') : ''}
-                          </span>
-                        </div>
-                        {r.description && <p style={{ fontSize: '10px', color: '#475569', margin: '3px 0' }}>📝 {r.description}</p>}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #f1f5f9', fontSize: '9px', color: '#64748b' }}>
-                          <span>👤 {r.user_id || 'N/A'}</span>
-                          <span>
-                            🕒 {r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : ''}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-
-                    {reports.filter(r => r.user_id === user?.email || r.user_id === user?.id || r.user_id === 'Supervisor').length === 0 && (
-                      <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '12px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1' }}>
-                        No reports submitted yet. Select a site above to start a new report.
-                      </div>
+                    {(pRow.contractorName === 'OTHER_CONTRACTOR_MANUAL' || (!currentSiteContractors.some(con => con.name === pRow.contractorName) && pRow.contractorName !== '')) && (
+                      <input 
+                        type="text" 
+                        placeholder="Type custom contractor name here..." 
+                        value={pRow.contractorName === 'OTHER_CONTRACTOR_MANUAL' ? '' : pRow.contractorName} 
+                        onChange={(e) => updatePalingRow(pIndex, 'contractorName', e.target.value)} 
+                        autoFocus
+                        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #9333ea', fontSize: '11px', backgroundColor: '#f3e8ff', boxSizing: 'border-box' }} 
+                      />
                     )}
                   </div>
-                ) : (
-                  <>
-                    {/* 2. PALING WORK */}
-                    <div style={{ backgroundColor: '#fdf4ff', padding: '10px', borderRadius: '8px', border: '1px solid #f5d0fe', marginBottom: '12px', boxSizing: 'border-box' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#86198f' }}>1. Paling Work (પેલિંગ વર્ક)</span>
-                        <button type="button" onClick={addPalingWorkRow} style={{ backgroundColor: '#a855f7', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Paling Work</button>
-                      </div>
 
-                      {reportForm.palingWorkRows.map((pRow, pIndex) => (
-                        <div key={pIndex} style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #f5d0fe', marginBottom: '8px', boxSizing: 'border-box' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#86198f' }}>Paling Entry #{pIndex + 1}</span>
-                            {reportForm.palingWorkRows.length > 1 && (
-                              <button type="button" onClick={() => removePalingWorkRow(pIndex)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', padding: '2px 6px', borderRadius: '4px', fontSize: '9px' }}><Trash2 size={10} /></button>
-                            )}
-                          </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
+                    <input 
+                      type="number" 
+                      placeholder="Qty" 
+                      value={pRow.qty} 
+                      onChange={(e) => updatePalingRow(pIndex, 'qty', e.target.value)} 
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+                    />
+                    <div style={{ backgroundColor: '#f1f5f9', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', color: '#475569', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      NOS
+                    </div>
+                  </div>
 
-                          <select value={pRow.contractorName} onChange={(e) => {
-                            const selectedName = e.target.options[e.target.selectedIndex].text;
-                            if (e.target.value === "") {
-                              const updated = [...reportForm.palingWorkRows]
-                              updated[pIndex].contractorName = e.target.value
-                              setReportForm({...reportForm, palingWorkRows: updated})
-                            } else {
-                              triggerContractorChange('paling', pIndex, e.target.value, selectedName);
-                            }
-                          }} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%', fontWeight: 'bold', marginBottom: '6px', boxSizing: 'border-box' }}>
-                            <option value="">-- Select Contractor for this Site --</option>
-                            {currentSiteContractors.map(con => <option key={con.id} value={con.name}>{con.name}</option>)}
-                          </select>
+                  <input 
+                    type="text" 
+                    placeholder="Description / Remarks" 
+                    value={pRow.description} 
+                    onChange={(e) => updatePalingRow(pIndex, 'description', e.target.value)} 
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+                  />
 
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px', boxSizing: 'border-box' }}>
-                            <input type="number" placeholder="Qty" value={pRow.qty} onChange={(e) => {
-                              const updated = [...reportForm.palingWorkRows]
-                              updated[pIndex].qty = e.target.value
-                              setReportForm({...reportForm, palingWorkRows: updated})
-                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                            <div style={{ backgroundColor: '#f1f5f9', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', color: '#475569' }}>
+                </div>
+              ))}
+            </div>
+          )}
+
+        </div>
+
+          {/* 2. MATERIAL INSTALLATION & LABOUR-WISE DETAIL SECTION */}
+          <div style={{ backgroundColor: '#faf5ff', border: '1px solid #cbd5e1', borderRadius: '14px', padding: '12px', boxShadow: '0 2px 4px -1px rgba(0,0,0,0.05)', marginBottom: '14px', boxSizing: 'border-box', width: '100%' }}>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '2px dashed #cbd5e1', paddingBottom: '8px' }}>
+              <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#7e22ce', margin: 0, display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase' }}>
+                2. Material Installation & Labour-wise Detail
+              </h4>
+              <button type="button" onClick={addContractorRow} style={{ backgroundColor: '#9333ea', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Plus size={13} /> Add Source
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {reportForm.contractorRows.map((cRow, cIndex) => (
+                <div key={cIndex} style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: cIndex < reportForm.contractorRows.length - 1 ? '2px solid #cbd5e1' : 'none', paddingBottom: cIndex < reportForm.contractorRows.length - 1 ? '12px' : '0' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', backgroundColor: '#f3e8ff', color: '#6b21a8', padding: '2px 6px', borderRadius: '4px' }}>
+                      Source #{cIndex + 1}
+                    </span>
+                    {reportForm.contractorRows.length > 1 && (
+                      <button type="button" onClick={() => removeContractorRow(cIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
+                        Remove Source
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Contractor Selection */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <select 
+                      value={currentSiteContractors.some(con => con.name === cRow.contractorName) ? cRow.contractorName : (cRow.contractorName ? 'OTHER_CONTRACTOR_MANUAL' : '')} 
+                      onClick={handleDropdownClick}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const selectedName = e.target.options[e.target.selectedIndex].text;
+                        if (val === 'OTHER_CONTRACTOR_MANUAL') {
+                          const updated = [...reportForm.contractorRows];
+                          updated[cIndex].contractorName = 'OTHER_CONTRACTOR_MANUAL';
+                          setReportForm({...reportForm, contractorRows: updated});
+                        } else if (val !== '') {
+                          triggerContractorChange('material', cIndex, val, selectedName);
+                        } else {
+                          const updated = [...reportForm.contractorRows];
+                          updated[cIndex].contractorName = '';
+                          setReportForm({...reportForm, contractorRows: updated});
+                        }
+                      }} 
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box', fontWeight: 'bold' }}
+                    >
+                      <option value="">-- Select Contractor --</option>
+                      {currentSiteContractors.map(con => <option key={con.id} value={con.name}>{con.name}</option>)}
+                      <option value="OTHER_CONTRACTOR_MANUAL" style={{ fontWeight: 'bold', color: '#2563eb' }}>➕ Other (Type Manually...)</option>
+                    </select>
+
+                    {(cRow.contractorName === 'OTHER_CONTRACTOR_MANUAL' || (!currentSiteContractors.some(con => con.name === cRow.contractorName) && cRow.contractorName !== '')) && (
+                      <input 
+                        type="text" 
+                        placeholder="Type custom contractor name here..." 
+                        value={cRow.contractorName === 'OTHER_CONTRACTOR_MANUAL' ? '' : cRow.contractorName} 
+                        onChange={(e) => {
+                          const updated = [...reportForm.contractorRows];
+                          updated[cIndex].contractorName = e.target.value;
+                          setReportForm({...reportForm, contractorRows: updated});
+                        }} 
+                        autoFocus
+                        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #9333ea', fontSize: '11px', backgroundColor: '#f3e8ff', boxSizing: 'border-box' }} 
+                      />
+                    )}
+                  </div>
+
+                  {/* Labour Count & Notes */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
+                    <input 
+                      type="number" 
+                      placeholder="Labour Count" 
+                      value={cRow.labourCount} 
+                      onChange={(e) => {
+                        const updated = [...reportForm.contractorRows];
+                        updated[cIndex].labourCount = e.target.value;
+                        setReportForm({...reportForm, contractorRows: updated});
+                      }} 
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+                    />
+                    <input 
+                      type="text" 
+                      placeholder="Labour Notes" 
+                      value={cRow.labourNotes} 
+                      onChange={(e) => {
+                        const updated = [...reportForm.contractorRows];
+                        updated[cIndex].labourNotes = e.target.value;
+                        setReportForm({...reportForm, contractorRows: updated});
+                      }} 
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+                    />
+                  </div>
+
+                  {/* Types of Work Sub-section */}
+                  <div>
+                    <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#6b21a8', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Types of Work</span>
+                    {cRow.workItems.map((wItem, wIndex) => (
+                      <div key={wIndex} style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px dashed #cbd5e1' }}>
+                        
+                        {/* Work Type Dropdown */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                   <select 
+  value={wItem.workType} 
+  onClick={handleDropdownClick}
+  onChange={(e) => {
+    const val = e.target.value;
+    const updated = [...reportForm.contractorRows];
+    updated[cIndex].workItems[wIndex].workType = val;
+    setReportForm({...reportForm, contractorRows: updated});
+if (val === '2. Column Concrete') {
+  setModal({
+    isOpen: true,
+    message: 'કૃપા કરીને કોંક્રિટ માટે સોર્સ પસંદ કરો:',
+    confirmText: 'RMC',           // આ હોવું જરૂરી છે
+    cancelText: 'Manual Mix',      // આ હોવું જરૂરી છે
+    confirmColor: '#16a34a',       // Green
+    cancelColor: '#2563eb',        // Blue
+    cancelTextColor: '#fff',
+    onConfirm: () => {
+      const updated = [...reportForm.contractorRows];
+      updated[cIndex].workItems[wIndex].concreteType = 'RMC';
+      setReportForm({...reportForm, contractorRows: updated});
+      setModal({ isOpen: false });
+    },
+    onCancel: () => {
+      const updated = [...reportForm.contractorRows];
+      updated[cIndex].workItems[wIndex].concreteType = 'Manual';
+      setReportForm({...reportForm, contractorRows: updated});
+      setModal({ isOpen: false });
+    }
+  });
+}
+  }} 
+  style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box', fontWeight: 'bold' }}
+>
+  <option value="">-- Select Type of Work --</option>
+  <option value="1. Column Installation">1. Column Installation</option>
+  <option value="2. Column Concrete">2. Column Concrete</option>
+  <option value="3. Panel Erection">3. Panel Erection</option>
+  <option value="4. Finishing Work">4. Finishing Work</option>
+  <option value="Other">Other (Manual)</option>
+</select>
+
+                          {cRow.workItems.length > 1 && (
+                            <button type="button" onClick={() => removeWorkItemFromContractor(cIndex, wIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '4px', marginLeft: '6px' }}><Trash2 size={13} /></button>
+                          )}
+                        </div>
+
+                        {/* Condition 1 & 3: Column Installation / Panel Erection (ALL IN ONE ROW) */}
+                        {(wItem.workType === '1. Column Installation' || wItem.workType === '3. Panel Erection') && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '6px', boxSizing: 'border-box', alignItems: 'center' }}>
+                            <select 
+                              value={wItem.columnSize} 
+                              onChange={(e) => {
+                                const updated = [...reportForm.contractorRows];
+                                updated[cIndex].workItems[wIndex].columnSize = e.target.value;
+                                setReportForm({...reportForm, contractorRows: updated});
+                              }} 
+                              style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+                            >
+                              <option value="">-- Select Size --</option>
+                            {currentSiteMaterials
+  .filter(m => {
+    const matName = m.name.toLowerCase();
+    // 🌟 1. જો Column સિલેક્ટ કર્યું હોય તો માત્ર Column વાળા જ મટીરિયલ બતાવો
+    if (wItem.workType === '1. Column Installation') {
+      return matName.includes('column');
+    }
+    // 🌟 2. જો Panel સિલેક્ટ કર્યું હોય તો માત્ર Panel વાળા જ મટીરિયલ બતાવો
+    if (wItem.workType === '3. Panel Erection') {
+      return matName.includes('panel');
+    }
+    return false;
+  })
+  .map(m => {
+    // 🌟 3. નામમાંથી 'Column' અથવા 'Panel' શબ્દ કાઢી નાખો 
+    let sizeOnly = m.name.replace(/column/i, '').replace(/panel/i, '').trim();
+    
+    // 🌟 4. જો (3mm - 3 wires) જેવી બ્રેકેટવાળી કોઈ ડિટેલ હજુ આવતી હોય, તો એને પણ કાઢી નાખો
+    sizeOnly = sizeOnly.replace(/\s*\(.*?\)\s*/g, '').trim();
+
+    return (
+      <option key={m.id} value={sizeOnly}>
+        {sizeOnly}
+      </option>
+    );
+  })
+}
+                              <option value="Other">Other Size</option>
+                            </select>
+
+                            <input 
+                              type="number" 
+                              placeholder="Qty" 
+                              value={wItem.quantity} 
+                              onChange={(e) => {
+                                const updated = [...reportForm.contractorRows];
+                                updated[cIndex].workItems[wIndex].quantity = e.target.value;
+                                setReportForm({...reportForm, contractorRows: updated});
+                              }} 
+                              style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+                            />
+
+                            <div style={{ backgroundColor: '#f1f5f9', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', color: '#475569', boxSizing: 'border-box' }}>
                               NOS
                             </div>
                           </div>
+                        )}
 
-                          <input type="text" placeholder="Description / Remarks" value={pRow.description} onChange={(e) => {
-                            const updated = [...reportForm.palingWorkRows]
-                            updated[pIndex].description = e.target.value
-                            setReportForm({...reportForm, palingWorkRows: updated})
-                          }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                        </div>
-                      ))}
-                    </div>
+                        {/* Condition 2: Column Concrete */}
+                        {wItem.workType === '2. Column Concrete' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px', fontWeight: 'bold' }}>
+                              <span>Concrete Source:</span>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                                <input 
+                                  type="radio" 
+                                  name={`concrete_${cIndex}_${wIndex}`} 
+                                  value="RMC" 
+                                  checked={wItem.concreteType === 'RMC'} 
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setModal({
+                                      isOpen: true,
+                                      message: 'તમે RMC સિલેક્ટ કર્યું છે. BOM મુજબ અંદાજિત કેટલું કોંક્રિટ જોઈશે તેની ગણતરી લાગુ થશે.',
+                                      onConfirm: () => setModal({ isOpen: false })
+                                    });
+                                    const updated = [...reportForm.contractorRows];
+                                    updated[cIndex].workItems[wIndex].concreteType = val;
+                                    setReportForm({...reportForm, contractorRows: updated});
+                                  }} 
+                                /> RMC
+                             </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+        <input 
+          type="radio" 
+          name={`concrete_${cIndex}_${wIndex}`} 
+          value="Manual" 
+          checked={wItem.concreteType === 'Manual'} 
+          onChange={(e) => {
+            const updated = [...reportForm.contractorRows];
+            updated[cIndex].workItems[wIndex].concreteType = e.target.value;
+            setReportForm({...reportForm, contractorRows: updated});
+          }} 
+        /> Manual Mix
+      </label>
+    </div>
 
-                    {/* 3. MATERIAL USAGE */}
-                    <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '12px', boxSizing: 'border-box' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#1e40af' }}>2. Material Usage (કોન્ટ્રાક્ટર વાઇઝ વપરાશ)</span>
-                        <button type="button" onClick={addContractorRow} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Contractor</button>
+{/* Single Column Casting */}
+    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px', alignItems: 'center' }}>
+      <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#6b21a8' }}>Single Column Casting</span>
+      <input 
+        type="number" 
+        placeholder="Qty" 
+        value={wItem.singleCastingQty || ''} 
+    onChange={(e) => {
+          const updated = [...reportForm.contractorRows];
+          const qty = parseFloat(e.target.value) || 0;
+          updated[cIndex].workItems[wIndex].singleCastingQty = e.target.value; // (ડબલ કોલમમાં doubleCastingQty રાખવું)
+          
+          const singleQty = parseFloat(updated[cIndex].workItems[wIndex].singleCastingQty) || 0;
+          const doubleQty = parseFloat(updated[cIndex].workItems[wIndex].doubleCastingQty) || 0;
+          
+          // ૧. સિંગલ કોલમ માટે BOM અને સિમેન્ટ શોધો
+          const matchedSingleBom = siteBoms.find(b => 
+            b.site_name === reportForm.siteName && 
+            b.work_name && b.work_name.toLowerCase().includes('single')
+          );
+          const singleM3 = matchedSingleBom && matchedSingleBom.expected_m3 ? Number(matchedSingleBom.expected_m3) : 0;
+          
+          let singleCement = 0;
+          if (matchedSingleBom && Array.isArray(matchedSingleBom.bom_items)) {
+            const cementItem = matchedSingleBom.bom_items.find(item => item.material && item.material.toLowerCase().includes('cement'));
+            if (cementItem && cementItem.consumption) {
+              singleCement = Number(cementItem.consumption);
+            }
+          }
+
+          // ૨. ડબલ કોલમ માટે BOM અને સિમેન્ટ શોધો
+          const matchedDoubleBom = siteBoms.find(b => 
+            b.site_name === reportForm.siteName && 
+            b.work_name && b.work_name.toLowerCase().includes('double')
+          );
+          const doubleM3 = matchedDoubleBom && matchedDoubleBom.expected_m3 ? Number(matchedDoubleBom.expected_m3) : 0;
+          
+          let doubleCement = 0;
+          if (matchedDoubleBom && Array.isArray(matchedDoubleBom.bom_items)) {
+            const cementItem = matchedDoubleBom.bom_items.find(item => item.material && item.material.toLowerCase().includes('cement'));
+            if (cementItem && cementItem.consumption) {
+              doubleCement = Number(cementItem.consumption);
+            }
+          }
+
+          // ૩. RMC કે Manual મુજબ વેલ્યુ સેટ કરવી
+          if (updated[cIndex].workItems[wIndex].concreteType === 'RMC') {
+            updated[cIndex].workItems[wIndex].expectedBomQty = ((singleQty * singleM3) + (doubleQty * doubleM3)).toFixed(3);
+          } else {
+            updated[cIndex].workItems[wIndex].expectedCement = Math.ceil((singleQty * singleCement) + (doubleQty * doubleCement));
+          }
+
+          setReportForm({...reportForm, contractorRows: updated});
+        }}
+        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+      />
+    </div>
+
+   {/* Double Column Casting */}
+    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px', alignItems: 'center' }}>
+      <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#6b21a8' }}>Double Column Casting</span>
+      <input 
+        type="number" 
+        placeholder="Qty" 
+        value={wItem.doubleCastingQty || ''} 
+        onChange={(e) => {
+          const updated = [...reportForm.contractorRows];
+          const qty = parseFloat(e.target.value) || 0;
+          updated[cIndex].workItems[wIndex].doubleCastingQty = e.target.value; // 👈 હવે ડબલ કોલમ પરફેક્ટ અપડેટ થશે
+          
+          const singleQty = parseFloat(updated[cIndex].workItems[wIndex].singleCastingQty) || 0;
+          const doubleQty = qty;
+          
+          const matchedSingleBom = siteBoms.find(b => 
+            b.site_name === reportForm.siteName && 
+            b.work_name && b.work_name.toLowerCase().includes('single')
+          );
+          const singleM3 = matchedSingleBom && matchedSingleBom.expected_m3 ? Number(matchedSingleBom.expected_m3) : 0;
+          
+          let singleCement = 0;
+          if (matchedSingleBom && Array.isArray(matchedSingleBom.bom_items)) {
+            const cementItem = matchedSingleBom.bom_items.find(item => item.material && item.material.toLowerCase().includes('cement'));
+            if (cementItem && cementItem.consumption) {
+              singleCement = Number(cementItem.consumption);
+            }
+          }
+
+          const matchedDoubleBom = siteBoms.find(b => 
+            b.site_name === reportForm.siteName && 
+            b.work_name && b.work_name.toLowerCase().includes('double')
+          );
+          const doubleM3 = matchedDoubleBom && matchedDoubleBom.expected_m3 ? Number(matchedDoubleBom.expected_m3) : 0;
+          
+          let doubleCement = 0;
+          if (matchedDoubleBom && Array.isArray(matchedDoubleBom.bom_items)) {
+            const cementItem = matchedDoubleBom.bom_items.find(item => item.material && item.material.toLowerCase().includes('cement'));
+            if (cementItem && cementItem.consumption) {
+              doubleCement = Number(cementItem.consumption);
+            }
+          }
+
+          if (updated[cIndex].workItems[wIndex].concreteType === 'RMC') {
+            updated[cIndex].workItems[wIndex].expectedBomQty = ((singleQty * singleM3) + (doubleQty * doubleM3)).toFixed(3);
+          } else {
+            updated[cIndex].workItems[wIndex].expectedCement = Math.ceil((singleQty * singleCement) + (doubleQty * doubleCement));
+          }
+
+          setReportForm({...reportForm, contractorRows: updated});
+        }} 
+        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+      />
+    </div>
+
+    {/* Dynamic Display (RMC Expected vs Actual OR Manual Expected Cement vs Actual) */}
+    {wItem.concreteType === 'RMC' ? (
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '4px', alignItems: 'center' }}>
+        <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#16a34a' }}>RMC (Expect vs Actual)</span>
+        {/* Expected BOM Qty (Main Box - Readonly or Auto) */}
+        <input 
+          type="text" 
+          placeholder="Expect Cu.M" 
+          value={wItem.expectedBomQty || '0.000'} 
+          readOnly 
+          style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #16a34a', fontSize: '11px', backgroundColor: '#f0fdf4', boxSizing: 'border-box', fontWeight: 'bold', textAlign: 'center' }} 
+        />
+        {/* Actual Qty Input Box */}
+        <input 
+          type="number" 
+          step="any"
+          placeholder="Actual Qty" 
+          value={wItem.actualRmcQty || ''} 
+          onChange={(e) => {
+            const updated = [...reportForm.contractorRows];
+            updated[cIndex].workItems[wIndex].actualRmcQty = e.target.value;
+            setReportForm({...reportForm, contractorRows: updated});
+          }} 
+          style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '11px', backgroundColor: '#eff6ff', boxSizing: 'border-box', fontWeight: 'bold', textAlign: 'center' }} 
+        />
+      </div>
+    ) : (
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '4px', alignItems: 'center' }}>
+        <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#2563eb' }}>Cement (Expect vs Actual)</span>
+        {/* Expected BOM Cement Use (Main Box - Readonly or Auto) */}
+        <input 
+          type="text" 
+          placeholder="Expect Bags" 
+          value={wItem.expectedCement || '0'} 
+          readOnly 
+          style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '11px', backgroundColor: '#eff6ff', boxSizing: 'border-box', fontWeight: 'bold', textAlign: 'center' }} 
+        />
+        {/* Actual Cement Qty Input Box */}
+        <input 
+          type="number" 
+          placeholder="Actual Bags" 
+          value={wItem.actualCementBags || ''} 
+          onChange={(e) => {
+            const updated = [...reportForm.contractorRows];
+            updated[cIndex].workItems[wIndex].actualCementBags = e.target.value;
+            setReportForm({...reportForm, contractorRows: updated});
+          }} 
+          style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #9333ea', fontSize: '11px', backgroundColor: '#f3e8ff', boxSizing: 'border-box', fontWeight: 'bold', textAlign: 'center' }} 
+        />
+      </div>
+    )}
+
+  </div>
+)}
+{/* Condition 4: Finishing Work (All in 1 Row) */}
+{wItem.workType === '4. Finishing Work' && (
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', boxSizing: 'border-box', alignItems: 'center' }}>
+    <input 
+      type="number" 
+      placeholder="Run. Feet" 
+      value={wItem.runningFeet} 
+      onChange={(e) => {
+        const updated = [...reportForm.contractorRows];
+        updated[cIndex].workItems[wIndex].runningFeet = e.target.value;
+        setReportForm({...reportForm, contractorRows: updated});
+      }} 
+      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+    />
+    <input 
+      type="number" 
+      placeholder="Height" 
+      value={wItem.height} 
+      onChange={(e) => {
+        const updated = [...reportForm.contractorRows];
+        updated[cIndex].workItems[wIndex].height = e.target.value;
+        setReportForm({...reportForm, contractorRows: updated});
+      }} 
+      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+    />
+    <input 
+      type="number" 
+      placeholder="Used Cement Bags" 
+      value={wItem.cementBags} 
+      onChange={(e) => {
+        const updated = [...reportForm.contractorRows];
+        updated[cIndex].workItems[wIndex].cementBags = e.target.value;
+        setReportForm({...reportForm, contractorRows: updated});
+      }} 
+      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+    />
+  </div>
+)}
+
+                      {/* Condition Other / Manual (With UOM Dropdown) */}
+{wItem.workType === 'Other' && (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <input 
+      type="text" 
+      placeholder="Custom work name..." 
+      value={wItem.customWorkName} 
+      onChange={(e) => {
+        const updated = [...reportForm.contractorRows];
+        updated[cIndex].workItems[wIndex].customWorkName = e.target.value;
+        setReportForm({...reportForm, contractorRows: updated});
+      }} 
+      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #9333ea', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+    />
+    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
+      <input 
+        type="number" 
+        placeholder="Qty" 
+        value={wItem.quantity} 
+        onChange={(e) => {
+          const updated = [...reportForm.contractorRows];
+          updated[cIndex].workItems[wIndex].quantity = e.target.value;
+          setReportForm({...reportForm, contractorRows: updated});
+        }} 
+        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box', backgroundColor: '#fff' }} 
+      />
+      <select 
+        value={wItem.unit} 
+        onChange={(e) => {
+          const updated = [...reportForm.contractorRows];
+          updated[cIndex].workItems[wIndex].unit = e.target.value;
+          setReportForm({...reportForm, contractorRows: updated});
+        }} 
+        style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box', fontWeight: 'bold' }}
+      >
+        {UOM_OPTIONS.map(uom => <option key={uom} value={uom}>{uom}</option>)}
+      </select>
+    </div>
+  </div>
+)}
+
                       </div>
+                    ))}
+                    <button type="button" onClick={() => addWorkItemToContractor(cIndex)} style={{ backgroundColor: '#9333ea', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer', fontWeight: 'bold', marginTop: '4px' }}>+ Add Work Type</button>
+                  </div>
 
-                      {reportForm.contractorRows.map((cRow, cIndex) => (
-                        <div key={cIndex} style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '10px', boxSizing: 'border-box' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569' }}>Contractor #{cIndex + 1}</span>
-                            {reportForm.contractorRows.length > 1 && (
-                              <button type="button" onClick={() => removeContractorRow(cIndex)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', padding: '2px 6px', borderRadius: '4px', fontSize: '9px' }}><Trash2 size={10} /></button>
-                            )}
-                          </div>
+                </div>
+              ))}
+            </div>
 
-                          <select value={cRow.contractorName} onChange={(e) => {
-                            const selectedName = e.target.options[e.target.selectedIndex].text;
-                            if (e.target.value === "") {
-                              const updated = [...reportForm.contractorRows]
-                              updated[cIndex].contractorName = e.target.value
-                              setReportForm({...reportForm, contractorRows: updated})
-                            } else {
-                              triggerContractorChange('material', cIndex, e.target.value, selectedName);
-                            }
-                          }} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%', fontWeight: 'bold', marginBottom: '6px', boxSizing: 'border-box' }}>
-                            <option value="">-- Select Contractor for this Site --</option>
-                            {currentSiteContractors.map(con => <option key={con.id} value={con.name}>{con.name}</option>)}
-                          </select>
+          </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px', boxSizing: 'border-box' }}>
-                            <input type="number" placeholder="Labour Count" value={cRow.labourCount} onChange={(e) => {
-                              const updated = [...reportForm.contractorRows]
-                              updated[cIndex].labourCount = e.target.value
-                              setReportForm({...reportForm, contractorRows: updated})
-                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                            <input type="text" placeholder="Labour Notes" value={cRow.labourNotes} onChange={(e) => {
-                              const updated = [...reportForm.contractorRows]
-                              updated[cIndex].labourNotes = e.target.value
-                              setReportForm({...reportForm, contractorRows: updated})
-                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                          </div>
+         {/* Extra Remarks */}
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '10px', marginBottom: '12px', boxSizing: 'border-box' }}>
+            <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '3px', color: '#475569' }}>Additional Remarks</label>
+            <textarea rows="2" value={reportForm.description} onChange={(e) => setReportForm({...reportForm, description: e.target.value})} placeholder="Enter any extra notes..." style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
+          </div>
 
-                          <div style={{ backgroundColor: '#f1f5f9', padding: '8px', borderRadius: '6px', boxSizing: 'border-box' }}>
-                            <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#0f172a', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Materials Used</span>
-                            {cRow.materials.map((mRow, mIndex) => (
-                              <div key={mIndex} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px', backgroundColor: '#fff', padding: '6px', borderRadius: '6px' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: mRow.material === 'Other' ? '1fr 1fr 1fr auto' : '2fr 1fr 1fr auto', gap: '4px', alignItems: 'center', boxSizing: 'border-box' }}>
-                                  <select value={mRow.material} onChange={(e) => {
-                                    const updated = [...reportForm.contractorRows]
-                                    updated[cIndex].materials[mIndex].material = e.target.value
-                                    setReportForm({...reportForm, contractorRows: updated})
-                                  }} style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '10px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                                    <option value="">-- Select Material --</option>
-                                    {currentSiteMaterials.map(mat => <option key={mat.id} value={mat.name}>{mat.name}</option>)}
-                                    <option value="Other">Other (Manual)</option>
-                                  </select>
+         {/* 🌟 Site Progress Photos (Direct Camera & Multiple Upload with Delete Option) */}
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '10px', marginBottom: '14px', boxSizing: 'border-box' }}>
+            <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '6px', color: '#475569' }}>
+              📷 Site Progress Photos (Direct Camera / Gallery)
+            </label>
+            
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment" 
+              multiple 
+              onChange={(e) => {
+                const files = Array.from(e.target.files);
+                setReportForm({ ...reportForm, sitePhotos: [...(reportForm.sitePhotos || []), ...files] });
+              }}
+              style={{ width: '100%', fontSize: '11px', padding: '8px', border: '1px dashed #2563eb', borderRadius: '6px', backgroundColor: '#eff6ff', cursor: 'pointer' }}
+            />
 
-                                  {mRow.material === 'Other' && (
-                                    <input type="text" placeholder="Enter custom product name..." value={mRow.customMaterialName} onChange={(e) => {
-                                      const updated = [...reportForm.contractorRows]
-                                      updated[cIndex].materials[mIndex].customMaterialName = e.target.value
-                                      setReportForm({...reportForm, contractorRows: updated})
-                                    }} style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid #059669', fontSize: '10px', boxSizing: 'border-box' }} />
-                                  )}
-
-                                  <input type="number" placeholder="Qty" value={mRow.quantity} onChange={(e) => {
-                                    const updated = [...reportForm.contractorRows]
-                                    updated[cIndex].materials[mIndex].quantity = e.target.value
-                                    setReportForm({...reportForm, contractorRows: updated})
-                                  }} style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '10px', boxSizing: 'border-box' }} />
-
-                                  <select value={mRow.unit} onChange={(e) => {
-                                    const updated = [...reportForm.contractorRows]
-                                    updated[cIndex].materials[mIndex].unit = e.target.value
-                                    setReportForm({...reportForm, contractorRows: updated})
-                                  }} style={{ width: '100%', padding: '4px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '10px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
-                                    {UOM_OPTIONS.map(uom => <option key={uom} value={uom}>{uom}</option>)}
-                                  </select>
-
-                                  {cRow.materials.length > 1 && (
-                                    <button type="button" onClick={() => removeMaterialFromContractor(cIndex, mIndex)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: '2px' }}><Trash2 size={12} /></button>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                            <button type="button" onClick={() => addMaterialToContractor(cIndex)} style={{ backgroundColor: '#059669', color: '#fff', border: 'none', padding: '2px 6px', borderRadius: '3px', fontSize: '9px', cursor: 'pointer', marginTop: '4px' }}>+ Add Material</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* 4. FINAL WORK */}
-                    <div style={{ backgroundColor: '#eff6ff', padding: '10px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '12px', boxSizing: 'border-box' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#1e40af' }}>3. Final Work (ફાઇનલ વર્ક)</span>
-                        <button type="button" onClick={addFinalWorkRow} style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '10px', cursor: 'pointer' }}>+ Add Work</button>
-                      </div>
-
-                      {reportForm.finalWorkRows.map((fRow, fIndex) => (
-                        <div key={fIndex} style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #bfdbfe', marginBottom: '8px', boxSizing: 'border-box' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#1e40af' }}>Work Entry #{fIndex + 1}</span>
-                            {reportForm.finalWorkRows.length > 1 && (
-                              <button type="button" onClick={() => removeFinalWorkRow(fIndex)} style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', padding: '2px 6px', borderRadius: '4px', fontSize: '9px' }}><Trash2 size={10} /></button>
-                            )}
-                          </div>
-
-                          <select value={fRow.contractorName} onChange={(e) => {
-                            const selectedName = e.target.options[e.target.selectedIndex].text;
-                            if (e.target.value === "") {
-                              const updated = [...reportForm.finalWorkRows]
-                              updated[fIndex].contractorName = e.target.value
-                              setReportForm({...reportForm, finalWorkRows: updated})
-                            } else {
-                              triggerContractorChange('final', fIndex, e.target.value, selectedName);
-                            }
-                          }} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%', fontWeight: 'bold', marginBottom: '6px', boxSizing: 'border-box' }}>
-                            <option value="">-- Select Contractor for this Site --</option>
-                            {currentSiteContractors.map(con => <option key={con.id} value={con.name}>{con.name}</option>)}
-                          </select>
-
-                          <label style={{ display: 'block', fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '2px', color: '#475569' }}>Work Description</label>
-                          <select value={fRow.workDesc} onChange={(e) => {
-                            const updated = [...reportForm.finalWorkRows]
-                            updated[fIndex].workDesc = e.target.value
-                            setReportForm({...reportForm, finalWorkRows: updated})
-                          }} style={{ padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', width: '100%', marginBottom: '6px', boxSizing: 'border-box' }}>
-                            <option value="">-- Select Work Description --</option>
-                            {currentSiteWorkDescriptions.map(desc => <option key={desc.id} value={desc.name}>{desc.name}</option>)}
-                            <option value="Other">Other (Manual)</option>
-                          </select>
-
-                          {fRow.workDesc === 'Other' && (
-                            <input type="text" placeholder="Enter custom work description..." value={fRow.customWorkDesc} onChange={(e) => {
-                              const updated = [...reportForm.finalWorkRows]
-                              updated[fIndex].customWorkDesc = e.target.value
-                              setReportForm({...reportForm, finalWorkRows: updated})
-                            }} style={{ width: '100%', padding: '6px', marginBottom: '6px', borderRadius: '4px', border: '1px solid #2563eb', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} />
-                          )}
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', boxSizing: 'border-box' }}>
-                            <input type="number" placeholder="Running Feet" value={fRow.runningFeet} onChange={(e) => {
-                              const updated = [...reportForm.finalWorkRows]
-                              updated[fIndex].runningFeet = e.target.value
-                              setReportForm({...reportForm, finalWorkRows: updated})
-                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                            <input type="number" placeholder="Height" value={fRow.height} onChange={(e) => {
-                              const updated = [...reportForm.finalWorkRows]
-                              updated[fIndex].height = e.target.value
-                              setReportForm({...reportForm, finalWorkRows: updated})
-                            }} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Extra Description Box */}
-                    <div style={{ marginBottom: '12px', boxSizing: 'border-box' }}>
-                      <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Additional Description / Remarks</label>
-                      <textarea rows="2" value={reportForm.description} onChange={(e) => setReportForm({...reportForm, description: e.target.value})} placeholder="Any extra notes..." style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
-                    </div>
-
-                    {/* Site Progress Photos */}
-                    <div style={{ marginBottom: '12px', backgroundColor: '#f1f5f9', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}>
-                      <label style={{ display: 'block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px', color: '#0f172a' }}>📸 Site Progress Photos (Multiple)</label>
-                      <input type="file" multiple accept="image/*" capture="environment" onChange={(e) => {
-                        if (e.target.files.length > 0) setSiteProgressPhotos([...siteProgressPhotos, ...Array.from(e.target.files)])
-                        e.target.value = null;
-                      }} style={{ fontSize: '11px', marginBottom: '6px', width: '100%', boxSizing: 'border-box' }} />
-                      {siteProgressPhotos.length > 0 && (
-                        <div style={{ marginTop: '6px', fontSize: '11px', color: '#0f172a' }}>
-                          Selected Progress Photos:
-                          {siteProgressPhotos.map((file, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-end', background: '#fff', padding: '4px 8px', margin: '4px 0', borderRadius: '4px', border: '1px solid #cbd5e1', alignItems: 'center' }}>
-                              <span>{file.name || (typeof file === 'string' ? file.split('/').pop() : 'Photo')}</span>
-                              <button type="button" onClick={() => {
-                                setModal({
-                                  isOpen: true,
-                                  message: 'શું તમે ખરેખર આ પ્રોગ્રેસ ફોટો ડીલીટ કરવા માંગો છો?',
-                                  onConfirm: () => {
-                                    if (typeof file === 'string') deleteFileFromStorage(file);
-                                    setSiteProgressPhotos(siteProgressPhotos.filter((_, i) => i !== idx))
-                                    setModal({ isOpen: false });
-                                  },
-                                  onCancel: () => setModal({ isOpen: false })
-                                });
-                              }} style={{ color: 'red', border: 'none', background: 'none', fontWeight: 'bold', cursor: 'pointer', marginLeft: '4px' }}>Remove</button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '8px', boxSizing: 'border-box' }}>
+            {/* સિલેક્ટ થયેલા ફોટાઓની યાદી અને ડિલીટ બટન */}
+            {reportForm.sitePhotos && reportForm.sitePhotos.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#16a34a' }}>
+                  ✅ {reportForm.sitePhotos.length} photo(s) selected:
+                </span>
+                
+                {reportForm.sitePhotos.map((file, index) => (
+                  <div key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%', color: '#334155' }}>
+                      📄 {file.name}
+                    </span>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        const updatedPhotos = reportForm.sitePhotos.filter((_, i) => i !== index);
+                        setReportForm({ ...reportForm, sitePhotos: updatedPhotos });
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', padding: '2px 6px' }}
+                    >
+                      ❌ Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          
+   <div style={{ display: 'flex', gap: '8px', boxSizing: 'border-box' }}>
                       <button type="button" disabled={loading} onClick={handleCombinedReportPreview} style={{ backgroundColor: loading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', flex: 1, fontSize: '12px' }}>
                         {loading ? 'Processing...' : 'Review & Submit Report'}
                       </button>
-                      <button type="button" disabled={loading} onClick={() => setShowReportForm(false)} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', padding: '8px 16px', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', flex: 1, fontSize: '12px', color: '#334155' }}>Cancel</button>
+                     
                     </div>
-                  </>
-                )}
-              </div>
-
+               
+          {/* Filter & Submitted DPR section below */}
+          <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', fontSize: '10px', fontWeight: '700', color: '#475569' }}>
+              <Filter size={12} color="#2563eb" /> SUBMITTED DPR (Recent-7 log)
             </div>
-          )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '8px', fontWeight: '600', color: '#64748b', marginBottom: '2px' }}>SELECT SITE</label>
+                <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '10px', backgroundColor: '#fff', fontWeight: '500', boxSizing: 'border-box' }}>
+                  <option value="all">🌐 All Sites</option>
+                  {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '8px', fontWeight: '600', color: '#64748b', marginBottom: '2px' }}>REPORT DATE</label>
+                <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ width: '100%', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '10px', boxSizing: 'border-box' }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Historical Reports */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
+           {filteredReports.slice(0, 7).map(r => (
+              <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px', boxSizing: 'border-box' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '11px' }}>{r.site_name}</span>
+                  <span style={{ fontSize: '9px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 5px', borderRadius: '4px' }}>
+                    📅 {r.report_date ? r.report_date.split('-').reverse().join('/') : ''}
+                  </span>
+                </div>
+                {r.description && <p style={{ fontSize: '10px', color: '#475569', margin: '2px 0' }}>📝 {r.description}</p>}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px', paddingTop: '3px', borderTop: '1px solid #f1f5f9', fontSize: '8px', color: '#64748b' }}>
+                  <span>👤 {r.user_id || 'N/A'}</span>
+                  <span>🕒 {r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* FULL PREVIEW / CONFIRMATION MODAL */}
       {previewData && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box', backdropFilter: 'blur(2px)' }}>
-          <div style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', width: '100%', maxWidth: '500px', maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+          <div style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', width: '100%', maxWidth: '500px', maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
             
             <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 4px 0', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 4px 0', color: '#0f172a' }}>
                 🔍 Final Report Preview
               </h3>
               <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Please verify all details carefully before submitting.</p>
             </div>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-              
-              {/* Site Info Box */}
-              <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
-                  <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Site Name</span><strong style={{ color: '#0f172a' }}>{previewData.site}</strong></div>
-                  <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Report Date</span><strong style={{ color: '#0f172a' }}>{previewData.date}</strong></div>
-                </div>
-                {previewData.details?.description && (
-                  <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#334155' }}>
-                    <strong>Remarks:</strong> {previewData.details.description}
-                  </div>
-                )}
-                {previewData.sitePhotosCount > 0 && (
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#2563eb', fontWeight: '600' }}>
-                    📸 {previewData.sitePhotosCount} Site Progress Photos Attached
-                  </div>
-                )}
+            <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
+                <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Site Name</span><strong style={{ color: '#0f172a' }}>{previewData.site}</strong></div>
+                <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Report Date</span><strong style={{ color: '#0f172a' }}>{previewData.date}</strong></div>
               </div>
-              
-              {/* Paling Work Preview */}
-              {previewData.details?.palingWorkRows?.some(p => p.contractorName) && (
-                <div style={{ backgroundColor: '#fdf4ff', padding: '12px', borderRadius: '8px', border: '1px solid #f5d0fe' }}>
-                  <strong style={{ color: '#86198f', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #f5d0fe', paddingBottom: '4px' }}>🪵 1. Paling Work</strong>
-                  {previewData.details.palingWorkRows.filter(p => p.contractorName).map((p, pi) => (
-                    <div key={pi} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #fae8ff', marginBottom: '4px' }}>
-                      <div>
-                        <strong style={{ color: '#701a75' }}>{p.contractorName}</strong>
-                        {p.description && <span style={{ display: 'block', fontSize: '10px', color: '#a21caf' }}>{p.description}</span>}
-                      </div>
-                      <strong style={{ color: '#0f172a' }}>{p.qty || 0} NOS</strong>
-                    </div>
-                  ))}
+              {previewData.details?.description && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#334155' }}>
+                  <strong>Remarks:</strong> {previewData.details.description}
                 </div>
               )}
-
-              {/* Contractor Work Preview (Material Usage) */}
-              {previewData.details?.contractorRows?.some(c => c.contractorName) && (
-                <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                  <strong style={{ color: '#1e40af', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #cbd5e1', paddingBottom: '4px' }}>👷 2. Material Usage</strong>
-                  {previewData.details.contractorRows.filter(c => c.contractorName).map((c, ci) => (
-                    <div key={ci} style={{ marginBottom: '8px', fontSize: '12px' }}>
-                      <div style={{ fontWeight: '600', color: '#1e3a8a', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                        <span>{ci + 1}. {c.contractorName}</span>
-                        <span style={{ fontSize: '10px', backgroundColor: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>Labour: {c.labourCount || 0}</span>
-                      </div>
-                      <div style={{ backgroundColor: '#fff', padding: '6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        {c.materials?.filter(m => m.quantity).map((m, mi) => (
-                          <div key={mi} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: mi !== c.materials.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: mi !== c.materials.length - 1 ? '4px' : '0', marginBottom: mi !== c.materials.length - 1 ? '4px' : '0' }}>
-                            <span style={{ color: '#334155' }}>{m.material === 'Other' ? m.customMaterialName : m.material}</span>
-                            <strong style={{ color: '#0f172a' }}>{m.quantity} {m.unit}</strong>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Final Work Preview */}
-              {previewData.details?.finalWorkRows?.some(f => f.contractorName) && (
-                <div style={{ backgroundColor: '#eff6ff', padding: '12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                  <strong style={{ color: '#0369a1', fontSize: '13px', display: 'block', marginBottom: '8px', borderBottom: '1px solid #bfdbfe', paddingBottom: '4px' }}>🏗️ 3. Final Work</strong>
-                  {previewData.details.finalWorkRows.filter(f => f.contractorName).map((f, fi) => (
-                    <div key={fi} style={{ fontSize: '12px', backgroundColor: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #dbeafe', marginBottom: '4px' }}>
-                      <div style={{ fontWeight: '600', color: '#075985', marginBottom: '2px' }}>{f.contractorName}</div>
-                      <div style={{ color: '#334155', marginBottom: '4px' }}>{f.workDesc === 'Other' ? f.customWorkDesc : f.workDesc}</div>
-                      <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#64748b' }}>
-                        <span>Run. Feet: <strong style={{ color: '#0f172a' }}>{f.runningFeet || 0}</strong></span>
-                        <span>Height: <strong style={{ color: '#0f172a' }}>{f.height || 0}</strong></span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', paddingTop: '12px', borderTop: '1px solid #e2e8f0', boxSizing: 'border-box' }}>
-              <button disabled={loading} onClick={() => { confirmAndSave(); }} style={{ flex: 1, padding: '12px', backgroundColor: loading ? '#94a3b8' : '#059669', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px', boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.2)' }}>
+            <div style={{ display: 'flex', gap: '10px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+              <button disabled={loading} onClick={() => { confirmAndSave(); }} style={{ flex: 1, padding: '12px', backgroundColor: loading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
                 {loading ? 'Saving Data...' : '✅ Confirm & Save'}
               </button>
               <button disabled={loading} onClick={() => setPreviewData(null)} style={{ flex: 1, padding: '12px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
@@ -1042,10 +1264,14 @@ function SupervisorDashboard() {
         </div>
       )}
 
-      {/* CUSTOM CONFIRMATION MODAL */}
-      <ConfirmModal 
+     <ConfirmModal 
         isOpen={modal.isOpen} 
         message={modal.message} 
+        confirmText={modal.confirmText}
+        cancelText={modal.cancelText}
+        confirmColor={modal.confirmColor}
+        cancelColor={modal.cancelColor}
+        cancelTextColor={modal.cancelTextColor}
         onConfirm={modal.onConfirm || (() => setModal({ isOpen: false }))} 
         onCancel={modal.onCancel || (() => setModal({ isOpen: false }))} 
       />

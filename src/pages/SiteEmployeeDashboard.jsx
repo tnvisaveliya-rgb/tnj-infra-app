@@ -15,13 +15,11 @@ import SiteExpensePage from './siteexpensepage';
 import SiteSupervisorFundRequest from './SiteSupervisorFundRequest'; 
 // અથવા જો ફાઇલનું નામ સાચે જ 'SiteSupervisorFundRequest' હોય તો ઉપરનો કોડ બરાબર છે.
 
-
-// ❌ પહેલા આવું હતું:
-// export default function ProductionReportView({ onBack, plantList = [] }) {
-
-//  આ રીતે બદલો (માત્ર function રાખો):
-function ProductionReportView({ onBack, plantList = [] }) {
-  const [selectedPlant, setSelectedPlant] = useState(plantList[0] || 'All');
+// આ રીતે onBack, siteList ની સાથે user પણ લેવડાવો
+function ProductionReportView({ onBack, siteList = [], user }) {
+  const [selectedSite, setSelectedSite] = useState(() => {
+    return siteList && siteList.length > 0 ? siteList[0] : 'All';
+  });
   const [labourList, setLabourList] = useState([]);
   const [selectedLabour, setSelectedLabour] = useState('');
   const [fromDate, setFromDate] = useState(() => {
@@ -35,36 +33,29 @@ function ProductionReportView({ onBack, plantList = [] }) {
   const [reportRows, setReportRows] = useState([]);
   const [totalUpad, setTotalUpad] = useState(0);
   const [dynamicColumns, setDynamicColumns] = useState([]);
-  const [productRates, setProductRates] = useState({});
-  // તારીખને YYYY-MM-DD માંથી DD/MM/YYYY માં ફેરવવા માટે
-const formatDateToDMY = (dateStr) => {
-  if (!dateStr) return '-';
-  const parts = dateStr.split('-');
-  if (parts.length === 3) {
-    const [year, month, day] = parts;
-    return `${day}/${month}/${year}`;
-  }
-  return dateStr;
-};
 
-  // =========================================================================
-  // ૧. સિલેક્ટ થયેલા પ્લાન્ટ મુજબ જ contractors ફેચ કરવા
-  // =========================================================================
+  const formatDateToDMY = (dateStr) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+    return dateStr;
+  };
+
+  // ૧. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું
   useEffect(() => {
-    const fetchContractorsByPlant = async () => {
+    const fetchContractorsBySite = async () => {
       try {
         let query = supabase.from('contractors').select('*');
-
-        if (selectedPlant && selectedPlant !== 'All') {
-          query = query.or(`site_name.eq."${selectedPlant}",company_name.eq."${selectedPlant}"`);
+        if (selectedSite && selectedSite !== 'All') {
+          query = query.or(`site_name.eq."${selectedSite}",company_name.eq."${selectedSite}"`);
         }
-
         const { data, error } = await query;
-
         if (!error && data) {
           const filteredNames = data.map(d => d.name).filter(Boolean);
           setLabourList(filteredNames);
-          
           if (filteredNames.length > 0) {
             setSelectedLabour(filteredNames[0]);
           } else {
@@ -72,170 +63,113 @@ const formatDateToDMY = (dateStr) => {
           }
         }
       } catch (err) {
-        console.error('Error fetching contractors for plant:', err);
+        console.error('Error fetching contractors for site:', err);
       }
     };
+    fetchContractorsBySite();
+  }, [selectedSite]);
 
-    fetchContractorsByPlant();
-  }, [selectedPlant]);
-
-  // =========================================================================
-  // ૨. ફિલ્ટર બદલાય ત્યારે લાઈવ ડેટા લોડ કરવો
-  // =========================================================================
+  // ૨. ડેટા ફેચ કરવો
   useEffect(() => {
-    if (!selectedLabour) return;
     fetchReportData();
-  }, [selectedPlant, selectedLabour, fromDate, toDate]);
+  }, [selectedSite, selectedLabour, fromDate, toDate]);
 
   const fetchReportData = async () => {
     setLoading(true);
     try {
       const groupedByDate = {};
       const uniqueColSet = new Set();
-    // (A) labour_product_rates માંથી સાચા રેટ્સ લાવો
-      let rateQuery = supabase
-        .from('labour_product_rates')
-        .select('*');
 
-      if (selectedPlant && selectedPlant !== 'All') {
-        rateQuery = rateQuery.eq('plant_name', selectedPlant);
+      let reportQuery = supabase.from('daily_reports').select('*');
+      if (selectedSite && selectedSite !== 'All') {
+        reportQuery = reportQuery.eq('site_name', selectedSite);
       }
-      if (selectedLabour) {
-        rateQuery = rateQuery.eq('team_name', selectedLabour);
-      }
+      if (fromDate) reportQuery = reportQuery.gte('report_date', fromDate);
+      if (toDate) reportQuery = reportQuery.lte('report_date', toDate);
 
-      const { data: rateData, error: rateErr } = await rateQuery;
+      const { data: reportData, error: rErr } = await reportQuery;
 
-      const rateList = [];
-      if (!rateErr && rateData && rateData.length > 0) {
-        rateData.forEach(r => {
-          rateList.push({
-            pName: (r.product_name || '').toLowerCase().trim(),
-            pSize: (r.product_size || '').toLowerCase().trim(),
-            rate: Number(r.rate || 0)
-          });
-        });
-      }
-      setProductRates(rateList); // 👈 આખું array સેવ કરો
+      if (!rErr && reportData && reportData.length > 0) {
+        reportData.forEach(rep => {
+          const dStr = rep.report_date;
+          if (!dStr) return;
 
-      // (B) લાઈવ હેડર્સ લાવવા
-      let headerQuery = supabase
-        .from('production_header')
-        .select('id, production_date, team_name, plant_name');
+          // (૧) contractor_details માંથી materials અથવા workItems વાંચવા
+          const contractorRows = rep.contractor_details || [];
+          contractorRows.forEach(cRow => {
+           // જૂનું: if (selectedLabour && cRow.contractorName !== selectedLabour) return;
+// નવું આ કરો:
+if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
 
-      if (selectedPlant && selectedPlant !== 'All') {
-        headerQuery = headerQuery.eq('plant_name', selectedPlant);
-      }
-      if (selectedLabour) {
-        headerQuery = headerQuery.eq('team_name', selectedLabour);
-      }
-      if (fromDate) headerQuery = headerQuery.gte('production_date', fromDate);
-      if (toDate) headerQuery = headerQuery.lte('production_date', toDate);
-
-      const { data: headers, error: hErr } = await headerQuery;
-
-      if (!hErr && headers && headers.length > 0) {
-        const headerIds = headers.map(h => h.id);
-        const headerDateMap = {};
-        headers.forEach(h => {
-          headerDateMap[h.id] = h.production_date;
-        });
-
-         // (C) આ હેડર્સની બધી જ production_items લાવવી
-        const { data: items, error: iErr } = await supabase
-          .from('production_items')
-          .select('*')
-          .in('header_id', headerIds);
-
-        if (!iErr && items && items.length > 0) {
-          const itemIds = items.map(it => it.id);
-
-          // 🌟 stock_ledger ટેબલમાંથી reference_id મુજબ સાચી qty લાવવી
-          const { data: stockEntries } = await supabase
-            .from('stock_ledger')
-            .select('reference_id, qty')
-            .in('reference_id', itemIds);
-
-          const stockMap = {};
-          if (stockEntries) {
-            stockEntries.forEach(s => {
-              stockMap[s.reference_id] = (stockMap[s.reference_id] || 0) + Number(s.qty || 0);
+            // જો materials હોય તો
+            const materialsUsed = cRow.materials || [];
+            materialsUsed.forEach(mItem => {
+              const matName = (mItem.material === 'Other' ? mItem.customMaterialName : mItem.material) || 'Material';
+              const qty = Number(mItem.quantity || 0);
+              if (matName && qty > 0) {
+                uniqueColSet.add(matName);
+                if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                groupedByDate[dStr][matName] = (groupedByDate[dStr][matName] || 0) + qty;
+              }
             });
-          }
 
-
-          items.forEach(item => {
-            const dStr = headerDateMap[item.header_id];
-            if (!dStr) return;
-
-          // ❌ પહેલા આવું હતું:
-// const pVariant = item.size_variant ? ` (${item.size_variant})` : '';
-// const colHeader = `${pName}${pVariant}`;
-
-// ✅ આ રીતે અપડેટ કરો:
-const pName = (item.product_name || 'Item').trim();
-const pVariant = (item.size_variant || '').trim();
-
-// જો વેરિઅન્ટ હોય તો સ્પેસ સાથે જોડાશે (વધારાનો કૌંસ નહીં લાગે)
-const colHeader = pVariant ? `${pName} ${pVariant}` : pName;
-
-            uniqueColSet.add(colHeader);
-
-            if (!groupedByDate[dStr]) {
-              groupedByDate[dStr] = { date: dStr };
-            }
-
-            // 🌟 લાઈન હોય તો લાઈન કાસ્ટિંગ, નહીંતર stock_ledger માંથી qty
-            const lineQty = Number(item.nos_of_line_casting || 0);
-            const ledgerQty = stockMap[item.id] || 0;
-            const finalQty = lineQty > 0 ? lineQty : ledgerQty;
-
-            groupedByDate[dStr][colHeader] = (groupedByDate[dStr][colHeader] || 0) + finalQty;
+            // જો workItems હોય તો
+            const workItems = cRow.workItems || [];
+            workItems.forEach(wItem => {
+              const wName = wItem.workType || 'Work';
+              const qty = Number(wItem.quantity || wItem.actualCementBags || wItem.runningFeet || 0);
+              if (wName && qty > 0) {
+                uniqueColSet.add(wName);
+                if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                groupedByDate[dStr][wName] = (groupedByDate[dStr][wName] || 0) + qty;
+              }
+            });
           });
 
-          const colsArray = Array.from(uniqueColSet);
-          setDynamicColumns(colsArray);
+          // (૨) paling_work માંથી ડેટા વાંચવો
+          const palingRows = rep.paling_work || [];
+          palingRows.forEach(pRow => {
+         // જૂનું: if (selectedLabour && cRow.contractorName !== selectedLabour) return;
+// નવું આ કરો:
+if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
+            const pQty = Number(pRow.qty || 0);
+            if (pQty > 0) {
+              const pCol = 'Paling Work';
+              uniqueColSet.add(pCol);
+              if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+              groupedByDate[dStr][pCol] = (groupedByDate[dStr][pCol] || 0) + pQty;
+            }
+          });
+        });
 
-          const sortedRows = Object.values(groupedByDate).sort(
-            (a, b) => new Date(b.date) - new Date(a.date)
-          );
-          setReportRows(sortedRows);
-        } else {
-          setDynamicColumns([]);
-          setReportRows([]);
-        }
+        setDynamicColumns(Array.from(uniqueColSet));
       } else {
         setDynamicColumns([]);
-        setReportRows([]);
       }
 
-  // (D) plant_expenses માંથી ઉપાડ લાવવો
+      // ઉપાડ (Upad / Expenses) લાવવો
       const upadByDateMap = {};
       let totalUpadSum = 0;
 
-      if (selectedLabour) {
-        let upadQuery = supabase
-          .from('plant_expenses')
-          .select('amount, expense_date')
-          .eq('paid_to', selectedLabour);
+      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date');
+if (selectedLabour && selectedLabour       !== 'All') {
+        upadQuery = upadQuery.eq('paid_to', selectedLabour);
+      }
+      if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
+      if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
 
-        if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
-        if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
-
-        const { data: upadData } = await upadQuery;
-        if (upadData && upadData.length > 0) {
-          upadData.forEach(item => {
-            const expDate = item.expense_date;
-            const amt = Number(item.amount || 0);
-            upadByDateMap[expDate] = (upadByDateMap[expDate] || 0) + amt;
-            totalUpadSum += amt;
-          });
-        }
+      const { data: upadData } = await upadQuery;
+      if (upadData && upadData.length > 0) {
+        upadData.forEach(item => {
+          const expDate = item.expense_date;
+          const amt = Number(item.amount || 0);
+          upadByDateMap[expDate] = (upadByDateMap[expDate] || 0) + amt;
+          totalUpadSum += amt;
+        });
       }
 
       setTotalUpad(totalUpadSum);
 
-      // હવે groupedByDate ઉપર જ ડીકલેર હોવાથી ReferenceError ક્યારેય નહીં આવે
       Object.keys(groupedByDate).forEach(dStr => {
         groupedByDate[dStr].dayUpad = upadByDateMap[dStr] || 0;
       });
@@ -252,274 +186,89 @@ const colHeader = pVariant ? `${pName} ${pVariant}` : pName;
       setReportRows(sortedRows);
 
     } catch (err) {
-      console.error('Error fetching dynamic report:', err);
+      console.error('Error fetching daily reports billing:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const getRateForColumn = (colName) => {
-    if (!Array.isArray(productRates) || productRates.length === 0) return 0;
-
-    const cleanCol = colName.toLowerCase().replace(/×/g, 'x').replace(/[^a-z0-9]/g, '');
-
-    // 🌟 ૧. 'Other Work' / 'Day Work' / 'Cleaning' માટે ચેક કરવું
-    const isOtherWork = 
-      cleanCol.includes('cleaning') || 
-      cleanCol.includes('daywork') || 
-      cleanCol.includes('other') || 
-      cleanCol.includes('department');
-
-    if (isOtherWork) {
-      // ડેટાબેઝમાંથી Other Work અથવા Other Department Work નો રેટ શોધવો
-      const otherRateItem = productRates.find(r => 
-        r.pName.includes('other') || 
-        r.pName.includes('department') || 
-        r.pName.includes('cleaning')
-      );
-      if (otherRateItem) return otherRateItem.rate;
-      return 0; // જો ડેટાબેઝમાં મેચ ન થાય તો ડિફોલ્ટ 0
-    }
-
-    // ૨. પ્રોડક્ટ વાઈઝ ડેટાબેઝ મેચ
-    for (const item of productRates) {
-      const cleanDBName = item.pName.replace(/×/g, 'x').replace(/[^a-z0-9]/g, '');
-      const cleanDBSize = item.pSize.replace(/×/g, 'x').replace(/[^a-z0-9]/g, '');
-
-      if (cleanDBName && cleanCol.includes(cleanDBName)) {
-        if (cleanDBName === 'panel7' && cleanCol.includes('panel7')) return item.rate;
-        if (cleanDBName === 'panel6' && cleanCol.includes('panel6')) return item.rate;
-        if (cleanDBName.includes('drain')) return item.rate;
-        if (cleanDBName.includes('column')) return item.rate;
-      }
-
-      if (cleanDBSize && cleanCol.includes(cleanDBSize)) {
-        return item.rate;
-      }
-    }
-
-    // ૩. સ્પેસિફિક ફોલબેક્સ
-    const panel7 = productRates.find(r => r.pName.includes('panel') && r.pName.includes('7'));
-    if (cleanCol.includes('panel') && cleanCol.includes('7') && panel7) return panel7.rate;
-
-    const panel6 = productRates.find(r => r.pName.includes('panel') && r.pName.includes('6'));
-    if (cleanCol.includes('panel') && cleanCol.includes('6') && panel6) return panel6.rate;
-
-    const udrain = productRates.find(r => r.pName.includes('drain'));
-    if (cleanCol.includes('drain') && udrain) return udrain.rate;
-
-    const column8 = productRates.find(r => r.pName.includes('column') && r.pName.includes('8'));
-    if (cleanCol.includes('column') && cleanCol.includes('8') && column8) return column8.rate;
-
-    return 0;
-  };
-  // =========================================================================
-  // ૪. કુલ ઉત્પાદન અને બાકી રકમની ગણતરી (Auto Calculations)
-  // =========================================================================
-  let grandTotalProduction = 0;
-  dynamicColumns.forEach(col => {
-    const totalColQty = reportRows.reduce((sum, row) => sum + (Number(row[col]) || 0), 0);
-    const colRate = getRateForColumn(col);
-    grandTotalProduction += (totalColQty * colRate);
-  });
-  const netOutstanding = grandTotalProduction - totalUpad;
-
   return (
-    <div style={{ padding: '10px 8px', maxWidth: '650px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-
-      {/* 🖨️ Action Bar */}
+    <div style={{ padding: '10px 8px', maxWidth: '750px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <button 
-          onClick={onBack}
-          style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#fff', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}
-        >
+        <button onClick={onBack} style={{ padding: '6px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#fff', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>
           ← Back
         </button>
-        <button 
-          onClick={() => window.print()}
-          style={{ padding: '7px 16px', borderRadius: '8px', border: 'none', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer', fontWeight: '800', fontSize: '12px', boxShadow: '0 2px 6px rgba(37,99,235,0.3)' }}
-        >
+        <button onClick={() => window.print()} style={{ padding: '7px 16px', borderRadius: '8px', border: 'none', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer', fontWeight: '800', fontSize: '12px' }}>
           🖨️ Export PDF / Print
         </button>
       </div>
 
-      {/* 📄 Printable Report Sheet */}
-      <div style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-        
+      <div style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '16px' }}>
         <h2 style={{ margin: '0 0 10px 0', fontSize: '15px', fontWeight: '900', color: '#0f172a' }}>
-          PRODUCTION & LABOUR BILLING REPORT
+          DAILY REPORT & LABOUR BILLING FORMAT
         </h2>
 
-        {/* Selected Info Bar */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px', color: '#334155', marginBottom: '12px' }}>
-          <div><strong>Plant:</strong> {selectedPlant}</div>
-          <div><strong>Date Filter:</strong> {formatDateToDMY(fromDate)} to {formatDateToDMY(toDate)}</div>
-          <div style={{ gridColumn: 'span 2' }}><strong>Labour / Contractor:</strong> {selectedLabour || 'All'}</div>
+        {/* Filters */}
+        <div className="no-print" style={{ display: 'flex', gap: '8px', marginBottom: '12px', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+<select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: '700', borderRadius: '6px' }}>
+  {/* જો એડમિન હોય તો જ 'All Sites' ઓપ્શન દેખાશે */}
+  {((user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com') && (
+    <option value="All">All Sites</option>
+  )}
+  {siteList.map((s, i) => <option key={i} value={s}>{s}</option>)}
+</select>
+          <select value={selectedLabour} onChange={(e) => setSelectedLabour(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '11px', fontWeight: '700', borderRadius: '6px' }}>
+            <option value="All">All Labours / Contractors</option>
+            {labourList.map((l, i) => <option key={i} value={l}>{l}</option>)}
+          </select>
+          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ padding: '5px', fontSize: '11px', borderRadius: '6px' }} />
+          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ padding: '5px', fontSize: '11px', borderRadius: '6px' }} />
         </div>
 
-        {/* Dynamic Controls (No Print) */}
-        <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <select 
-              value={selectedPlant} 
-              onChange={(e) => setSelectedPlant(e.target.value)}
-              style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', fontWeight: '700' }}
-            >
-              <option value="All">All Plants</option>
-              {plantList.map((p, i) => <option key={i} value={p}>{p}</option>)}
-            </select>
-
-            <select 
-              value={selectedLabour} 
-              onChange={(e) => setSelectedLabour(e.target.value)}
-              style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', fontWeight: '700', color: '#1e293b' }}
-            >
-              {labourList.map((name, i) => (
-                <option key={i} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Date Range:</span>
-            <input 
-              type="date" 
-              value={fromDate} 
-              onChange={(e) => setFromDate(e.target.value)} 
-              style={{ flex: 1, padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }} 
-            />
-            <input 
-              type="date" 
-              value={toDate} 
-              onChange={(e) => setToDate(e.target.value)} 
-              style={{ flex: 1, padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }} 
-            />
-          </div>
-        </div>
-
-{/* 📊 DYNAMIC PRODUCTION TABLE */}
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f1f5f9' }}>
-              <th style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Date</th>
-              {dynamicColumns.map((col, idx) => (
-                <th key={idx} style={{ padding: '8px 4px', border: '1px solid #cbd5e1' }}>
-                  {col}
-                </th>
-              ))}
-              <th style={{ padding: '8px 4px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fef2f2' }}>
-                Upad (ઉપાડ)
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={dynamicColumns.length + 2} style={{ padding: '12px', color: '#64748b' }}>
-                  Loading live production...
-                </td>
+        {/* Table Format */}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f1f5f9' }}>
+                <th style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Date</th>
+                {dynamicColumns.map((col, idx) => (
+                  <th key={idx} style={{ padding: '8px 4px', border: '1px solid #cbd5e1', textTransform: 'capitalize' }}>{col}</th>
+                ))}
+                <th style={{ padding: '8px 4px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fef2f2' }}>Upad</th>
               </tr>
-            ) : reportRows.length === 0 ? (
-              <tr>
-                <td colSpan={dynamicColumns.length + 2} style={{ padding: '12px', color: '#94a3b8' }}>
-                  કોઈ ડેટા મળ્યો નથી.
-                </td>
-              </tr>
-            ) : (
-              reportRows.map((row, idx) => (
-                <tr key={idx}>
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left', fontWeight: '600' }}>
-                    {formatDateToDMY(row.date)}
-                  </td>
-                  {dynamicColumns.map((col, cIdx) => (
-                    <td key={cIdx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>
-                      {row[col] !== undefined ? row[col] : '-'}
-                    </td>
-                  ))}
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', fontWeight: '700', backgroundColor: '#fff5f5' }}>
-                    {row.dayUpad ? `₹ ${row.dayUpad.toLocaleString('en-IN')}` : '-'}
-                  </td>
-                </tr>
-              ))
-            )}
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={dynamicColumns.length + 2} style={{ padding: '15px' }}>Loading...</td></tr>
+              ) : reportRows.length === 0 ? (
+                <tr><td colSpan={dynamicColumns.length + 2} style={{ padding: '15px', color: '#94a3b8' }}>કોઈ ડેટા મળ્યો નથી.</td></tr>
+              ) : (
+                reportRows.map((row, idx) => (
+                  <tr key={idx}>
+                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left', fontWeight: '600' }}>{formatDateToDMY(row.date)}</td>
+                    {dynamicColumns.map((col, cIdx) => (
+                      <td key={cIdx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{row[col] !== undefined ? row[col] : '-'}</td>
+                    ))}
+                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', fontWeight: '700' }}>{row.dayUpad ? `₹ ${row.dayUpad.toLocaleString('en-IN')}` : '-'}</td>
+                  </tr>
+                ))
+              )}
 
-            {/* TOTAL ROW */}
-            {reportRows.length > 0 && (
-              <>
+              {/* Total Row */}
+              {reportRows.length > 0 && (
                 <tr style={{ fontWeight: '800', backgroundColor: '#f8fafc' }}>
                   <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Total</td>
                   {dynamicColumns.map((col, idx) => {
-                    const totalColQty = reportRows.reduce((sum, row) => sum + (Number(row[col]) || 0), 0);
-                    return (
-                      <td key={idx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>
-                        {totalColQty}
-                      </td>
-                    );
+                    const totalQty = reportRows.reduce((sum, row) => sum + (Number(row[col]) || 0), 0);
+                    return <td key={idx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{totalQty}</td>;
                   })}
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fee2e2' }}>
-                    ₹ {totalUpad.toLocaleString('en-IN')}
-                  </td>
+                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626' }}>₹ {totalUpad.toLocaleString('en-IN')}</td>
                 </tr>
-
-                {/* REAL DB RATE ROW */}
-                <tr style={{ color: '#475569', backgroundColor: '#ffffff' }}>
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left', fontWeight: '700' }}>Rate (₹)</td>
-                  {dynamicColumns.map((col, idx) => (
-                    <td key={idx} style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: '700' }}>
-                      {getRateForColumn(col)}
-                    </td>
-                  ))}
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>-</td>
-                </tr>
-
-                {/* TOTAL AMOUNT ROW */}
-                <tr style={{ fontWeight: '900', backgroundColor: '#f1f5f9', color: '#0f172a' }}>
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Total Amount (₹)</td>
-                  {dynamicColumns.map((col, idx) => {
-                    const totalColQty = reportRows.reduce((sum, row) => sum + (Number(row[col]) || 0), 0);
-                    const amt = totalColQty * getRateForColumn(col);
-                    return (
-                      <td key={idx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>
-                        ₹ {amt.toLocaleString('en-IN')}
-                      </td>
-                    );
-                  })}
-                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fee2e2' }}>
-                    - ₹ {totalUpad.toLocaleString('en-IN')}
-                  </td>
-                </tr>
-              </>
-            )}
-          </tbody>
-        </table>
-
-        {/* 💰 SUMMARY & OUTSTANDING */}
-        <div style={{ marginTop: '14px', borderTop: '2px solid #0f172a', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#1e293b' }}>
-            <span>Total Production Amount:</span>
-            <strong>₹ {grandTotalProduction.toLocaleString('en-IN')}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
-            <span>Till Date Upad (ઉપાડ):</span>
-            <strong>- ₹ {totalUpad.toLocaleString('en-IN')}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #cbd5e1', paddingTop: '6px', fontSize: '13px', color: '#15803d' }}>
-            <span><strong>Net Outstanding Payable:</strong></span>
-            <strong style={{ fontSize: '15px' }}>₹ {netOutstanding.toLocaleString('en-IN')}</strong>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
-
       </div>
-
-      {/* 🖨️ Print Stylesheet */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          .no-print { display: none !important; }
-          div, table, tr, td, th { visibility: visible; }
-          @page { size: portrait; margin: 10mm; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -569,27 +318,54 @@ const [attendanceInfo, setAttendanceInfo] = useState({
     fetchDashboardData();
   }, [user, selectedPlant]);
 
-  useEffect(() => {
-    const fetchPlantList = async () => {
+ useEffect(() => {
+    const fetchSiteList = async () => {
       try {
-        const { data, error } = await supabase
-          .from('material_stock_ledger')
-          .select('plant_name');
+        const userEmail = (user?.email || '').trim().toLowerCase();
+        const userId = user?.id;
 
-        if (!error && data) {
-          const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
-          setPlantList(unique);
-          if (unique.length > 0 && selectedPlant === 'All') {
-            setSelectedPlant(unique[0]);
+        // ૧. જો એડમિન હોય તો બધી જ સાઇટ્સ દેખાશે
+        if (userEmail === 'infra.tnj@gmail.com') {
+          const { data, error } = await supabase.from('sites').select('site_name');
+          if (!error && data) {
+            const unique = [...new Set(data.map(d => d.site_name).filter(Boolean))];
+            setPlantList(unique);
+            if (unique.length > 0 && selectedPlant === 'All') {
+              setSelectedPlant(unique[0]);
+            }
           }
+          return;
         }
+
+        // ૨. બાકીના સુપરવાઇઝર માટે માત્ર અસાઇન કરેલી સાઇટ્સ જ આવશે
+        const { data: permData, error: permError } = await supabase
+          .from('user_permissions')
+          .select('assigned_sites')
+          .eq('user_id', userId)
+          .single();
+
+        if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
+          setPlantList([]);
+          return;
+        }
+
+        const assignedSiteNames = permData.assigned_sites;
+        setPlantList(assignedSiteNames);
+        if (assignedSiteNames.length > 0 && selectedPlant === 'All') {
+          setSelectedPlant(assignedSiteNames[0]);
+        }
+
       } catch (err) {
-        console.error('Error fetching plant list:', err);
+        console.error('Error fetching assigned site list:', err);
+        setPlantList([]);
       }
     };
 
-    fetchPlantList();
-  }, []);
+    if (user) {
+      fetchSiteList();
+    }
+  }, [user]);
+
 const fetchNotifications = async () => {
   try {
     const list = [];
@@ -753,11 +529,11 @@ const fetchDashboardData = async () => {
 
       // (ઇન્વેન્ટરી અને એટેન્ડન્સનો આગળનો કોડ એમ જ રહેશે...)
       // ૪. RAW MATERIAL, STORE & ASSETS STOCK
-      let matQuery = supabase.from('material_stock_ledger').select('*');
-      if (selectedPlant && selectedPlant !== 'All') {
-        matQuery = matQuery.eq('plant_name', selectedPlant);
-      }
-      const { data: matLedger, error: matErr } = await matQuery;
+let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 ટેબલનું નામ બદલ્યું
+    if (selectedPlant && selectedPlant !== 'All') {
+      matQuery = matQuery.eq('site_name', selectedPlant); // 👈 plant_name ના બદલે site_name
+    }
+    const { data: matLedger, error: matErr } = await matQuery;
 
       if (!matErr && matLedger) {
         const stockMap = {};
@@ -785,13 +561,22 @@ const fetchDashboardData = async () => {
             n.includes('mold') ||
             n.includes('machine') ||
             n.includes('vibrator') ||
-            n.includes('panel') ||
             n.includes('crane') ||
             n.includes('batching') ||
             n.includes('silow') ||
             n.includes('asset')
           );
         };
+        const checkIsFinished = (name) => {
+          const n = name.toLowerCase();
+          return (
+            n.includes('panel') ||
+            n.includes('column') ||
+            n.includes('drain') ||
+            n.includes('beam') ||
+            n.includes('wall')
+          );
+        };  
 
         matLedger.forEach(item => {
           const rawName = (item.material_name || '').trim();
@@ -806,6 +591,9 @@ const fetchDashboardData = async () => {
             let determinedCategory = 'store';
             if (checkIsAsset(rawName)) {
               determinedCategory = 'asset';
+              
+           } else if (checkIsFinished(rawName)) {
+              determinedCategory = 'finished'; // 👈 Finished goods mate
             } else if (checkIsRawMaterial(rawName)) {
               determinedCategory = 'raw';
             }
@@ -871,7 +659,7 @@ const fetchDashboardData = async () => {
       console.error('Error fetching employee dashboard data:', err);
     }
   };
-
+const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); // 👈 Add this
   const rawItems = rawMaterialsStock.filter(i => i.category === 'raw');
   const storeItems = rawMaterialsStock.filter(i => i.category === 'store');
   const assetItems = rawMaterialsStock.filter(i => i.category === 'asset');
@@ -1142,13 +930,13 @@ const fetchDashboardData = async () => {
             justifyContent: 'space-between',
             boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '14px' }}>🏭</span>
-              <span style={{ fontSize: '12px', fontWeight: '700', color: '#334155' }}>Select Plant:</span>
-            </div>
-            <select 
-              value={selectedPlant} 
-              onChange={(e) => setSelectedPlant(e.target.value)}
+         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <span style={{ fontSize: '14px' }}>🏗️</span>
+      <span style={{ fontSize: '12px', fontWeight: '700', color: '#334155' }}>Select Site:</span> {/* 👈 Plant ના બદલે Site */}
+    </div>
+    <select 
+      value={selectedPlant} 
+      onChange={(e) => setSelectedPlant(e.target.value)}
               style={{
                 border: '1px solid #94a3b8',
                 borderRadius: '8px',
@@ -1162,11 +950,11 @@ const fetchDashboardData = async () => {
                 maxWidth: '220px'
               }}  
             >
-              <option value="All">All Plants (બધા પ્લાન્ટ)</option>
-              {plantList.map((plantName, idx) => (
-                <option key={idx} value={plantName}>{plantName}</option>
-              ))}
-            </select>
+             <option value="All">All Sites (બધા સાઇટ)</option>
+      {plantList.map((siteName, idx) => (
+        <option key={idx} value={siteName}>{siteName}</option>
+      ))}
+    </select>
           </div>
 
           {/* 📦 LIVE INVENTORY SECTION */}
@@ -1191,6 +979,34 @@ const fetchDashboardData = async () => {
                 ● Live Sync
               </span>
             </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', minWidth: '0' }}>
+  {finishedItems.map((item, idx) => (
+    <div key={idx} style={{ 
+      backgroundColor: '#f0fdf4', 
+      border: '1px solid #bbf7d0', 
+      borderRadius: '10px', 
+      padding: '6px 8px', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'space-between',
+      minWidth: '0', // 👈 આ લાઈન ઉમેરવી ખૂબ જ જરૂરી છે
+      overflow: 'hidden' // 👈 આનાથી બહાર નહીં જાય
+    }}>
+      <span style={{ fontSize: '11px', fontWeight: '700', color: '#166534', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, marginRight: '4px' }}>
+        {item.name}
+      </span>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock <= 0 ? '#dc2626' : '#15803d' }}>
+          {item.stock.toLocaleString('en-IN')}
+        </span>
+        <span style={{ fontSize: '9px', fontWeight: '700', color: '#16a34a', marginLeft: '3px' }}>
+          {item.unit}
+        </span>
+      </div>
+    </div>
+  ))}
+</div>
 
              {/* STORE & TOOLS (Assets Filtered Out) */}
             <div>
@@ -1363,9 +1179,10 @@ const fetchDashboardData = async () => {
       {activeTab === 'issue_return' && <SiteIssueReturn />}
      {activeTab === 'siteexpense' && <SiteExpensePage user={user} defaultType={expenseInitialTab} />}
       {activeTab === 'production_report' && (
-  <ProductionReportView 
-    onBack={() => setActiveTab('home')} 
-    plantList={plantList} 
+  <ProductionReportView
+    onBack={() => setActiveTab('home')}
+    siteList={plantList}
+    user={user}
   />
 )}
       
