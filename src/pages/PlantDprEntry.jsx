@@ -173,7 +173,7 @@ const triggerAlert = (msg) => {
     const { data: siteData } = await supabase.from('sites').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);
     setSites(siteData || []);
 
-    const { data: labData } = await supabase.from('contractors').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);
+    const { data: labData } = await supabase.from('contractors').select('*').eq('plant_id', plantId).eq('site_name', selectedPlant);
     setLabours(labData || []);
 
     const { data: matData } = await supabase.from('site_materials_master').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);

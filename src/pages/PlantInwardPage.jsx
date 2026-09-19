@@ -717,8 +717,8 @@ return (
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {inwardSources.map((source, sIndex) => {
-              const selectedSupplierData = suppliers.find(sup => sup.name === source.supplier);
-              const supplierMaterials = selectedSupplierData?.materials_supplied || [];
+             const selectedSupplierData = suppliers.find(sup => sup.company_name === source.supplier);
+const supplierMaterials = selectedSupplierData?.materials_supplied || [];
 
               return (
                 <div key={source.id} style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderBottom: sIndex < inwardSources.length - 1 ? '2px solid #cbd5e1' : 'none', paddingBottom: sIndex < inwardSources.length - 1 ? '16px' : '0' }}>
@@ -738,7 +738,7 @@ return (
                   {/* 🏢 Select Vendor / Supplier + Manual Input Option */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <select 
-                      value={suppliers.some(sup => sup.name === source.supplier) ? source.supplier : (source.supplier ? 'OTHER_SUPPLIER_MANUAL' : '')} 
+                      value={suppliers.some(sup => sup.company_name === source.supplier) ? source.supplier : (source.supplier ? 'OTHER_SUPPLIER_MANUAL' : '')}
                       onClick={handleDropdownClick} 
                       onChange={(e) => {
                         const val = e.target.value;
@@ -753,7 +753,7 @@ return (
                       <option value="">-- Select Vendor / Supplier --</option>
                       {suppliers
                         .filter(sup => sup.site_name === selectedPlant || sup.site_name === 'All Sites (General)' || !sup.site_name) 
-                        .map(sup => <option key={sup.id} value={sup.name}>{sup.name}</option>)
+                        .map(sup => <option key={sup.id} value={sup.company_name}>{sup.company_name}</option>)
                       }
                       <option value="OTHER_SUPPLIER_MANUAL" style={{ fontWeight: 'bold', color: '#2563eb' }}>➕ Other (Type Manually...)</option>
                     </select>
@@ -929,7 +929,7 @@ return (
             style={{ width: '100%', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
           >
             <option value="Nos">Nos</option>
-            <option value="Tons">Tons</option>
+            <option value="Tons">Ltr</option>
             <option value="Bags">Bags</option>
             <option value="Kg">Kg</option>
           </select>
