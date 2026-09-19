@@ -45,7 +45,15 @@ const messaging = getMessaging(firebaseApp);
 function AppRoutes() {
   const { user } = useAuth()
   const userEmail = (user?.email || '').trim().toLowerCase()
+function SupervisorRedirectHandler() {
+  const { userPermissions } = useAuth(); // Tamari permission context
 
+  if (userPermissions?.assigned_plants?.length > 0 && userPermissions?.assigned_sites?.length === 0) {
+    return <Navigate to="/supervisor-dashboard/plant" replace />;
+  }
+  
+  return <Navigate to="/supervisor-dashboard/site" replace />;
+}
   return (
     <Routes>
       {/* ૧. એડમિન માટે બધા જ પેજ ખુલ્લા રહેશે */}
@@ -71,6 +79,7 @@ function AppRoutes() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </>
       ) : (
+        
         /* ૨. સ્ટાફ અને સુપરવાઈઝર માટે ડાયનેમિક રાઉટ્સ */
         <>
           <Route path="/Dashboard" element={<Dashboard />} />
@@ -89,7 +98,8 @@ function AppRoutes() {
           <Route path="/staff-management" element={<StaffManagement />} />
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
-          <Route path="*" element={<Navigate to="/siteemployee-dashboard" replace />} />
+
+         <Route path="/supervisor-dashboard" element={<SupervisorRedirectHandler />} />
         </>
       )}
     </Routes>

@@ -11,6 +11,17 @@ function Login() {
 
 
   
+  // Login ya Dashboard Load thati vakhte check karo:
+const assignedPlants = userPermissions?.assigned_plants || [];
+const assignedSites = userPermissions?.assigned_sites || [];
+
+if (assignedPlants.length === 1 && assignedSites.length === 0) {
+  // Jo fakt 1 j plant hoy to seedhu plant dashboard par redirect karo
+  navigate('/supervisor-dashboard/plant');
+} else if (assignedSites.length === 1 && assignedPlants.length === 0) {
+  // Jo fakt 1 j site hoy to seedhu site dashboard par redirect karo
+  navigate('/supervisor-dashboard/site');
+}
 
   const handleLogin = async (e) => {
     e.preventDefault()
