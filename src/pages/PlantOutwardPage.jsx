@@ -1250,7 +1250,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
             style={{ flex: '0.8', minWidth: '0', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
           >
             <option value="Nos">Nos</option>
-            <option value="Tons">Tons</option>
+            <option value="Ltr">Ltr</option>
             <option value="Bags">Bags</option>
             <option value="Kg">Kg</option>
           </select>

@@ -74,7 +74,7 @@ function ProductionReportView({ onBack, siteList = [], user }) {
     fetchReportData();
   }, [selectedSite, selectedLabour, fromDate, toDate]);
 
-  const fetchReportData = async () => {
+const fetchReportData = async () => {
     setLoading(true);
     try {
       const groupedByDate = {};
@@ -94,44 +94,49 @@ function ProductionReportView({ onBack, siteList = [], user }) {
           const dStr = rep.report_date;
           if (!dStr) return;
 
-          // (૧) contractor_details માંથી materials અથવા workItems વાંચવા
+          // (૧) contractor_details માંથી કામ અને ડેટા વાંચવા
           const contractorRows = rep.contractor_details || [];
           contractorRows.forEach(cRow => {
-           // જૂનું: if (selectedLabour && cRow.contractorName !== selectedLabour) return;
-// નવું આ કરો:
-if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
+            if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
 
-            // જો materials હોય તો
-            const materialsUsed = cRow.materials || [];
-            materialsUsed.forEach(mItem => {
-              const matName = (mItem.material === 'Other' ? mItem.customMaterialName : mItem.material) || 'Material';
-              const qty = Number(mItem.quantity || 0);
-              if (matName && qty > 0) {
-                uniqueColSet.add(matName);
-                if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
-                groupedByDate[dStr][matName] = (groupedByDate[dStr][matName] || 0) + qty;
-              }
-            });
-
-            // જો workItems હોય તો
+            // કામના આઇટમ્સ
             const workItems = cRow.workItems || [];
             workItems.forEach(wItem => {
-              const wName = wItem.workType || 'Work';
-              const qty = Number(wItem.quantity || wItem.actualCementBags || wItem.runningFeet || 0);
-              if (wName && qty > 0) {
-                uniqueColSet.add(wName);
-                if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
-                groupedByDate[dStr][wName] = (groupedByDate[dStr][wName] || 0) + qty;
+              let wName = wItem.workType || 'Work';
+
+              // 🎯 Column Concrete માટે Single અને Double અલગ કૉલમ બનાવવી
+              if (wName === '2. Column Concrete') {
+                const singleQ = Number(wItem.singleCastingQty || 0);
+                const doubleQ = Number(wItem.doubleCastingQty || 0);
+
+                if (singleQ > 0) {
+                  const colSingle = 'Single Column Casting';
+                  uniqueColSet.add(colSingle);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][colSingle] = (groupedByDate[dStr][colSingle] || 0) + singleQ;
+                }
+                if (doubleQ > 0) {
+                  const colDouble = 'Double Column Casting';
+                  uniqueColSet.add(colDouble);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][colDouble] = (groupedByDate[dStr][colDouble] || 0) + doubleQ;
+                }
+              } else {
+                // બાકીના કામો માટે નોર્મલ લોજિક
+                const qty = Number(wItem.quantity || wItem.actualCementBags || wItem.runningFeet || 0);
+                if (wName && qty > 0) {
+                  uniqueColSet.add(wName);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][wName] = (groupedByDate[dStr][wName] || 0) + qty;
+                }
               }
             });
           });
 
-          // (૨) paling_work માંથી ડેટા વાંચવો
+          // (૨) paling_work માંથી ડેટા વાંચવો (એરર સોલ્વ કરવા માટે cRow ની જગ્યાએ pRow વાપર્યું છે)
           const palingRows = rep.paling_work || [];
           palingRows.forEach(pRow => {
-         // જૂનું: if (selectedLabour && cRow.contractorName !== selectedLabour) return;
-// નવું આ કરો:
-if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
+            if (selectedLabour && selectedLabour !== 'All' && pRow.contractorName !== selectedLabour) return;
             const pQty = Number(pRow.qty || 0);
             if (pQty > 0) {
               const pCol = 'Paling Work';
@@ -147,12 +152,12 @@ if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== select
         setDynamicColumns([]);
       }
 
-      // ઉપાડ (Upad / Expenses) લાવવો
+      // 🎯 (૩) ઉપાડ (Upad / Expenses) labour wise પરફેક્ટ લાવવા માટેનું લોજિક
       const upadByDateMap = {};
       let totalUpadSum = 0;
 
-      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date');
-if (selectedLabour && selectedLabour       !== 'All') {
+      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to');
+      if (selectedLabour && selectedLabour !== 'All') {
         upadQuery = upadQuery.eq('paid_to', selectedLabour);
       }
       if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);

@@ -433,7 +433,7 @@ export default function SiteMaterialDamage({ user }) {
                       >
                         <option value="Nos">Nos</option>
                         <option value="Bags">Bags</option>
-                        <option value="Tons">Tons</option>
+                        <option value="Ltr">Ltr</option>
                         <option value="Kg">Kg</option>
                       </select>
                     </div>

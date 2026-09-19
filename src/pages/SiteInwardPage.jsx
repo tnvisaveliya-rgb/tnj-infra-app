@@ -150,7 +150,7 @@ export default function SiteMaterialInward({ user }) {
       supplier: '',
       dcNumber: '',
       vehicleNumber: '',
-      items: [{ id: 1, material: '', size: '', qty: '', unit: 'Bags', category: 'Finished Product', steelSpec: '' }],
+      items: [{ id: 1, material: '', size: '', qty: '', unit: 'Nos', category: 'Finished Product', steelSpec: '' }],
       billFiles: []
     }
   ]);
@@ -956,7 +956,7 @@ const handleSiteChange = (e) => {
                                   style={{ width: '100%', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
                                 >
                                   <option value="Nos">Nos</option>
-                                  <option value="Tons">Tons</option>
+                                  <option value="Ltr">Ltr</option>
                                   <option value="Bags">Bags</option>
                                   <option value="Kg">Kg</option>
                                 </select>

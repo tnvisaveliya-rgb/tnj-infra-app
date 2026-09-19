@@ -838,10 +838,27 @@ const handleLabourUpdate = async (contractorId, formData) => {
     else { loadAllData(); showAlert("Site deleted successfully!") }
   }
 
-  const availableProductsForPlant = products.filter(p => 
-    formPlantId === 'all' || p.plant_id == formPlantId || !p.plant_id
-  );
+const availableProductsForPlant = products.filter(p => {
+    // જો પ્લાન્ટ સિલેક્ટ ન કર્યો હોય તો બધી જ બતાવવી
+    if (!formPlantFilter || formPlantFilter === 'all') return true;
 
+    const selectedPlantObj = (plants || []).find(pl => pl.id.toString() === formPlantFilter.toString());
+    const plantNameStr = selectedPlantObj ? selectedPlantObj.plant_name.trim().toLowerCase() : '';
+
+    const prodPlantId = p.plant_id ? p.plant_id.toString() : '';
+    const prodSiteName = p.site_name ? p.site_name.trim().toLowerCase() : '';
+
+    // ૧. જો પ્રોડક્ટની plant_id સિલેક્ટ કરેલા પ્લાન્ટ સાથે મેચ થતી હોય
+    const isPlantIdMatch = prodPlantId === formPlantFilter.toString();
+
+    // ૨. જો site_name માં પ્લાન્ટનું નામ આવતું હોય
+    const isSiteNameMatch = plantNameStr && prodSiteName.includes(plantNameStr);
+
+    // ૩. 🌟 સૌથી મહત્ત્વનું: જો એન્ટ્રી "All Plants (General)" અથવા "General" હોય તો તે પણ બતાવવી
+    const isGeneral = prodSiteName.includes('all plants') || prodSiteName.includes('general') || !p.plant_id;
+
+    return isPlantIdMatch || isSiteNameMatch || isGeneral;
+  });
   const filteredPlantsForSite = (plants || []).filter(p => 
     !selectedPlantState || p.state === selectedPlantState
   );
@@ -1575,7 +1592,7 @@ return (
                 <option value="Nos">Nos</option>
                 <option value="Bags">Bags</option>
                 <option value="Kg">Kg</option>
-                <option value="Tons">Tons</option>
+              
               </select>
 
               {work.bom_items.length > 1 && (
@@ -2689,7 +2706,7 @@ return (
                         <option value="Nos">Nos</option>
                         <option value="Bags">Bags</option>
                         <option value="Kg">Kg</option>
-                        <option value="Tons">Tons</option>
+                     
                       </select>
 
                       {bomItems.length > 1 && (
@@ -3019,7 +3036,7 @@ return (
                         <option value="Nos">Nos</option>
                         <option value="Bags">Bags</option>
                         <option value="Kg">Kg</option>
-                        <option value="Tons">Tons</option>
+                   
                       </select>
 
                       {bomItems.length > 1 && (

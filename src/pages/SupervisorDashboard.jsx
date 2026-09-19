@@ -118,7 +118,7 @@ const loadMaterialsMaster = async () => {
     try {
       // 🌟 ૧. ટેબલનું નામ બદલીને 'site_material_stock_ledger' કર્યું
       const { data, error } = await supabase
-        .from('site_material_stock_ledger')
+        .from('site_material_inward')
         .select('material_name, site_name');
 
       if (!error && data) {
@@ -888,7 +888,7 @@ if (val === '2. Column Concrete') {
           // ૧. સિંગલ કોલમ માટે BOM અને સિમેન્ટ શોધો
           const matchedSingleBom = siteBoms.find(b => 
             b.site_name === reportForm.siteName && 
-            b.work_name && b.work_name.toLowerCase().includes('single')
+            b.work_name && b.work_name.toLowerCase().includes('sing')
           );
           const singleM3 = matchedSingleBom && matchedSingleBom.expected_m3 ? Number(matchedSingleBom.expected_m3) : 0;
           

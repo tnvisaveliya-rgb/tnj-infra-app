@@ -714,7 +714,7 @@ if (materialLedgerRows.length > 0) {
                               style={{ width: '70px', minWidth: '70px', padding: '7px 4px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }}
                             >
                               <option value="Nos">Nos</option>
-                              <option value="Tons">Tons</option>
+                              <option value="Ltr">Ltr</option>
                               <option value="Bags">Bags</option>
                               <option value="Kg">Kg</option>
                             </select>
