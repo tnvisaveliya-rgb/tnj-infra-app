@@ -35,12 +35,22 @@ const [reportModeFilter, setReportModeFilter] = useState('All');
 const filteredInwardReport = requests.filter(item => {
   if (item.status !== 'RECEIVED') return false;
 
-  const itemDate = item.request_date || (item.created_at ? item.created_at.split('T')[0] : '');
+ // 🌟 request_date ને બદલે received_date પકડવી (જો ન હોય તો created_at વાપરવી)
+  const fullReceivedDate = item.received_date || item.created_at || '';
+  const itemDate = fullReceivedDate ? fullReceivedDate.split('T')[0] : '';
   const matchDate = (!reportFromDate || itemDate >= reportFromDate) && (!reportToDate || itemDate <= reportToDate);
   const matchPurpose = reportPurposeFilter === 'All' || item.purpose === reportPurposeFilter;
-  const matchMode = reportModeFilter === 'All' || (item.payment_mode || 'Cash') === reportModeFilter;
+  
+  let matchParty = true;
+  if (reportModeFilter !== 'All') {
+    if (reportModeFilter === 'Admin Office') {
+      matchParty = !item.admin_remarks?.includes('ખરીદનાર:');
+    } else {
+      matchParty = item.admin_remarks?.includes(reportModeFilter);
+    }
+  }
 
-  return matchDate && matchPurpose && matchMode;
+  return matchDate && matchPurpose && matchParty;
 });
 
 const totalInwardAmount = filteredInwardReport.reduce(
@@ -102,14 +112,31 @@ const fetchPlants = async () => {
       setPlants([]);
     }
   };
-  const fetchMyRequests = async () => {
-    const { data } = await supabase
-      .from('plant_fund_transfers')
-      .select('*')
-      .eq('plant_name', selectedPlant)
-      .order('created_at', { ascending: false })
-      .limit(15);
-    setRequests(data || []);
+const fetchMyRequests = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = (user?.email || session?.user?.email || '').toLowerCase().trim();
+      const isAdmin = (userEmail === 'infra.tnj@gmail.com');
+
+      let query = supabase
+        .from('plant_fund_transfers')
+        .select('*')
+        .eq('plant_name', selectedPlant);
+
+      // 🌟 જો એડમિન ન હોય, તો સુપરવાઇઝર માટે તેમની રિક્વેસ્ટ્સ અને રિસીવ્ડ ડેટા બંને લાવવા
+      if (!isAdmin && userEmail) {
+        const shortName = userEmail.split('@')[0].trim();
+        query = query.or(`received_by.ilike.${userEmail},supervisor_name.ilike.${shortName}`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(20);
+      
+      if (error) throw error;
+      setRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching requests:", err);
+      setRequests([]);
+    }
   };
 
   // 🟢 સુપરવાઇઝર જ્યારે એડમિને મોકલેલા પૈસા સ્વીકારે
@@ -619,18 +646,25 @@ const payload = {
           </select>
         </div>
 
-        <div>
-          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '2px' }}>Payment Mode</label>
+<div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '2px' }}>Filter By Party / Source</label>
           <select
             value={reportModeFilter}
             onChange={(e) => setReportModeFilter(e.target.value)}
             style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
           >
-            <option value="All">All Modes (બધા મોડ)</option>
-            <option value="Cash">Cash (રોકડા)</option>
-            <option value="Cash (Direct)">Cash (Direct Sale)</option>
-            <option value="UPI / GPay">UPI / GPay</option>
-            <option value="Bank NEFT">Bank NEFT</option>
+            <option value="All">All Parties / Sources (બધા)</option>
+            <option value="Admin Office">🏢 Admin / Office Fund (ઓફિસ)</option>
+            {/* 🌟 Database mathi direct party / buyer na nam dynamic fetch karva */}
+            {Array.from(new Set(requests.map(r => {
+              if (r.admin_remarks && r.admin_remarks.includes('ખરીદનાર:')) {
+                const parts = r.admin_remarks.split('|')[0].replace('ખરીદનાર:', '').trim();
+                return parts;
+              }
+              return null;
+            }).filter(Boolean))).map((partyName, idx) => (
+              <option key={idx} value={partyName}>📦 Party: {partyName}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -657,9 +691,11 @@ const payload = {
             ) : (
               filteredInwardReport.map((item, idx) => (
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#ffffff' : '#fcfcfc' }}>
-                  <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>
-                    {item.request_date ? item.request_date.split('-').reverse().join('/') : '-'}
-                  </td>
+               <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', whiteSpace: 'nowrap' }}>
+    {item.received_date 
+      ? item.received_date.split('T')[0].split('-').reverse().join('/') 
+      : (item.created_at ? item.created_at.split('T')[0].split('-').reverse().join('/') : '-')}
+  </td>
                   <td style={{ padding: '6px 8px', border: '1px solid #cbd5e1', fontWeight: '600', color: '#0f172a' }}>
                     {item.purpose}
                     {item.admin_remarks && <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 'normal' }}>{item.admin_remarks}</div>}

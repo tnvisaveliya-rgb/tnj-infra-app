@@ -1015,24 +1015,23 @@ export default function PlantExpensesPage({ user }) {
                 <input type="date" value={reportToDate} onChange={(e) => setReportToDate(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', boxSizing: 'border-box' }} />
               </div>
               
-              {/* 🌟 Expense Location Dropdown પાછું ઉમેર્યું */}
-              <div>
-                <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Expense Location</label>
-                <select
-                  value={reportPlantFilter}
-                  onChange={(e) => {
-                    setReportPlantFilter(e.target.value);
-                    setSelectedPaidToFilter('All');
-                  }}
-                  style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', fontWeight: 'bold', color: '#1e3a8a', backgroundColor: '#fff', boxSizing: 'border-box' }}
-                >
-                  <option value="All">🌐 All (બધી સાઇટ્સ)</option>
-                  {sites.map((s) => {
-                    const sName = s.site_name || s.plant_name || s.name;
-                    return <option key={s.id} value={sName}>{sName}</option>;
-                  })}
-                </select>
-              </div>
+            <div>
+    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Expense Location</label>
+    <select
+      value={reportPlantFilter}
+      onChange={(e) => {
+        setReportPlantFilter(e.target.value);
+        setSelectedPaidToFilter('All');
+      }}
+      style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', fontWeight: 'bold', color: '#1e3a8a', backgroundColor: '#fff', boxSizing: 'border-box' }}
+    >
+      <option value="All">🌐 All (બધી સાઇટ્સ)</option>
+      {/* 🌟 Database na plant_name (site_name) parthi dynamic options */}
+      {Array.from(new Set(expensesHistory.map(i => i.plant_name).filter(Boolean))).map((locationName, idx) => (
+        <option key={idx} value={locationName}>{locationName}</option>
+      ))}
+    </select>
+  </div>
 
               <div>
                 <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Filter By Person / Vendor</label>

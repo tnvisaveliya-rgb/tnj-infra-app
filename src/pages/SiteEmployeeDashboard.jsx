@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import SupervisorDashboard from './SupervisorDashboard';
 import SiteAttendancePage from './SiteAttendancePage';
-
+import { useLocation } from 'react-router-dom';
 
 import SiteInwardPage from './SiteInwardPage';
 import SiteOutwardPage from './SiteOutwardPage';
@@ -45,9 +45,16 @@ function ProductionReportView({ onBack, siteList = [], user }) {
   };
 
   // ૧. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું
-  useEffect(() => {
-    const fetchContractorsBySite = async () => {
-      try {
+ useEffect(() => {
+  const fetchContractorsBySite = async () => {
+    try {
+      // 🌟 Jo user ne koi site assigned nathi ane admin pan nathi, to contractor fetch j na karo
+      const isOwner = (user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com';
+      if (!isOwner && (!siteList || siteList.length === 0)) {
+        setLabourList([]);
+        setSelectedLabour('');
+        return;
+      }
         let query = supabase.from('contractors').select('*');
         if (selectedSite && selectedSite !== 'All') {
           query = query.or(`site_name.eq."${selectedSite}",company_name.eq."${selectedSite}"`);
@@ -73,10 +80,20 @@ function ProductionReportView({ onBack, siteList = [], user }) {
   useEffect(() => {
     fetchReportData();
   }, [selectedSite, selectedLabour, fromDate, toDate]);
-
 const fetchReportData = async () => {
-    setLoading(true);
-    try {
+  // 🌟 Jo user ne koi site assigned nathi (siteList khali che) ane admin pan nathi, to data fetch j na karo
+  const isOwner = (user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com';
+  if (!isOwner && (!siteList || siteList.length === 0)) {
+    setReportRows([]);
+    setDynamicColumns([]);
+    setTotalUpad(0);
+    setLoading(false);
+    return;
+  }
+
+  setLoading(true);
+  try {
+    // ... tamaro baki no code ahiya aavse ...
       const groupedByDate = {};
       const uniqueColSet = new Set();
 
@@ -153,17 +170,31 @@ const fetchReportData = async () => {
       }
 
       // 🎯 (૩) ઉપાડ (Upad / Expenses) labour wise પરફેક્ટ લાવવા માટેનું લોજિક
-      const upadByDateMap = {};
-      let totalUpadSum = 0;
+// 🎯 (૩) ઉપાડ (Upad / Expenses) labour wise પરફેક્ટ લાવવા માટેનું લોજિક
+const upadByDateMap = {};
+let totalUpadSum = 0;
 
-      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to');
-      if (selectedLabour && selectedLabour !== 'All') {
-        upadQuery = upadQuery.eq('paid_to', selectedLabour);
-      }
-      if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
-      if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
+let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to, expense_category, plant_name');
 
-      const { data: upadData } = await upadQuery;
+// 🌟 FAKT "મજૂરી / ઉપાડ" (Labour Advance / Wages) vali category j filter karva mate:
+upadQuery = upadQuery.ilike('expense_category', '%ઉપાડ%');
+
+// 🌟 Site wise filter logic:
+if (selectedSite && selectedSite !== 'All') {
+  // Jo koi ek khas site select hoy tyare fatk te j site aavse
+  upadQuery = upadQuery.eq('plant_name', selectedSite);
+} else if (siteList && siteList.length > 0) {
+  // Jo 'All Sites' select hoy tyare user ne assigned/available badhi sites na j kharcha aavse
+  upadQuery = upadQuery.in('plant_name', siteList);
+}
+
+if (selectedLabour && selectedLabour !== 'All') {
+  upadQuery = upadQuery.eq('paid_to', selectedLabour);
+}
+if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
+if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
+
+const { data: upadData } = await upadQuery;
       if (upadData && upadData.length > 0) {
         upadData.forEach(item => {
           const expDate = item.expense_date;
@@ -302,6 +333,24 @@ const [attendanceInfo, setAttendanceInfo] = useState({
     badgeBg: '#fee2e2', 
     badgeColor: '#dc2626' 
   });
+  const [totalWorkSummary, setTotalWorkSummary] = useState({
+  paling: 0,
+  columnInstallation: 0,
+  singleColumn: 0,
+  doubleColumn: 0,
+  finishingWork: 0,
+  otherWork: 0
+}); 
+
+const location = useLocation();
+
+  useEffect(() => {
+    const savedTab = localStorage.getItem('activeTab');
+    if (savedTab) {
+      setActiveTab(savedTab);
+      localStorage.removeItem('activeTab');
+    }
+  }, [location]); // 👈 Ahiya [location] rakhvathi navigation thata j tarat code run thase
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const approveId = params.get('approve_id');
@@ -371,77 +420,21 @@ const [attendanceInfo, setAttendanceInfo] = useState({
     }
   }, [user]);
 
-const fetchNotifications = async () => {
-  try {
-    const list = [];
 
-    // ટેબલમાંથી જરૂરી કોલમ્સ ફેચ કરવી
-    let fundQuery = supabase
-      .from('plant_fund_transfers')
-      .select('id, plant_name, purpose, requested_amount, approved_amount, status, approved_by, received_by, admin_remarks');
-
-    if (selectedPlant && selectedPlant !== 'All') {
-      fundQuery = fundQuery.eq('plant_name', selectedPlant.trim());
-    }
-
-    // PENDING અને SENT બંને સ્ટેટસ લાવવા
-    fundQuery = fundQuery
-      .in('status', ['PENDING', 'SENT', 'pending', 'sent'])
-      .order('id', { ascending: false })
-      .limit(10);
-
-    const { data: fundReq, error: fundErr } = await fundQuery;
-
-    if (fundErr) {
-      console.error('Supabase Query Error:', fundErr.message);
-      return;
-    }
-
-    if (fundReq && fundReq.length > 0) {
-      fundReq.forEach(item => {
-        const st = (item.status || '').toUpperCase();
-        const amt = Number(item.approved_amount || item.requested_amount || 0);
-
-        // એડમિને મોકલી દીધા હોય (SENT) પણ સુપરવાઇઝરે હજુ સ્વીકારવાના બાકી હોય
-        if (st === 'SENT') {
-          list.push({
-            id: `fund-${item.id}`,
-            title: `🎉 Admin Approved: ₹${amt.toLocaleString('en-IN')}`,
-            subText: `${item.purpose || 'ફંડ'} - સ્વીકારો (Receive)`,
-            tab: 'sitesupervisiorfundrequest',
-            time: 'Payment Sent',
-            color: '#16a34a' // Green
-          });
-        } 
-        // સુપરવાઇઝરે રિક્વેસ્ટ મોકલેલી હોય પણ Admin એ હજુ અપ્રૂવ ન કરી હોય
-        else if (st === 'PENDING') {
-          list.push({
-            id: `fund-${item.id}`,
-            title: `⏳ Pending Approval: ₹${amt.toLocaleString('en-IN')}`,
-            subText: item.purpose || 'ફંડ રિક્વેસ્ટ',
-            tab: 'sitesupervisiorfundrequest',
-            time: 'Waiting Admin',
-            color: '#ea580c' // Orange
-          });
-        }
-      });
-    }
-
-    setNotifications(list);
-  } catch (err) {
-    console.error('Error fetching notifications:', err);
-  }
-};
-useEffect(() => {
-  fetchNotifications();
-}, [user, selectedPlant]);
-const fetchDashboardData = async () => {
-    try {
+  const fetchDashboardData = async () => {
+      try {
       const todayStr = new Date().toISOString().split('T')[0];
       const userEmail = (user?.email || '').toLowerCase().trim();
 
       if (!userEmail) return;
-
+// 🌟 Jo user ne koi site assigned nathi ane admin pan nathi, to dashboard data fetch j na karo
+    const isOwner = (userEmail === 'infra.tnj@gmail.com');
+    if (!isOwner && (!plantList || plantList.length === 0)) {
+      setWorkingBalance(0);
+      setTodayExpense(0);
+      setRawMaterialsStock([]);
+      return;
+    }
       let totalIncome = 0;
       let totalExpense = 0;
       let todayExpSum = 0;
@@ -626,7 +619,56 @@ let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 
 
         setRawMaterialsStock(Object.values(stockMap));
       }
+// 🏗️ TOTAL WORK SUMMARY FETCH KARVA MATE
+let reportQuery = supabase.from('daily_reports').select('*');
+if (selectedPlant && selectedPlant !== 'All') {
+  reportQuery = reportQuery.eq('site_name', selectedPlant);
+} else if (plantList && plantList.length > 0) {
+  reportQuery = reportQuery.in('site_name', plantList);
+}
 
+const { data: repData } = await reportQuery;
+let pTotal = 0, cInstTotal = 0, singleTotal = 0, doubleTotal = 0, finishTotal = 0, otherTotal = 0;
+
+if (repData && repData.length > 0) {
+  repData.forEach(rep => {
+    // Paling Work Total
+    if (Array.isArray(rep.paling_work)) {
+      rep.paling_work.forEach(p => {
+        pTotal += Number(p.qty || 0);
+      });
+    }
+
+    // Contractor Details & Work Items Total
+    if (Array.isArray(rep.contractor_details)) {
+      rep.contractor_details.forEach(c => {
+        if (Array.isArray(c.workItems)) {
+          c.workItems.forEach(w => {
+            if (w.workType === '1. Column Installation') {
+              cInstTotal += Number(w.quantity || 0);
+            } else if (w.workType === '2. Column Concrete') {
+              singleTotal += Number(w.singleCastingQty || 0);
+              doubleTotal += Number(w.doubleCastingQty || 0);
+            } else if (w.workType === '4. Finishing Work') {
+              finishTotal += Number(w.runningFeet || 0);
+            } else if (w.workType === 'Other') {
+              otherTotal += Number(w.quantity || 0);
+            }
+          });
+        }
+      });
+    }
+  });
+}
+
+setTotalWorkSummary({
+  paling: pTotal,
+  columnInstallation: cInstTotal,
+  singleColumn: singleTotal,
+  doubleColumn: doubleTotal,
+  finishingWork: finishTotal,
+  otherWork: otherTotal
+});
 // ૫. ATTENDANCE FETCH
       const { data: attData, error: attError } = await supabase
         .from('site_attendance')
@@ -706,143 +748,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
                 </h2>
               </div>
             </div>
-           {/* 🔔 Notification Bell Icon & Dropdown */}
-<div style={{ position: 'relative' }}>
-  <div 
-    onClick={() => setIsNotifOpen(!isNotifOpen)}
-    style={{ 
-      width: '38px', 
-      height: '38px', 
-      borderRadius: '10px', 
-      backgroundColor: isNotifOpen ? '#eff6ff' : '#f8fafc', 
-      border: '1px solid #cbd5e1', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      cursor: 'pointer',
-      position: 'relative'
-    }}
-  >
-    <Bell size={18} color={notifications.length > 0 ? '#2563eb' : '#64748b'} />
-    
-    {/* નોટિફિકેશન કાઉન્ટ બેજ */}
-    {notifications.length > 0 && (
-      <span style={{
-        position: 'absolute',
-        top: '-4px',
-        right: '-4px',
-        backgroundColor: '#dc2626',
-        color: '#ffffff',
-        fontSize: '9px',
-        fontWeight: '900',
-        borderRadius: '50%',
-        width: '18px',
-        height: '18px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '2px solid #ffffff'
-      }}>
-        {notifications.length}
-      </span>
-    )}
-  </div>
 
-  {/* 📋 Notification Dropdown List */}
-  {isNotifOpen && (
-    <div style={{
-      position: 'absolute',
-      right: 0,
-      top: '46px',
-      width: '280px',
-      backgroundColor: '#ffffff',
-      borderRadius: '14px',
-      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.15)',
-      border: '1px solid #e2e8f0',
-      padding: '10px',
-      zIndex: 1000
-    }}>
-      {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        paddingBottom: '8px', 
-        borderBottom: '1px solid #f1f5f9',
-        marginBottom: '8px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Bell size={14} color="#2563eb" />
-          <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
-            NOTIFICATIONS ({notifications.length})
-          </span>
-        </div>
-        <button 
-          onClick={() => setIsNotifOpen(false)}
-          style={{ 
-            background: '#f1f5f9', 
-            border: 'none', 
-            borderRadius: '50%', 
-            width: '22px', 
-            height: '22px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            cursor: 'pointer', 
-            color: '#64748b' 
-          }}
-        >
-          <X size={13} strokeWidth={2.5} />
-        </button>
-      </div>
-
-      {/* List Container */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
-        {notifications.length === 0 ? (
-          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>
-            કોઈ નવી રિક્વેસ્ટ કે નોટિફિકેશન નથી.
-          </div>
-        ) : (
-          notifications.map((notif) => (
-            <div 
-              key={notif.id}
-              onClick={() => {
-                setActiveTab(notif.tab);
-                setIsNotifOpen(false);
-              }}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                backgroundColor: '#f8fafc',
-                cursor: 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                border: '1px solid #f1f5f9',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#1e293b' }}>
-                  {notif.title}
-                </p>
-                {notif.subText && (
-                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '500' }}>
-                    {notif.subText}
-                  </span>
-                )}
-                <span style={{ fontSize: '9px', color: notif.color || '#dc2626', fontWeight: '700', marginTop: '2px' }}>
-                  ● {notif.time}
-                </span>
-              </div>
-              <ChevronRight size={14} color="#94a3b8" />
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )}
-</div>
           </div>
 
           {/* Wallet Balance Card */}
@@ -961,6 +867,56 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
       ))}
     </select>
           </div>
+            {/* 📊 TOTAL SITE WORK SUMMARY CARD */}
+<div style={{
+  backgroundColor: '#ffffff',
+  borderRadius: '16px',
+  padding: '5px 10px',
+  border: '1px solid #e2e8f0',
+  boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '2px',
+  marginTop: '2px'
+}}>
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '6px' }}>
+    <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase' }}>
+      📈 Total Site Work Progress ({selectedPlant})
+    </span>
+  </div>
+
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>1. Paling Work</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.paling} Nos</strong>
+    </div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>2. Column Installation</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.columnInstallation} Nos</strong>
+    </div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>3. Single Column Casting</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.singleColumn} Nos</strong>
+    </div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>4. Double Column Casting</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.doubleColumn} Nos</strong>
+    </div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>5. Finishing Work</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.finishingWork} R.Ft</strong>
+    </div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>6. Other Work</span>
+      <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.otherWork}</strong>
+    </div>
+  </div>
+</div>
 
           {/* 📦 LIVE INVENTORY SECTION */}
           <div style={{
@@ -1093,7 +1049,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
             </div>
 
           </div>
-          
+        
 
          {/* Production Report Entry Card */}
 <div style={{ backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>

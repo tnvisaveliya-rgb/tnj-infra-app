@@ -163,7 +163,26 @@ export default function MasterTransactionHub({ adminUser }) {
     fetchLedgerData();
   }, [viewMode, isAllDates, fromDate, toDate, selectedState, selectedLocation, availablePlants]);
   // ==========================================
-  // Action Handlers (Approve with safe Prev State)
+ // ==========================================
+
+
+ const handleReject = async (item) => {
+    const { error } = await supabase
+      .from('plant_fund_transfers')
+      .update({
+        status: 'REJECTED',
+        approved_by: adminUser?.email || 'Admin'
+      })
+      .eq('id', item.id);
+
+    if (!error) {
+      alert(`❌ Fund Request Rejected!`);
+      fetchPendingRequests();
+    } else {
+      alert("Error: " + error.message);
+    }
+  };
+  // Action Handlers (Approve and Send Money)
   // ==========================================
   const handleApprove = async (item) => {
     const config = actionData[item.id] || {};
@@ -171,10 +190,11 @@ export default function MasterTransactionHub({ adminUser }) {
     const finalMode = config.mode || 'Cash';
     const txnRef = config.txn || 'Direct Handover';
     
+    // 🎯 અહીં સ્ટેટસ 'APPROVED' ની જગ્યાએ 'SENT' કરવું, જેથી સુપરવાઇઝર સ્વીકારે નહીં ત્યાં સુધી જમા ન થાય
     const { error } = await supabase
       .from('plant_fund_transfers')
       .update({
-        status: 'APPROVED',
+        status: 'SENT', // 👈 'APPROVED' ને બદલે 'SENT' કરો
         approved_amount: finalAmount,
         payment_mode: finalMode,
         txn_reference: txnRef,
@@ -183,13 +203,12 @@ export default function MasterTransactionHub({ adminUser }) {
       .eq('id', item.id);
 
     if (!error) {
-      alert(`✅ ₹${finalAmount} Approved!`);
+      alert(`✅ ₹${finalAmount} સફળતાપૂર્વક મોકલી દેવામાં આવ્યા છે (સાઇટ પરથી રીસીવ થવાનું બાકી છે)!`);
       fetchPendingRequests();
     } else {
       alert("Error: " + error.message);
     }
   };
-
   // Date Formatter
   const formatDateToDDMMYYYY = (dateString) => {
     if (!dateString || dateString === '-') return '-';
@@ -283,36 +302,43 @@ export default function MasterTransactionHub({ adminUser }) {
                   </div>
                 </div>
                 
-                <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {/* સલામત (Safe) onChange લોજીક ઉમેર્યું છે */}
-                  <select 
-                    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), mode: e.target.value } }))} 
-                    style={actionInputStyle}
-                  >
-                    <option value="Cash">💵 Cash</option>
-                    <option value="UPI / GPay">📱 GPay / UPI</option>
-                    <option value="Bank NEFT">🏦 Bank NEFT</option>
-                  </select>
-                  
-                  <input 
-                    type="number" 
-                    defaultValue={item.requested_amount} 
-                    placeholder="Amount"
-                    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), amount: e.target.value } }))} 
-                    style={actionInputStyle} 
-                  />
+      <div style={{ padding: '12px 16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+  <select 
+    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), mode: e.target.value } }))} 
+    style={actionInputStyle}
+  >
+    <option value="Cash">💵 Cash</option>
+    <option value="UPI / GPay">📱 GPay / UPI</option>
+    <option value="Bank NEFT">🏦 Bank NEFT</option>
+  </select>
+  
+  <input 
+    type="number" 
+    defaultValue={item.requested_amount} 
+    placeholder="Amount"
+    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), amount: e.target.value } }))} 
+    style={actionInputStyle} 
+  />
 
-                  <input 
-                    type="text" 
-                    placeholder="Ref (Optional)"
-                    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), txn: e.target.value } }))} 
-                    style={actionInputStyle} 
-                  />
-                  
-                  <button onClick={() => handleApprove(item)} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer', flex: 1 }}>
-                    Approve
-                  </button>
-                </div>
+  <input 
+    type="text" 
+    placeholder="Ref (Optional)"
+    onChange={(e) => setActionData(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || {}), txn: e.target.value } }))} 
+    style={actionInputStyle} 
+  />
+  
+  {/* 🟢 Approve Button (સ્ટેટસ SENT કરશે જેથી પેમેન્ટ મોકલ્યા પછી જ જમા થાય) */}
+  <button onClick={() => handleApprove(item)} style={{ backgroundColor: '#16a34a', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
+    Approve & Send
+  </button>
+
+  {/* 🔴 Reject Button (નવું ઉમેરેલું) */}
+  <button onClick={() => handleReject(item)} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
+    Reject
+  </button>
+</div>
+
+                
               </div>
             ))}
           </div>

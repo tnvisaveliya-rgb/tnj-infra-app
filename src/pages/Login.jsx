@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react' // useEffect add karyu
 import { supabase } from '../lib/supabase'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'; // (તમારા ફોલ્ડર સ્ટ્રક્ચર મુજબ પાથ સરખો કરી લેવો)
 
 function Login() {
   const [email, setEmail] = useState('') // અહીંથી ડિફોલ્ટ ઈમેલ કાઢી નાખ્યો છે
@@ -8,21 +9,10 @@ function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
-
+// Inside your Login component, make sure it's defined:
+const { userPermissions } = useAuth(); // or useState
 
   
-  // Login ya Dashboard Load thati vakhte check karo:
-const assignedPlants = userPermissions?.assigned_plants || [];
-const assignedSites = userPermissions?.assigned_sites || [];
-
-if (assignedPlants.length === 1 && assignedSites.length === 0) {
-  // Jo fakt 1 j plant hoy to seedhu plant dashboard par redirect karo
-  navigate('/supervisor-dashboard/plant');
-} else if (assignedSites.length === 1 && assignedPlants.length === 0) {
-  // Jo fakt 1 j site hoy to seedhu site dashboard par redirect karo
-  navigate('/supervisor-dashboard/site');
-}
-
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -35,7 +25,16 @@ if (assignedPlants.length === 1 && assignedSites.length === 0) {
       })
 
       if (error) throw error
-      navigate('/')
+
+      // 🌟 અહીં ઈમેલ ચેક કરીને પ્રોપર રીડાયરેક્ટ કરો
+      const userEmail = (email || '').trim().toLowerCase()
+
+      if (userEmail === 'infra.tnj@gmail.com') {
+        navigate('/Dashboard', { replace: true })
+      } else {
+        navigate('/supervisor-dashboard', { replace: true })
+      }
+      
     } catch (error) {
       setError(error.message || 'An error occurred during login')
     } finally {

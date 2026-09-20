@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Home, ClipboardEdit, IndianRupee, UserCheck, Wallet, Clock, ChevronRight, FileText, Plus, X, Layers, Box, ArrowLeft,Bell  } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -526,6 +527,7 @@ const colHeader = pVariant ? `${pName} ${pVariant}` : pName;
 // ==========================================
 export default function PlantEmployeeDashboard() {
   const { user } = useAuth();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('home');
   const [workingBalance, setWorkingBalance] = useState(0);
   const [todayExpense, setTodayExpense] = useState(0);
@@ -546,6 +548,17 @@ const [attendanceInfo, setAttendanceInfo] = useState({
     badgeBg: '#fee2e2', 
     badgeColor: '#dc2626' 
   });
+
+
+
+  useEffect(() => {
+    const savedTab = localStorage.getItem('activeTab');
+    if (savedTab) {
+      setActiveTab(savedTab);
+      localStorage.removeItem('activeTab');
+    }
+  }, [location]); // 👈
+  //  Ahiya [location] rakhvathi navigation thata j tarat code run thase
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const approveId = params.get('approve_id');
@@ -567,18 +580,39 @@ const [attendanceInfo, setAttendanceInfo] = useState({
     fetchDashboardData();
   }, [user, selectedPlant]);
 
-  useEffect(() => {
+useEffect(() => {
     const fetchPlantList = async () => {
       try {
-        const { data, error } = await supabase
-          .from('material_stock_ledger')
-          .select('plant_name');
+        const userEmail = (user?.email || '').trim().toLowerCase();
+        const isAdmin = (userEmail === 'infra.tnj@gmail.com');
 
-        if (!error && data) {
-          const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
-          setPlantList(unique);
-          if (unique.length > 0 && selectedPlant === 'All') {
-            setSelectedPlant(unique[0]);
+        if (isAdmin) {
+          // Admin mate badha plants fetch karo
+          const { data, error } = await supabase
+            .from('material_stock_ledger')
+            .select('plant_name');
+
+          if (!error && data) {
+            const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
+            setPlantList(unique);
+            if (unique.length > 0 && selectedPlant === 'All') {
+              setSelectedPlant(unique[0]);
+            }
+          }
+        } else {
+          // Baki na supervisors mate user_permissions table mathi fkt teo na assigned_plants fetch karo
+          const { data: permData, error: permErr } = await supabase
+            .from('user_permissions')
+            .select('assigned_plants')
+            .or(`user_id.eq.${user.id},email.eq.${userEmail}`)
+            .single();
+
+          if (!permErr && permData?.assigned_plants) {
+            const assigned = permData.assigned_plants;
+            setPlantList(assigned);
+            if (assigned.length > 0) {
+              setSelectedPlant(assigned[0]); // First assigned plant select rakhse
+            }
           }
         }
       } catch (err) {
@@ -586,72 +620,10 @@ const [attendanceInfo, setAttendanceInfo] = useState({
       }
     };
 
-    fetchPlantList();
-  }, []);
-const fetchNotifications = async () => {
-  try {
-    const list = [];
-
-    // ટેબલમાંથી જરૂરી કોલમ્સ ફેચ કરવી
-    let fundQuery = supabase
-      .from('plant_fund_transfers')
-      .select('id, plant_name, purpose, requested_amount, approved_amount, status, approved_by, received_by, admin_remarks');
-
-    if (selectedPlant && selectedPlant !== 'All') {
-      fundQuery = fundQuery.eq('plant_name', selectedPlant.trim());
+    if (user) {
+      fetchPlantList();
     }
-
-    // PENDING અને SENT બંને સ્ટેટસ લાવવા
-    fundQuery = fundQuery
-      .in('status', ['PENDING', 'SENT', 'pending', 'sent'])
-      .order('id', { ascending: false })
-      .limit(10);
-
-    const { data: fundReq, error: fundErr } = await fundQuery;
-
-    if (fundErr) {
-      console.error('Supabase Query Error:', fundErr.message);
-      return;
-    }
-
-    if (fundReq && fundReq.length > 0) {
-      fundReq.forEach(item => {
-        const st = (item.status || '').toUpperCase();
-        const amt = Number(item.approved_amount || item.requested_amount || 0);
-
-        // એડમિને મોકલી દીધા હોય (SENT) પણ સુપરવાઇઝરે હજુ સ્વીકારવાના બાકી હોય
-        if (st === 'SENT') {
-          list.push({
-            id: `fund-${item.id}`,
-            title: `🎉 Admin Approved: ₹${amt.toLocaleString('en-IN')}`,
-            subText: `${item.purpose || 'ફંડ'} - સ્વીકારો (Receive)`,
-            tab: 'supervisiorfundrequest',
-            time: 'Payment Sent',
-            color: '#16a34a' // Green
-          });
-        } 
-        // સુપરવાઇઝરે રિક્વેસ્ટ મોકલેલી હોય પણ Admin એ હજુ અપ્રૂવ ન કરી હોય
-        else if (st === 'PENDING') {
-          list.push({
-            id: `fund-${item.id}`,
-            title: `⏳ Pending Approval: ₹${amt.toLocaleString('en-IN')}`,
-            subText: item.purpose || 'ફંડ રિક્વેસ્ટ',
-            tab: 'supervisiorfundrequest',
-            time: 'Waiting Admin',
-            color: '#ea580c' // Orange
-          });
-        }
-      });
-    }
-
-    setNotifications(list);
-  } catch (err) {
-    console.error('Error fetching notifications:', err);
-  }
-};
-useEffect(() => {
-  fetchNotifications();
-}, [user, selectedPlant]);
+  }, [user]);
 const fetchDashboardData = async () => {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
@@ -911,143 +883,7 @@ const fetchDashboardData = async () => {
                 </h2>
               </div>
             </div>
-           {/* 🔔 Notification Bell Icon & Dropdown */}
-<div style={{ position: 'relative' }}>
-  <div 
-    onClick={() => setIsNotifOpen(!isNotifOpen)}
-    style={{ 
-      width: '38px', 
-      height: '38px', 
-      borderRadius: '10px', 
-      backgroundColor: isNotifOpen ? '#eff6ff' : '#f8fafc', 
-      border: '1px solid #cbd5e1', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      cursor: 'pointer',
-      position: 'relative'
-    }}
-  >
-    <Bell size={18} color={notifications.length > 0 ? '#2563eb' : '#64748b'} />
-    
-    {/* નોટિફિકેશન કાઉન્ટ બેજ */}
-    {notifications.length > 0 && (
-      <span style={{
-        position: 'absolute',
-        top: '-4px',
-        right: '-4px',
-        backgroundColor: '#dc2626',
-        color: '#ffffff',
-        fontSize: '9px',
-        fontWeight: '900',
-        borderRadius: '50%',
-        width: '18px',
-        height: '18px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '2px solid #ffffff'
-      }}>
-        {notifications.length}
-      </span>
-    )}
-  </div>
-
-  {/* 📋 Notification Dropdown List */}
-  {isNotifOpen && (
-    <div style={{
-      position: 'absolute',
-      right: 0,
-      top: '46px',
-      width: '280px',
-      backgroundColor: '#ffffff',
-      borderRadius: '14px',
-      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.15)',
-      border: '1px solid #e2e8f0',
-      padding: '10px',
-      zIndex: 1000
-    }}>
-      {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        paddingBottom: '8px', 
-        borderBottom: '1px solid #f1f5f9',
-        marginBottom: '8px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Bell size={14} color="#2563eb" />
-          <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
-            NOTIFICATIONS ({notifications.length})
-          </span>
-        </div>
-        <button 
-          onClick={() => setIsNotifOpen(false)}
-          style={{ 
-            background: '#f1f5f9', 
-            border: 'none', 
-            borderRadius: '50%', 
-            width: '22px', 
-            height: '22px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            cursor: 'pointer', 
-            color: '#64748b' 
-          }}
-        >
-          <X size={13} strokeWidth={2.5} />
-        </button>
-      </div>
-
-      {/* List Container */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
-        {notifications.length === 0 ? (
-          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>
-            કોઈ નવી રિક્વેસ્ટ કે નોટિફિકેશન નથી.
-          </div>
-        ) : (
-          notifications.map((notif) => (
-            <div 
-              key={notif.id}
-              onClick={() => {
-                setActiveTab(notif.tab);
-                setIsNotifOpen(false);
-              }}
-              style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                backgroundColor: '#f8fafc',
-                cursor: 'pointer',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                border: '1px solid #f1f5f9',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#1e293b' }}>
-                  {notif.title}
-                </p>
-                {notif.subText && (
-                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '500' }}>
-                    {notif.subText}
-                  </span>
-                )}
-                <span style={{ fontSize: '9px', color: notif.color || '#dc2626', fontWeight: '700', marginTop: '2px' }}>
-                  ● {notif.time}
-                </span>
-              </div>
-              <ChevronRight size={14} color="#94a3b8" />
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )}
-</div>
+         
           </div>
 
           {/* Wallet Balance Card */}

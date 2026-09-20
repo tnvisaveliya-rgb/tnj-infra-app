@@ -35,12 +35,22 @@ const [reportModeFilter, setReportModeFilter] = useState('All');
 const filteredInwardReport = requests.filter(item => {
   if (item.status !== 'RECEIVED') return false;
 
-  const itemDate = item.request_date || (item.created_at ? item.created_at.split('T')[0] : '');
+  const fullReceivedDate = item.received_date || item.created_at || '';
+  const itemDate = fullReceivedDate ? fullReceivedDate.split('T')[0] : '';
+  
   const matchDate = (!reportFromDate || itemDate >= reportFromDate) && (!reportToDate || itemDate <= reportToDate);
   const matchPurpose = reportPurposeFilter === 'All' || item.purpose === reportPurposeFilter;
-  const matchMode = reportModeFilter === 'All' || (item.payment_mode || 'Cash') === reportModeFilter;
+  
+  let matchParty = true;
+  if (reportModeFilter !== 'All') {
+    if (reportModeFilter === 'Admin Office') {
+      matchParty = !item.admin_remarks?.includes('ખરીદનાર:');
+    } else {
+      matchParty = item.admin_remarks?.includes(reportModeFilter);
+    }
+  }
 
-  return matchDate && matchPurpose && matchMode;
+  return matchDate && matchPurpose && matchParty;
 });
 
 const totalInwardAmount = filteredInwardReport.reduce(
@@ -100,14 +110,34 @@ const fetchSites = async () => {
       setsites([]);
     }
   };
-  const fetchMyRequests = async () => {
-    const { data } = await supabase
-      .from('plant_fund_transfers')
-      .select('*')
-      .eq('plant_name', selectedPlant)
-      .order('created_at', { ascending: false })
-      .limit(15);
-    setRequests(data || []);
+const fetchMyRequests = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = (user?.email || session?.user?.email || '').toLowerCase().trim();
+      const isAdmin = (userEmail === 'infra.tnj@gmail.com');
+
+      let query = supabase
+        .from('plant_fund_transfers')
+        .select('*')
+        .eq('plant_name', selectedPlant);
+
+      // જો એડમિન ન હોય, તો સુપરવાઇઝર માટે:
+      // ૧. જે તેમણે મોકલી છે (supervisor_name અથવા created_by / submitted_by)
+      // ૨. અથવા જે તેમણે સ્વીકારી છે (received_by)
+      if (!isAdmin && userEmail) {
+        // સુપરવાઇઝર શોર્ટ નેમ અથવા ઈમેલના આધારે તેમની રિક્વેસ્ટ્સ લાવો
+        const shortName = userEmail.split('@')[0].trim();
+        query = query.or(`received_by.ilike.${userEmail},supervisor_name.ilike.${shortName}`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(20);
+      
+      if (error) throw error;
+      setRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching requests:", err);
+      setRequests([]);
+    }
   };
 
   // 🟢 સુપરવાઇઝર જ્યારે એડમિને મોકલેલા પૈસા સ્વીકારે
@@ -427,7 +457,7 @@ const payload = {
             boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.2)'
           }}
         >
-          <Send size={16} /> {loading ? 'નોંધાય છે...' : (incomeType === 'HO_REQUEST' ? 'Send Request to Head Office' : 'Add Cash to Plant Balance')}
+          <Send size={16} /> {loading ? 'નોંધાય છે...' : (incomeType === 'HO_REQUEST' ? 'Send Request to Head Office' : 'Add Cash to Site Balance')}
         </button>
 
       </form>
@@ -541,7 +571,7 @@ const payload = {
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
         <div>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
-            Plant Cash Inward Statement
+            Site Cash Inward Statement
           </h3>
           <span style={{ fontSize: '11px', color: '#64748b' }}>તારીખ પસંદ કરી આવક/ફંડનો રિપોર્ટ પ્રિન્ટ / PDF કાઢો</span>
         </div>
@@ -571,7 +601,7 @@ const payload = {
               CASH INWARD & FUND RECEIPT STATEMENT
             </h2>
             <div style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>
-              Plant: <span style={{ color: '#0f172a' }}>{selectedPlant}</span>
+              Site: <span style={{ color: '#0f172a' }}>{selectedPlant}</span>
             </div>
           </div>
           <div style={{ textAlign: 'right', fontSize: '11px', color: '#334155' }}>
@@ -617,18 +647,24 @@ const payload = {
           </select>
         </div>
 
-        <div>
-          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '2px' }}>Payment Mode</label>
+    <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#166534', display: 'block', marginBottom: '2px' }}>Filter By Party / Source</label>
           <select
             value={reportModeFilter}
             onChange={(e) => setReportModeFilter(e.target.value)}
             style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
           >
-            <option value="All">All Modes (બધા મોડ)</option>
-            <option value="Cash">Cash (રોકડા)</option>
-            <option value="Cash (Direct)">Cash (Direct Sale)</option>
-            <option value="UPI / GPay">UPI / GPay</option>
-            <option value="Bank NEFT">Bank NEFT</option>
+            <option value="All">All Parties / Sources (બધા)</option>
+            <option value="Admin Office">🏢 Admin / Office Fund (ઓફિસ)</option>
+            {Array.from(new Set(requests.map(r => {
+              if (r.admin_remarks && r.admin_remarks.includes('ખરીદનાર:')) {
+                const parts = r.admin_remarks.split('|')[0].replace('ખરીદનાર:', '').trim();
+                return parts;
+              }
+              return null;
+            }).filter(Boolean))).map((partyName, idx) => (
+              <option key={idx} value={partyName}>📦 Party: {partyName}</option>
+            ))}
           </select>
         </div>
       </div>

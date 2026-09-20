@@ -437,53 +437,34 @@ const handleDeleteCurrentExpense = async () => {
       setLoading(false);
     }
   };
-const fetchExpensesHistory = async () => {
+// 🌟 માત્ર plant_expenses ટેબલમાંથી જ ડેટા ફેચ થશે (Admin માટે બધા, Supervisor માટે પોતાના)
+  const fetchExpensesHistory = async () => {
     try {
-      // ૧. પ્લાન્ટના ખર્ચા (બધા જ પ્લાન્ટ લાવો જેથી પોપઅપમાં પ્લાન્ટ બદલો તો તરત ડેટા મળે)
-      const { data: plantData } = await supabase
-        .from('plant_expenses')
-        .select('*')
-        .order('expense_date', { ascending: false });
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = (user?.email || session?.user?.email || localStorage.getItem('userEmail') || '').toLowerCase().trim();
 
-      // ૨. સાઈટના ખર્ચા
-      const { data: siteData } = await supabase
-        .from('site_transactions')
-        .select('*')
-        .order('created_by', { ascending: false })
-        .limit(200);
+      let query = supabase.from('plant_expenses').select('*');
 
-      // ૩. નોર્મલાઈઝ અને મર્જ
-      const formattedPlantExpenses = (plantData || []).map(p => ({
+      // જો એડમિન ન હોય, તો માત્ર આ સુપરવાઇઝરે કરેલા ખર્ચા જ લાવો
+      if (userEmail !== 'infra.tnj@gmail.com') {
+        query = query.ilike('submitted_by', userEmail);
+      }
+
+      const { data: plantData, error } = await query.order('expense_date', { ascending: false });
+
+      if (error) throw error;
+
+      const formattedExpenses = (plantData || []).map(p => ({
         ...p,
         source_type: 'Plant',
         display_location: p.plant_name || 'Plant'
       }));
 
-      const formattedSiteExpenses = (siteData || []).map(s => ({
-        id: `site_${s.id}`,
-        expense_date: s.date || s.transaction_date || (s.created_at ? s.created_at.split('T')[0] : expenseDate),
-        plant_name: s.site_name || 'Site Work',
-        display_location: `Site: ${s.site_name || 'General Site'}`,
-        expense_category: s.category || s.expense_category || 'Site Expense',
-        amount: Number(s.amount || 0),
-        paid_to: s.paid_to || s.party_name || s.vendor_name || 'Self',
-        payment_mode: s.payment_mode || 'Cash',
-        bill_no: s.bill_no || '-',
-        bill_url: s.bill_url || s.attachment_url || null,
-        remarks: s.remarks || '',
-        source_type: 'Site'
-      }));
-
-      const combined = [...formattedPlantExpenses, ...formattedSiteExpenses].sort(
-        (a, b) => new Date(b.expense_date) - new Date(a.expense_date)
-      );
-
-      setExpensesHistory(combined);
+      setExpensesHistory(formattedExpenses);
     } catch (err) {
-      console.error("Combined Expenses Error:", err);
+      console.error("Expenses History Error:", err);
     }
   };
-     
   const addExpenseRow = () => {
     setExpenseRows([
       ...expenseRows,
@@ -1281,7 +1262,7 @@ triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થ�
           />
         </div>
 
-        <div>
+       <div>
           <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Expense Location</label>
           <select
             value={reportPlantFilter}
@@ -1291,15 +1272,14 @@ triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થ�
             }}
             style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', fontWeight: 'bold', color: '#1e3a8a', backgroundColor: '#fff', boxSizing: 'border-box' }}
           >
-            <option value="All">🌐 All (પ્લાન્ટ + સાઈટ બંને)</option>
-            <option value="Plant Only">🏭 Only Plants</option>
-            <option value="Site Only">🏗️ Only Sites</option>
-            {plants.map((p) => (
-              <option key={p.id} value={p.plant_name}>{p.plant_name}</option>
+            <option value="All">🌐 All (બધા)</option>
+          
+            {/* 🌟 Database na plant_name parthi dynamic options */}
+            {Array.from(new Set(expensesHistory.filter(i => i.source_type === 'Plant').map(i => i.plant_name).filter(Boolean))).map((plantName, idx) => (
+              <option key={idx} value={plantName}>{plantName}</option>
             ))}
           </select>
         </div>
-
         <div>
           <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Filter By Person / Vendor</label>
           <select
