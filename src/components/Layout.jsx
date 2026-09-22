@@ -13,10 +13,219 @@ function Layout({ children, notifications = [] }) {
   const [allowedTabs, setAllowedTabs] = useState([])
 
   const userEmail = (user?.email || '').trim().toLowerCase()
+// 🔔 DPR Edit Requests માટેના નવા સ્ટેટ્સ
+  const [dprRequests, setDprRequests] = useState([]);
+  const [inwardRequests, setInwardRequests] = useState([]);
+  const [outwardRequests, setOutwardRequests] = useState([]);
+  const [expenseRequests, setExpenseRequests] = useState([]);
+  const isAdmin = userEmail === 'infra.tnj@gmail.com';
+  // 🔔 સુપરવાઈઝરના નોટિફિકેશન માટેનું સ્ટેટ
+  const [supervisorNotifs, setSupervisorNotifs] = useState([]);
+
+  useEffect(() => {
+    fetchDprRequests();
+    fetchInwardRequests();
+    fetchOutwardRequests();
+    fetchExpenseRequests(); //
+    fetchSupervisorNotifs(); // 👈 નવું ફંક્શન કોલ કર્યું
+  }, [user, userEmail]);
+
+
+  // 📥 સુપરવાઈઝરને એડમિનનો રિપ્લાય (Approve/Reject) બતાવવા માટે
+  const fetchSupervisorNotifs = async () => {
+    if (isAdmin || !user) return; // એડમિનને આની જરૂર નથી
+    
+    try {
+      const { data: permData } = await supabase.from('user_permissions').select('assigned_plants').eq('user_id', user.id).single();
+      const plants = permData?.assigned_plants || [];
+      if (plants.length === 0) return;
+
+      // DPR ના રિપ્લાય લાવો (જ્યાં reject_reason ખાલી ન હોય)
+      const { data: dprData } = await supabase.from('production_header')
+        .select('id, plant_name, team_name, reject_reason')
+        .in('plant_name', plants)
+        .not('reject_reason', 'is', null);
+
+      // Inward ના રિપ્લાય લાવો
+      const { data: inwData } = await supabase.from('plant_material_inward')
+        .select('id, plant_name, supplier_name, material_name, reject_reason')
+        .in('plant_name', plants)
+        .not('reject_reason', 'is', null);
+
+        // Outward ના રિપ્લાય લાવો
+      const { data: outData } = await supabase.from('plant_material_outward')
+        .select('id, plant_name, party_name, site_name, material_name, reject_reason')
+        .in('plant_name', plants)
+        .not('reject_reason', 'is', null);
+
+        const { data: expData } = await supabase.from('plant_expenses')
+        .select('id, plant_name, expense_category, paid_to, reject_reason')
+        .in('plant_name', plants)
+        .not('reject_reason', 'is', null);
+
+      const formattedDpr = (dprData || []).map(d => ({ ...d, type: 'DPR' }));
+      const formattedInw = (inwData || []).map(d => ({ ...d, type: 'INWARD' }));
+const formattedOut = (outData || []).map(d => ({ ...d, type: 'OUTWARD' })); // 👈 આ ઉમેરો
+const formattedExp = (expData || []).map(d => ({ ...d, type: 'EXPENSE' }));
+
+     setSupervisorNotifs([...formattedDpr, ...formattedInw, ...formattedOut, ...formattedExp]);
+    } catch (err) {
+      console.error("Error fetching supervisor notifs", err);
+    }
+  };
+
+  // 🧹 સુપરવાઈઝર નોટિફિકેશન વાંચી લે પછી તેને ક્લિયર કરવા
+  const handleClearNotif = async (e, notif) => {
+    e.stopPropagation();
+    try {
+     const table = notif.type === 'DPR' 
+        ? 'production_header' 
+        : notif.type === 'INWARD' 
+        ? 'plant_material_inward' 
+        : notif.type === 'OUTWARD'
+        ? 'plant_material_outward'
+        : 'plant_expenses';
+
+      await supabase.from(table).update({ reject_reason: null }).eq('id', notif.id);
+      fetchSupervisorNotifs(); // લિસ્ટ રિફ્રેશ કરો
+    } catch (err) {
+      console.error("Clear Notif Error:", err);
+    }
+  };
+
+  // 📥 Expenses ની પેન્ડિંગ રિક્વેસ્ટ લાવવા માટે
+  const fetchExpenseRequests = async () => {
+    if (!user) return;
+    try {
+      let query = supabase
+        .from('plant_expenses')
+        .select('*')
+        .eq('edit_requested', true)
+        .eq('is_locked', true)
+        .order('created_at', { ascending: false });
+
+      if (!isAdmin) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('assigned_plants')
+          .eq('user_id', user.id)
+          .single();
+
+        if (permData && permData.assigned_plants && permData.assigned_plants.length > 0) {
+          query = query.in('plant_name', permData.assigned_plants);
+        } else {
+          return; 
+        }
+      }
+
+      const { data, error } = await query;
+      if (!error) setExpenseRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching Expense requests", err);
+    }
+  };
+  
+// 📥 આઉટવર્ડની પેન્ડિંગ રિક્વેસ્ટ લાવવા માટે
+  const fetchOutwardRequests = async () => {
+    if (!user) return;
+    try {
+      let query = supabase
+        .from('plant_material_outward')
+        .select('*')
+        .eq('edit_requested', true)
+        .eq('is_locked', true)
+        .order('created_at', { ascending: false });
+
+      if (!isAdmin) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('assigned_plants')
+          .eq('user_id', user.id)
+          .single();
+
+        if (permData && permData.assigned_plants && permData.assigned_plants.length > 0) {
+          query = query.in('plant_name', permData.assigned_plants);
+        } else {
+          return; 
+        }
+      }
+
+      const { data, error } = await query;
+      if (!error) setOutwardRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching Outward requests", err);
+    }
+  };
+  const fetchDprRequests = async () => {
+    if (!user) return;
+    try {
+      let query = supabase
+        .from('production_header')
+        .select('*')
+        .eq('edit_requested', true)
+        .eq('is_locked', true)
+        .order('created_at', { ascending: false });
+
+      // જો સુપરવાઈઝર હોય, તો માત્ર એને અસાઇન થયેલા પ્લાન્ટની જ પેન્ડિંગ રિક્વેસ્ટ લાવો
+      if (!isAdmin) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('assigned_plants')
+          .eq('user_id', user.id)
+          .single();
+
+        if (permData && permData.assigned_plants && permData.assigned_plants.length > 0) {
+          query = query.in('plant_name', permData.assigned_plants);
+        } else {
+          return; 
+        }
+      }
+
+      const { data, error } = await query;
+      if (!error) setDprRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching DPR requests", err);
+    }
+  };
+
+
 const handlesignout = async () => {
   const { error } = await supabase.auth.signOut();
   if (error) console.log("signout error:", error.message);
 };
+
+// 📥 Inward ની પેન્ડિંગ રિક્વેસ્ટ લાવવા માટે
+  const fetchInwardRequests = async () => {
+    if (!user) return;
+    try {
+      let query = supabase
+        .from('plant_material_inward')
+        .select('*')
+        .eq('edit_requested', true)
+        .eq('is_locked', true)
+        .order('created_at', { ascending: false });
+
+      if (!isAdmin) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('assigned_plants')
+          .eq('user_id', user.id)
+          .single();
+
+        if (permData && permData.assigned_plants && permData.assigned_plants.length > 0) {
+          query = query.in('plant_name', permData.assigned_plants);
+        } else {
+          return; 
+        }
+      }
+
+      const { data, error } = await query;
+      if (!error) setInwardRequests(data || []);
+    } catch (err) {
+      console.error("Error fetching Inward requests", err);
+    }
+  };
+
   // ૧. ડેટાબેઝમાંથી પરમિશન ફેચ કરવાનું લોજિક
   useEffect(() => {
     const fetchPermissions = async () => {
@@ -66,6 +275,112 @@ const handlesignout = async () => {
     await logout()
     navigate('/login')
   }
+
+  // ✅ DPR Approve
+  const handleApproveRequest = async (e, entry) => {
+    e.stopPropagation(); 
+    try {
+      await supabase.from('production_header').update({ 
+          is_locked: false, 
+          edit_requested: false,
+          created_at: new Date().toISOString(),
+          reject_reason: '✅ Approved: તમારી એડિટ રિક્વેસ્ટ એડમિને મંજૂર કરી છે.' // 👈 મેસેજ એડ કર્યો
+        }).eq('id', Number(entry.id));
+      fetchDprRequests(); 
+    } catch (err) { console.error(err); }
+  };
+
+  // ❌ DPR Reject
+  const handleRejectRequest = async (e, req) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('production_header').update({ 
+          edit_requested: false,
+          is_locked: true, // રિજેક્ટ થાય એટલે લોક જ રહેવું જોઈએ
+          reject_reason: '❌ Rejected: એડમિને તમારી રિક્વેસ્ટ નામંજૂર કરી છે.' // 👈 મેસેજ એડ કર્યો
+        }).eq('id', Number(req.id));
+      fetchDprRequests(); 
+    } catch (err) { console.error(err); }
+  };
+
+  // ✅ INWARD Approve
+  const handleApproveInwardRequest = async (e, entry) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_material_inward').update({ 
+          is_locked: false, 
+          edit_requested: false,
+          created_at: new Date().toISOString(),
+          reject_reason: '✅ Approved: Inward ની એડિટ રિક્વેસ્ટ મંજૂર થઈ છે.' 
+        }).eq('id', Number(entry.id));
+      fetchInwardRequests(); 
+    } catch (err) { console.error(err); }
+  };
+
+  // ❌ INWARD Reject
+  const handleRejectInwardRequest = async (e, req) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_material_inward').update({ 
+          edit_requested: false,
+          is_locked: true,
+          reject_reason: '❌ Rejected: Inward ની રિક્વેસ્ટ નામંજૂર થઈ છે.'
+        }).eq('id', Number(req.id));
+      fetchInwardRequests();
+    } catch (err) { console.error(err); }
+  };
+  // ✅ OUTWARD Approve
+  const handleApproveOutwardRequest = async (e, entry) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_material_outward').update({ 
+          is_locked: false, 
+          edit_requested: false,
+          created_at: new Date().toISOString(),
+          reject_reason: '✅ Approved: Outward ની એડિટ રિક્વેસ્ટ મંજૂર થઈ છે.' 
+        }).eq('id', Number(entry.id));
+      fetchOutwardRequests(); 
+    } catch (err) { console.error(err); }
+  };
+
+  // ❌ OUTWARD Reject
+  const handleRejectOutwardRequest = async (e, req) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_material_outward').update({ 
+          edit_requested: false,
+          is_locked: true,
+          reject_reason: '❌ Rejected: Outward ની રિક્વેસ્ટ નામંજૂર થઈ છે.'
+        }).eq('id', Number(req.id));
+      fetchOutwardRequests();
+    } catch (err) { console.error(err); }
+  };
+  // ✅ EXPENSE Approve
+  const handleApproveExpenseRequest = async (e, entry) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_expenses').update({ 
+          is_locked: false, 
+          edit_requested: false,
+          created_at: new Date().toISOString(),
+          reject_reason: '✅ Approved: ખર્ચ (Expense) ની એડિટ રિક્વેસ્ટ મંજૂર થઈ છે.' 
+        }).eq('id', Number(entry.id));
+      fetchExpenseRequests(); 
+    } catch (err) { console.error(err); }
+  };
+
+  // ❌ EXPENSE Reject
+  const handleRejectExpenseRequest = async (e, req) => {
+    e.stopPropagation();
+    try {
+      await supabase.from('plant_expenses').update({ 
+          edit_requested: false,
+          is_locked: true,
+          reject_reason: '❌ Rejected: ખર્ચ (Expense) ની રિક્વેસ્ટ નામંજૂર થઈ છે.'
+        }).eq('id', Number(req.id));
+      fetchExpenseRequests();
+    } catch (err) { console.error(err); }
+  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f8fafc', position: 'relative' }}>
@@ -324,7 +639,7 @@ const handlesignout = async () => {
     <Bell size={18} color={notifications.length > 0 ? '#2563eb' : '#64748b'} />
     
     {/* નોટિફિકેશન કાઉન્ટ બેજ */}
-    {notifications.length > 0 && (
+{notifications.length + (isAdmin ? dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length : dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length + supervisorNotifs.length) > 0 && (
       <span style={{
         position: 'absolute',
         top: '-4px',
@@ -340,8 +655,8 @@ const handlesignout = async () => {
         alignItems: 'center',
         justifyContent: 'center',
         border: '2px solid #ffffff'
-      }}>
-        {notifications.length}
+     }}>
+   {notifications.length + (isAdmin ? dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length : dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length + supervisorNotifs.length)}
       </span>
     )}
   </div>
@@ -371,9 +686,9 @@ const handlesignout = async () => {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Bell size={14} color="#2563eb" />
-          <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
-            NOTIFICATIONS ({notifications.length})
-          </span>
+         <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
+ NOTIFICATIONS ({notifications.length + (isAdmin ? dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length : dprRequests.length + inwardRequests.length + outwardRequests.length + expenseRequests.length + supervisorNotifs.length)})
+</span>
         </div>
         <button 
           onClick={() => setIsNotifOpen(false)}
@@ -394,14 +709,233 @@ const handlesignout = async () => {
         </button>
       </div>
 
-      {/* List Container */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
-        {notifications.length === 0 ? (
+    {/* List Container */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '280px', overflowY: 'auto' }}>
+     {notifications.length === 0 && dprRequests.length === 0 && inwardRequests.length === 0 && outwardRequests.length === 0 && expenseRequests.length === 0 && supervisorNotifs.length === 0 ? (
           <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: '11px', color: '#94a3b8' }}>
             કોઈ નવી રિક્વેસ્ટ કે નોટિફિકેશન નથી.
           </div>
         ) : (
-notifications.map((notif) => (
+          <> 
+            {/* 🚀 ૧. પેલા DPR Edit Requests બતાવો */}
+            {dprRequests.map((req) => (
+              <div 
+                key={`dpr-${req.id}`} 
+                style={{
+                  padding: '10px',
+                  borderRadius: '8px',
+                  backgroundColor: '#fef2f2', 
+                  border: '1px solid #fecaca',
+                  marginBottom: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#991b1b' }}>
+                      🔔 DPR Edit Request
+                    </p>
+                    <div style={{ fontSize: '10px', color: '#7f1d1d', marginTop: '2px', fontWeight: '600' }}>
+                      {req.plant_name} (Team: {req.team_name})<br/>
+                      Date: {req.production_date}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🎯 એડમિન માટે બટન અને સુપરવાઈઝર માટે પેન્ડિંગ લેબલ */}
+                <div style={{ marginTop: '8px' }}>
+                  {isAdmin ? (
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={(e) => handleApproveRequest(e, req)} style={{ flex: 1, background: '#16a34a', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                        ✅ Approve
+                      </button>
+                      <button onClick={(e) => handleRejectRequest(e, req)} style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                        ❌ Reject
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '4px', background: '#fef3c7', color: '#b45309', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textAlign: 'center', border: '1px dashed #f59e0b' }}>
+                      ⏳ Pending Admin Approval
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* 🚀 ૨. Inward Edit Requests બતાવો */}
+            {inwardRequests.map((req) => (
+              <div 
+                key={`inw-${req.id}`} 
+                style={{
+                  padding: '10px', borderRadius: '8px', backgroundColor: '#f0fdf4', 
+                  border: '1px solid #bbf7d0', marginBottom: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#166534' }}>
+                      📦 Inward Edit Request
+                    </p>
+                    <div style={{ fontSize: '10px', color: '#14532d', marginTop: '2px', fontWeight: '600' }}>
+                      {req.plant_name} (Supplier: {req.supplier_name})<br/>
+                      Material: {req.material_name} | Date: {req.date}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🎯 એડમિન માટે બટન અને સુપરવાઈઝર માટે પેન્ડિંગ લેબલ */}
+                <div style={{ marginTop: '8px' }}>
+                  {isAdmin ? (
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button onClick={(e) => handleApproveInwardRequest(e, req)} style={{ flex: 1, background: '#16a34a', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                        ✅ Approve
+                      </button>
+                      <button onClick={(e) => handleRejectInwardRequest(e, req)} style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                        ❌ Reject
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '4px', background: '#fef3c7', color: '#b45309', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textAlign: 'center', border: '1px dashed #f59e0b' }}>
+                      ⏳ Pending Admin Approval
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+
+
+{/* 🚀 ૩. Outward Edit Requests batavo */}
+          {outwardRequests.map((req) => (
+            <div 
+              key={`out-${req.id}`} 
+              style={{
+                padding: '10px', borderRadius: '8px', backgroundColor: '#fff7ed', 
+                border: '1px solid #fed7aa', marginBottom: '6px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#c2410c' }}>
+                    📦 Outward Edit Request
+                  </p>
+                  <div style={{ fontSize: '10px', color: '#9a3412', marginTop: '2px', fontWeight: '600' }}>
+                    {req.plant_name} (Site: {req.site_name})<br/>
+                    Material: {req.material_name} | Date: {req.date}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '8px' }}>
+                {isAdmin ? (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button onClick={(e) => handleApproveOutwardRequest(e, req)} style={{ flex: 1, background: '#16a34a', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      ✅ Approve
+                    </button>
+                    <button onClick={(e) => handleRejectOutwardRequest(e, req)} style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      ❌ Reject
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ padding: '4px', background: '#fef3c7', color: '#b45309', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textAlign: 'center', border: '1px dashed #f59e0b' }}>
+                    ⏳ Pending Admin Approval
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+
+{/* 🚀 ૪. Expense Edit Requests બતાવો (એડમિન માટે) */}
+{expenseRequests.map((req) => (
+  <div key={`exp-${req.id}`} style={{ padding: '10px', borderRadius: '8px', backgroundColor: '#fdf4ff', border: '1px solid #f5d0fe', marginBottom: '6px' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <div>
+        <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#86198f' }}>
+          💸 Expense Edit Request
+        </p>
+        <div style={{ fontSize: '10px', color: '#701a75', marginTop: '2px', fontWeight: '600' }}>
+          {req.plant_name} (Category: {req.expense_category})<br/>
+          Paid To: {req.paid_to} | Amount: ₹{req.amount}
+        </div>
+      </div>
+    </div>
+
+    <div style={{ marginTop: '8px' }}>
+      {isAdmin ? (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={(e) => handleApproveExpenseRequest(e, req)} style={{ flex: 1, background: '#16a34a', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+            ✅ Approve
+          </button>
+          <button onClick={(e) => handleRejectExpenseRequest(e, req)} style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+            ❌ Reject
+          </button>
+        </div>
+      ) : (
+        <div style={{ padding: '4px', background: '#fef3c7', color: '#b45309', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textAlign: 'center', border: '1px dashed #f59e0b' }}>
+          ⏳ Pending Admin Approval
+        </div>
+      )}
+    </div>
+  </div>
+))}
+
+
+     {/* 🚀 ૩. સુપરવાઈઝરને એડમિનનો રિપ્લાય (Approve/Reject) બતાવો */}
+{!isAdmin && supervisorNotifs.map((notif) => (
+  <div 
+    key={`sup-notif-${notif.type}-${notif.id}`} 
+    onClick={async () => {
+      setIsNotifOpen(false);
+      try {
+        // નોટિફિકેશનના પ્રકાર મુજબ સાચું ટેબ નક્કી કરો
+        let targetTab = 'production';
+        if (notif.type === 'INWARD') targetTab = 'inward';
+        if (notif.type === 'OUTWARD') targetTab = 'outward';
+        if (notif.type === 'EXPENSE') targetTab = 'plantexpense';
+
+        // localStorage માં ટેબ અને રેકોર્ડ આઈડી સેવ કરો
+        localStorage.setItem('activeTab', targetTab);
+        localStorage.setItem('editRecordId', notif.id);
+        
+        // પ્લાન્ટ એમ્પ્લોયી ડેશબોર્ડ પર રીડાયરેક્ટ કરો
+        navigate('/plantemployee-dashboard');
+      } catch (err) {
+        console.error("Redirection error:", err);
+        navigate('/Dashboard');
+      }
+    }}
+    style={{ 
+      padding: '10px', 
+      borderRadius: '8px', 
+      backgroundColor: notif.reject_reason.includes('✅') ? '#f0fdf4' : '#fef2f2', 
+      border: `1px solid ${notif.reject_reason.includes('✅') ? '#bbf7d0' : '#fecaca'}`, 
+      marginBottom: '6px',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease'
+    }}
+  >
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
+      {notif.type === 'DPR' ? '🏭 DPR Update' : notif.type === 'INWARD' ? '📦 Inward Update' : notif.type === 'OUTWARD' ? '🚚 Outward Update' : '💸 Expense Update'}
+      </p>
+      <ChevronRight size={14} color="#94a3b8" />
+    </div>
+    <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px', fontWeight: '600' }}>
+{notif.plant_name} {notif.team_name ? `(${notif.team_name})` : notif.supplier_name ? `(${notif.supplier_name})` : notif.party_name ? `(${notif.party_name})` : `(${notif.expense_category} - ${notif.paid_to})`}
+    </div>
+    <div style={{ marginTop: '6px', fontSize: '11px', fontWeight: 'bold', color: notif.reject_reason.includes('✅') ? '#16a34a' : '#dc2626' }}>
+      {notif.reject_reason}
+    </div>
+    <button 
+      onClick={(e) => handleClearNotif(e, notif)} 
+      style={{ marginTop: '8px', width: '100%', background: '#fff', border: '1px solid #cbd5e1', padding: '4px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}
+    >
+      ✓ Mark as Read (Clear)
+    </button>
+  </div>
+))}
+            
+{notifications.map((notif) => (
   <div 
     key={notif.id}
     onClick={async () => {
@@ -475,7 +1009,8 @@ notifications.map((notif) => (
     </div>
     <ChevronRight size={14} color="#94a3b8" />
   </div>
-))
+            ))}
+          </>
         )}
       </div>
     </div>

@@ -1,879 +1,407 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../lib/supabase'
-import { Filter, Printer, FileDown, Package, User, ExternalLink } from 'lucide-react'
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { Calendar, MapPin, FileText, ChevronDown, ChevronUp, RefreshCcw, Globe, FileDown, ArrowLeft } from 'lucide-react';
 
-function SiteReportPage() {
-  const [sites, setSites] = useState([])
-  const [selectedState, setSelectedState] = useState('all') // રાજ્ય (State) ફિલ્ટર માટે
-  const [selectedSite, setSelectedSite] = useState('all')
-  const [reportType, setReportType] = useState('all') 
-  const [selectedParty, setSelectedParty] = useState('all')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const [reports, setReports] = useState([])
-  const [movements, setMovements] = useState([])
-  const [partyNamesList, setPartyNamesList] = useState([])
-  const [loading, setLoading] = useState(false)
+// --- Date Formatting Helper ---
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString || dateString === '-') return '-';
+  const datePart = dateString.split('T')[0]; 
+  const [year, month, day] = datePart.split('-');
+  if (day && month && year) {
+    return `${day}/${month}/${year}`;
+  }
+  return dateString;
+};
 
+const AdminSiteReportPage = () => {
+  const [isAllDates, setIsAllDates] = useState(false);
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().split('T')[0];
+  });
+  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [siteList, setSiteList] = useState([]);
+  const [selectedSite, setSelectedSite] = useState('All');
+  const [contractorList, setContractorList] = useState([]);
+  const [selectedContractor, setSelectedContractor] = useState('All');
+
+  const [loading, setLoading] = useState(false);
+  const [reportRows, setReportRows] = useState([]);
+  const [totalUpad, setTotalUpad] = useState(0);
+  const [dynamicColumns, setDynamicColumns] = useState([]);
+
+  // ૧. સાઇટ્સની યાદી ફેચ કરવી
   useEffect(() => {
-    loadSites()
-    loadAllMastersAndData()
-  }, [])
-
-  useEffect(() => {
-    loadAllMastersAndData()
-  }, [selectedSite, fromDate, toDate])
-
-  const loadSites = async () => {
-    const { data } = await supabase.from('sites').select('*')
-    setSites(data || [])
-  }
-
-  // સાઇટ્સમાંથી યુનિક સ્ટેટ્સની યાદી કાઢવા માટે
-  const uniqueStates = ['all', ...new Set(sites.map(s => s.state).filter(Boolean))]
-
-  // સ્ટેટ મુજબ સાઇટ્સ ફિલ્ટર કરવા માટે
-  const filteredSites = selectedState === 'all' 
-    ? sites 
-    : sites.filter(s => s.state === selectedState)
-
-  const loadAllMastersAndData = async () => {
-    setLoading(true)
-    
-    let vQuery = supabase.from('site_vendors').select('site_name, name')
-    let pQuery = supabase.from('site_outward_parties').select('site_name, name')
-    let cQuery = supabase.from('contractors').select('site_name, name')
-
-    if (selectedSite !== 'all') {
-      vQuery = vQuery.eq('site_name', selectedSite)
-      pQuery = pQuery.eq('site_name', selectedSite)
-      cQuery = cQuery.eq('site_name', selectedSite)
-    }
-
-    const [vRes, pRes, cRes] = await Promise.all([vQuery, pQuery, cQuery])
-    
-    const vendors = (vRes.data || []).map(x => x.name ? `${x.name} (Vendor)` : null).filter(Boolean)
-    const parties = (pRes.data || []).map(x => x.name ? `${x.name} (Outward Party)` : null).filter(Boolean)
-    const contractors = (cRes.data || []).map(x => x.name ? `${x.name} (Contractor)` : null).filter(Boolean)
-
-    const allNames = [...vendors, ...parties, ...contractors]
-    setPartyNamesList([...new Set(allNames)].filter(Boolean))
-
-    let repQuery = supabase.from('daily_reports').select('*').order('report_date', { ascending: false })
-    if (selectedSite !== 'all') repQuery = repQuery.eq('site_name', selectedSite)
-    if (fromDate) repQuery = repQuery.gte('report_date', fromDate)
-    if (toDate) repQuery = repQuery.lte('report_date', toDate)
-    const { data: repData } = await repQuery
-
-    let movQuery = supabase.from('material_movements').select('*').order('entry_date', { ascending: false })
-    if (selectedSite !== 'all') movQuery = movQuery.eq('site_name', selectedSite)
-    if (fromDate) movQuery = movQuery.gte('entry_date', fromDate)
-    if (toDate) movQuery = movQuery.lte('entry_date', toDate)
-    const { data: movData } = await movQuery
-
-    setReports(repData || [])
-    setMovements(movData || [])
-    setLoading(false)
-  }
-
-  const handlePrintPDF = () => {
-    window.print()
-  }
-
-  const isMatchParty = (targetName) => {
-    if (selectedParty === 'all') return true;
-    if (!targetName) return false;
-    const cleanSelected = selectedParty.split(' (')[0].trim().toLowerCase();
-    const cleanTarget = targetName.trim().toLowerCase();
-    return cleanTarget === cleanSelected;
-  }
-
-  const filteredData = useMemo(() => {
-    let processed = []
-
-    const getAttachmentUrls = (urls) => {
-      if (!urls) return [];
-      if (Array.isArray(urls)) return urls.filter(Boolean);
-      if (typeof urls === 'string') {
-        try {
-          const parsed = JSON.parse(urls);
-          if (Array.isArray(parsed)) return parsed.filter(Boolean);
-        } catch {
-          return [urls];
+    const fetchSites = async () => {
+      try {
+        const { data, error } = await supabase.from('sites').select('site_name');
+        if (!error && data) {
+          const unique = [...new Set(data.map(d => d.site_name).filter(Boolean))];
+          setSiteList(unique);
         }
+      } catch (err) {
+        console.error('Error fetching sites:', err);
       }
-      return [];
     };
+    fetchSites();
+  }, []);
 
-    // 1. Material Inward
-    if (reportType === 'all' || reportType === 'inward') {
-      movements.filter(m => m.movement_type === 'inward').forEach(m => {
-        const items = typeof m.items === 'string' ? JSON.parse(m.items) : (m.items || [])
-        items.forEach(it => {
-          const matName = it.materialName === 'Other' ? it.customMaterialName : (it.materialName || 'N/A')
-          const srcName = m.source_destination || 'N/A'
-          if (isMatchParty(srcName)) {
-            processed.push({
-              category: '1. Material Inward',
-              site: m.site_name,
-              date: m.entry_date,
-              userId: m.created_by || 'Supervisor',
-              name: srcName,
-              dcNumber: m.dc_number || 'N/A',
-              vehicleNo: m.vehicle_number || 'N/A',
-              detail: `${matName} (DC: ${m.dc_number || 'N/A'}, Veh: ${m.vehicle_number || 'N/A'})`,
-              materialKey: matName,
-              qty: parseFloat(it.quantity || 0),
-              unit: it.unit || 'Bags',
-              remarks: m.description || '',
-              attachments: getAttachmentUrls(m.bill_urls || m.attachment || m.image_url)
-            })
-          }
-        })
-      })
-    }
-
-    // 2. Paling Work
-    if (reportType === 'all' || reportType === 'paling') {
-      reports.forEach(r => {
-        (r.paling_work || []).forEach(p => {
-          const cName = p.contractorName || 'N/A'
-          if (isMatchParty(cName)) {
-            processed.push({
-              category: '2. Paling Work',
-              site: r.site_name,
-              date: r.report_date,
-              userId: r.user_id || 'Supervisor',
-              name: cName,
-              dcNumber: 'N/A',
-              vehicleNo: 'N/A',
-              detail: 'Paling Work',
-              materialKey: 'Paling Work',
-              qty: parseFloat(p.qty || 0),
-              unit: 'NOS',
-              remarks: p.description || '',
-              attachments: getAttachmentUrls(r.photo_urls || r.attachment || p.attachment)
-            })
-          }
-        })
-      })
-    }
-
-    // 3. Material Usage
-    if (reportType === 'all' || reportType === 'usage') {
-      reports.forEach(r => {
-        (r.contractor_details || []).forEach(c => {
-          const cName = c.contractorName || 'N/A'
-          if (isMatchParty(cName)) {
-            (c.materials || []).forEach(mat => {
-              const matName = mat.material === 'Other' ? mat.customMaterialName : mat.material
-              processed.push({
-                category: '3. Material Usage',
-                site: r.site_name,
-                date: r.report_date,
-                userId: r.user_id || 'Supervisor',
-                name: cName,
-                dcNumber: 'N/A',
-                vehicleNo: 'N/A',
-                detail: matName || 'Material',
-                materialKey: matName || 'Material',
-                qty: parseFloat(mat.quantity || 0),
-                unit: mat.unit || 'NOS',
-                remarks: `Labour: ${c.labourCount || 0}`,
-                attachments: getAttachmentUrls(r.photo_urls || r.attachment)
-              })
-            })
-          }
-        })
-      })
-    }
-
-    // 4. Final Work
-    if (reportType === 'all' || reportType === 'final') {
-      reports.forEach(r => {
-        (r.final_work || []).forEach(f => {
-          const cName = f.contractorName || 'N/A'
-          if (isMatchParty(cName)) {
-            const wName = f.workDesc === 'Other' ? f.customWorkDesc : f.workDesc
-            if (wName && wName !== 'Final Work') {
-              processed.push({
-                category: '4. Final Work',
-                site: r.site_name,
-                date: r.report_date,
-                userId: r.user_id || 'Supervisor',
-                name: cName,
-                dcNumber: 'N/A',
-                vehicleNo: 'N/A',
-                detail: wName,
-                materialKey: wName,
-                qty: parseFloat(f.runningFeet || 0),
-                unit: 'Running Feet',
-                remarks: `Height: ${f.height || 0}`,
-                attachments: getAttachmentUrls(r.photo_urls || r.attachment)
-              })
-            }
-          }
-        })
-      })
-    }
-
-    // 5. Material Damage
-    if (reportType === 'all' || reportType === 'damage') {
-      reports.forEach(r => {
-        (r.damage_items || []).forEach(d => {
-          const dName = d.materialName === 'Other' ? d.customMaterialName : d.materialName
-          processed.push({
-            category: '5. Material Damage',
-            site: r.site_name,
-            date: r.report_date,
-            userId: r.user_id || 'Supervisor',
-            name: 'N/A',
-            dcNumber: 'N/A',
-            vehicleNo: 'N/A',
-            detail: dName || 'Damaged Item',
-            materialKey: dName || 'Damaged Item',
-            qty: parseFloat(d.quantity || 0),
-            unit: d.unit || 'Bags',
-            remarks: d.reason || '',
-            attachments: getAttachmentUrls(d.bill_urls || r.attachment)
-          })
-        })
-      })
-    }
-
-    // 6. Material Outward
-    if (reportType === 'all' || reportType === 'outward') {
-      movements.filter(m => m.movement_type === 'outward').forEach(m => {
-        const items = typeof m.items === 'string' ? JSON.parse(m.items) : (m.items || [])
-        items.forEach(it => {
-          const matName = it.materialName === 'Other' ? it.customMaterialName : (it.materialName || 'N/A')
-          const destName = m.source_destination || 'N/A'
-          if (isMatchParty(destName)) {
-            processed.push({
-              category: '6. Material Outward',
-              site: m.site_name,
-              date: m.entry_date,
-              userId: m.created_by || 'Supervisor',
-              name: destName,
-              dcNumber: m.dc_number || 'N/A',
-              vehicleNo: m.vehicle_number || 'N/A',
-              detail: `${matName} (DC: ${m.dc_number || 'N/A'}, Veh: ${m.vehicle_number || 'N/A'})`,
-              materialKey: matName,
-              qty: parseFloat(it.quantity || 0),
-              unit: it.unit || 'Bags',
-              remarks: m.description || '',
-              attachments: getAttachmentUrls(m.bill_urls || m.attachment || m.image_url)
-            })
-          }
-        })
-      })
-    }
-
-    return processed
-  }, [reports, movements, reportType, selectedParty])
-
-  const materialSummary = useMemo(() => {
-    const summary = {}
-    const addToSummary = (key, name, unit, qty, type) => {
-      if (!summary[key]) {
-        summary[key] = { name, unit, inward: 0, usage: 0, outward: 0, damage: 0 }
-      }
-      if (type === 'inward') summary[key].inward += qty
-      if (type === 'usage') summary[key].usage += qty
-      if (type === 'outward') summary[key].outward += qty
-      if (type === 'damage') summary[key].damage += qty
-    }
-
-    filteredData.forEach(item => {
-      const key = `${item.materialKey} [${item.unit}]`
-      if (item.category === '1. Material Inward') addToSummary(key, item.materialKey, item.unit, item.qty, 'inward')
-      else if (item.category === '3. Material Usage') addToSummary(key, item.materialKey, item.unit, item.qty, 'usage')
-      else if (item.category === '6. Material Outward') addToSummary(key, item.materialKey, item.unit, item.qty, 'outward')
-      else if (item.category === '5. Material Damage') addToSummary(key, item.materialKey, item.unit, item.qty, 'damage')
-    })
-    return summary
-  }, [filteredData])
-
-  const contractorSummary = useMemo(() => {
-    const summary = {}
-    filteredData.forEach(item => {
-      if (item.category === '2. Paling Work' || item.category === '4. Final Work') {
-        const cName = item.name || 'Unknown'
-        const workDesc = item.materialKey || item.detail || item.category
-        const uniqueKey = `${cName}_${workDesc}`
-        if (!summary[uniqueKey]) {
-          summary[uniqueKey] = { name: cName, totalQty: 0, unit: item.unit, category: workDesc }
+  // ૨. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું
+  useEffect(() => {
+    const fetchContractors = async () => {
+      try {
+        let query = supabase.from('contractors').select('*');
+        if (selectedSite && selectedSite !== 'All') {
+          query = query.or(`site_name.eq."${selectedSite}",company_name.eq."${selectedSite}"`);
         }
-        summary[uniqueKey].totalQty += item.qty
+        const { data, error } = await query;
+        if (!error && data) {
+          const filteredNames = [...new Set(data.map(d => d.name).filter(Boolean))];
+          setContractorList(filteredNames);
+        } else {
+          setContractorList([]);
+        }
+      } catch (err) {
+        console.error('Error fetching contractors:', err);
       }
-    })
-    return summary
-  }, [filteredData])
+    };
+    fetchContractors();
+  }, [selectedSite]);
 
-  const exportToExcel = () => {
-    if (filteredData.length === 0) { alert("No data to export!"); return; }
+  // ૩. ડેટા ફેચ કરવો (Daily Reports & Expenses / Upad)
+  useEffect(() => {
+    fetchSiteReportData();
+  }, [selectedSite, selectedContractor, fromDate, toDate, isAllDates]);
 
-    let csvContent = `data:text/csv;charset=utf-8,"T&J Infra - Report: ${selectedSite} | Section: ${reportType}",,,,,\n`;
-    csvContent += `"Party: ${selectedParty} | From: ${fromDate || 'All'} To: ${toDate || 'All'}",,,,,,,\n`;
+  const fetchSiteReportData = async () => {
+    setLoading(true);
+    try {
+      const groupedByDate = {};
+      const uniqueColSet = new Set();
 
-    let lastDate = "";
-    let lastVendor = "";
+      let reportQuery = supabase.from('daily_reports').select('*');
+      if (selectedSite && selectedSite !== 'All') {
+        reportQuery = reportQuery.eq('site_name', selectedSite);
+      }
+      if (!isAllDates) {
+        if (fromDate) reportQuery = reportQuery.gte('report_date', fromDate);
+        if (toDate) reportQuery = reportQuery.lte('report_date', toDate);
+      }
 
-    if (reportType === 'inward' || reportType === 'outward') {
-      const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))];
-      csvContent += `date,vendor/party,dc no,${allMaterials.join(',')},uom,vehicle number,user id,remarks,attachments\n`;
+      const { data: reportData, error: rErr } = await reportQuery;
 
-      filteredData.forEach(item => {
-        let rowValues = allMaterials.map(mat => (item.materialKey === mat ? item.qty : ""));
-        
-        const dateToPrint = (item.date === lastDate) ? "" : item.date;
-        lastDate = item.date;
+      if (!rErr && reportData && reportData.length > 0) {
+        reportData.forEach(rep => {
+          const dStr = rep.report_date;
+          if (!dStr) return;
 
-        const vendorToPrint = (item.name === lastVendor && item.date === lastDate) ? "" : item.name;
-        lastVendor = item.name;
+          // Contractor / Labor Details
+          const contractorRows = rep.contractor_details || [];
+          contractorRows.forEach(cRow => {
+            if (selectedContractor && selectedContractor !== 'All' && cRow.contractorName !== selectedContractor) return;
 
-        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
-        const atts = (item.attachments || []).join(' | ');
-        
-        csvContent += `"${dateToPrint}","${vendorToPrint}","${item.dcNumber}",${rowValues.map(v => `"${v}"`).join(',')},"${item.unit}","${item.vehicleNo}","${item.userId}","${cleanRemark}","${atts}"\n`;
+            const workItems = cRow.workItems || [];
+            workItems.forEach(wItem => {
+              let wName = wItem.workType || 'Work';
+
+              if (wName === '2. Column Concrete') {
+                const singleQ = Number(wItem.singleCastingQty || 0);
+                const doubleQ = Number(wItem.doubleCastingQty || 0);
+
+                if (singleQ > 0) {
+                  const colSingle = 'Single Column Casting';
+                  uniqueColSet.add(colSingle);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][colSingle] = (groupedByDate[dStr][colSingle] || 0) + singleQ;
+                }
+                if (doubleQ > 0) {
+                  const colDouble = 'Double Column Casting';
+                  uniqueColSet.add(colDouble);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][colDouble] = (groupedByDate[dStr][colDouble] || 0) + doubleQ;
+                }
+              } else {
+                const qty = Number(wItem.quantity || wItem.actualCementBags || wItem.runningFeet || 0);
+                if (wName && qty > 0) {
+                  uniqueColSet.add(wName);
+                  if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+                  groupedByDate[dStr][wName] = (groupedByDate[dStr][wName] || 0) + qty;
+                }
+              }
+            });
+          });
+
+          // Paling Work
+          const palingRows = rep.paling_work || [];
+          palingRows.forEach(pRow => {
+            if (selectedContractor && selectedContractor !== 'All' && pRow.contractorName !== selectedContractor) return;
+            const pQty = Number(pRow.qty || 0);
+            if (pQty > 0) {
+              const pCol = 'Paling Work';
+              uniqueColSet.add(pCol);
+              if (!groupedByDate[dStr]) groupedByDate[dStr] = { date: dStr };
+              groupedByDate[dStr][pCol] = (groupedByDate[dStr][pCol] || 0) + pQty;
+            }
+          });
+        });
+
+        setDynamicColumns(Array.from(uniqueColSet));
+      } else {
+        setDynamicColumns([]);
+      }
+
+      // ઉપાડ (Upad / Expenses) labour wise
+      const upadByDateMap = {};
+      let totalUpadSum = 0;
+
+      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to, expense_category, plant_name');
+      upadQuery = upadQuery.ilike('expense_category', '%ઉપાડ%');
+
+      if (selectedSite && selectedSite !== 'All') {
+        upadQuery = upadQuery.eq('plant_name', selectedSite);
+      } else if (siteList.length > 0) {
+        upadQuery = upadQuery.in('plant_name', siteList);
+      }
+
+      if (selectedContractor && selectedContractor !== 'All') {
+        upadQuery = upadQuery.eq('paid_to', selectedContractor);
+      }
+      if (!isAllDates) {
+        if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
+        if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
+      }
+
+      const { data: upadData } = await upadQuery;
+      if (upadData && upadData.length > 0) {
+        upadData.forEach(item => {
+          const expDate = item.expense_date;
+          const amt = Number(item.amount || 0);
+          upadByDateMap[expDate] = (upadByDateMap[expDate] || 0) + amt;
+          totalUpadSum += amt;
+        });
+      }
+
+      setTotalUpad(totalUpadSum);
+
+      Object.keys(groupedByDate).forEach(dStr => {
+        groupedByDate[dStr].dayUpad = upadByDateMap[dStr] || 0;
       });
 
-    } else if (reportType === 'usage' || reportType === 'paling' || reportType === 'final' || reportType === 'damage') {
-      const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))].filter(m => m !== 'Final Work');
-      csvContent += `date,party/contractor,${allMaterials.join(',')},uom,user id,remarks,attachments\n`;
-
-      filteredData.forEach(item => {
-        let rowValues = allMaterials.map(mat => (item.materialKey === mat ? item.qty : ""));
-        
-        const dateToPrint = (item.date === lastDate) ? "" : item.date;
-        lastDate = item.date;
-
-        const vendorToPrint = (item.name === lastVendor && item.date === lastDate) ? "" : item.name;
-        lastVendor = item.name;
-
-        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
-        const atts = (item.attachments || []).join(' | ');
-        
-        csvContent += `"${dateToPrint}","${vendorToPrint}",${rowValues.map(v => `"${v}"`).join(',')},"${item.unit}","${item.userId}","${cleanRemark}","${atts}"\n`;
+      Object.keys(upadByDateMap).forEach(expDate => {
+        if (!groupedByDate[expDate]) {
+          groupedByDate[expDate] = { date: expDate, dayUpad: upadByDateMap[expDate] };
+        }
       });
 
-    } else {
-      csvContent += `date,category,party name,detail / material,quantity,unit,user id,remarks,attachments\n`;
-      filteredData.forEach(item => {
-        const cleanRemark = (item.remarks || "").replace(/,/g, " ");
-        const atts = (item.attachments || []).join(' | ');
-        csvContent += `"${item.date}","${item.category}","${item.name}","${item.detail}","${item.qty}","${item.unit}","${item.userId}","${cleanRemark}","${atts}"\n`;
-      });
+      const sortedRows = Object.values(groupedByDate).sort(
+        (a, b) => new Date(b.date) - new Date(a.date)
+      );
+      setReportRows(sortedRows);
+
+    } catch (err) {
+      console.error('Error fetching site report data:', err);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `T&J_Infra_Report_${reportType}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+  // PDF Print Function
+  const handlePrintPDF = () => {
+    const printWindow = window.open('', '', 'width=1000,height=700');
+    const dateText = isAllDates ? 'All Dates (બધી તારીખ)' : `${formatDateToDDMMYYYY(fromDate)} થી ${formatDateToDDMMYYYY(toDate)}`;
+    const siteText = selectedSite === 'All' ? 'બધી સાઇટ્સ (All Sites)' : selectedSite;
+    const contractorText = selectedContractor === 'All' ? 'બધા કોન્ટ્રાક્ટર્સ' : selectedContractor;
+
+    const tableHeaders = `
+      <th>Date</th>
+      ${dynamicColumns.map(col => `<th>${col}</th>`).join('')}
+      <th style="color:red;">Upad</th>
+    `;
+
+    const tableRows = reportRows.length === 0 ? `
+      <tr><td colspan="${dynamicColumns.length + 2}" style="text-align:center; padding:15px;">કોઈ ડેટા મળ્યો નથી.</td></tr>
+    ` : reportRows.map(row => `
+      <tr>
+        <td>${formatDateToDDMMYYYY(row.date)}</td>
+        ${dynamicColumns.map(col => `<td>${row[col] !== undefined ? row[col] : '-'}</td>`).join('')}
+        <td style="color:red; font-weight:bold;">${row.dayUpad ? `₹ ${row.dayUpad.toLocaleString('en-IN')}` : '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <html>
+        <head>
+          <title>Site Daily Progress & Labour Billing Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #1e293b; }
+            h2 { text-align: center; border-bottom: 2px solid #1e293b; padding-bottom: 8px; margin-bottom: 15px; font-size: 16px; }
+            .info-table { margin-bottom: 15px; border-collapse: collapse; width: 60%; font-size: 13px; }
+            .info-table td { padding: 5px 8px; border: 1px solid #cbd5e1; }
+            .info-table td:first-child { background-color: #f1f5f9; font-weight: bold; width: 140px; }
+            .data-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; }
+            .data-table th, .data-table td { border: 1px solid #334155; padding: 6px; }
+            .data-table th { background-color: #f8fafc; font-weight: bold; text-transform: uppercase; }
+          </style>
+        </head>
+        <body>
+          <h2>T&J Infra - SITE DAILY REPORT & LABOUR BILLING</h2>
+          <table class="info-table">
+            <tr><td>Site Name</td><td>${siteText}</td></tr>
+            <tr><td>Contractor / Labour</td><td>${contractorText}</td></tr>
+            <tr><td>Date Period</td><td>${dateText}</td></tr>
+          </table>
+          <table class="data-table">
+            <thead><tr>${tableHeaders}</tr></thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+          <script>window.onload = function() { window.print(); setTimeout(() => window.close(), 500); }</script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
 
   return (
-    <div style={{ padding: '10px', fontFamily: 'Inter, sans-serif', maxWidth: '1200px', margin: '0 auto', backgroundColor: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box' }}>
+    <div style={{ maxWidth: '650px', margin: '0 auto', fontFamily: 'Inter, sans-serif', paddingBottom: '40px', boxSizing: 'border-box' }}>
       
-<style>{`
-        @media print {
-          @page {
-            size: A4 landscape;
-            margin: 5mm;
-          }
-          .no-print, header, nav, aside, footer {
-            display: none !important;
-          }
-          .print-table-container {
-            display: block !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-          }
-          table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-          }
-          th, td {
-            border: 1px solid #000 !important;
-            padding: 3px !important;
-            font-size: 8px !important;
-            text-align: center !important;
-            color: #000 !important;
-            background-color: #ffffff !important;
-          }
-          th { background-color: #f1f5f9 !important; font-weight: bold !important; }
-          tr { page-break-inside: avoid !important; }
-        }
-        .print-table-container { display: none; }
-      `}</style>
-
-      {/* Header & Buttons */}
-      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px' }}>
-        <div>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📋 Comprehensive Site & Material Reports</h1>
-          <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 0' }}>Filter by State, Site, 6 report sections, vendors/parties, and date range.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={exportToExcel} style={{ backgroundColor: '#16a34a', color: '#fff', padding: '10px 16px', borderRadius: '8px', border: 'none', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <FileDown size={16} /> Export Excel
+      {/* Top Header */}
+      <div style={{ position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10, maxWidth: '650px', margin: '0 auto', paddingTop: '5px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px', backgroundColor: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+          <button 
+            onClick={() => window.history.back()}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px', fontWeight: '600', color: '#334155', cursor: 'pointer' }}
+          >
+            <ArrowLeft size={16} /> Back
           </button>
-          <button onClick={handlePrintPDF} style={{ backgroundColor: '#2563eb', color: '#fff', padding: '10px 16px', borderRadius: '8px', border: 'none', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Printer size={16} /> Print / PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Filters Section */}
-      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', fontSize: '13px', fontWeight: '600' }}>
-          <Filter size={16} /> Filters:
-        </div>
-
-        {/* State Filter Dropdown */}
-        <select 
-          value={selectedState} 
-          onChange={(e) => { setSelectedState(e.target.value); setSelectedSite('all'); }} 
-          style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fdf4ff', color: '#a21caf', fontWeight: 'bold' }}
-        >
-          {uniqueStates.map(st => (
-            <option key={st} value={st}>{st === 'all' ? '🌐 All States' : st}</option>
-          ))}
-        </select>
-
-        {/* Site Filter Dropdown */}
-        <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)} style={{ flex: '1 1 150px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff', fontWeight: 'bold' }}>
-          <option value="all">🌐 All Sites {selectedState !== 'all' ? `(${selectedState})` : ''}</option>
-          {filteredSites.map(s => <option key={s.id} value={s.site_name}>{s.site_name} {s.state ? `(${s.state})` : ''}</option>)}
-        </select>
-
-        <select value={reportType} onChange={(e) => setReportType(e.target.value)} style={{ flex: '1 1 170px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}>
-          <option value="all">📑 All 6 Sections</option>
-          <option value="inward">1. Material Inward</option>
-          <option value="paling">2. Paling Work</option>
-          <option value="usage">3. Material Usage</option>
-          <option value="final">4. Final Work</option>
-          <option value="damage">5. Material Damage</option>
-          <option value="outward">6. Material Outward</option>
-        </select>
-
-        <select value={selectedParty} onChange={(e) => setSelectedParty(e.target.value)} style={{ flex: '1 1 180px', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}>
-          <option value="all">👥 All Vendors / Parties / Contractors</option>
-          {partyNamesList.map((name, idx) => (
-            <option key={idx} value={name}>{name}</option>
-          ))}
-        </select>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 130px' }}>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>From:</span>
-          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 130px' }}>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>To:</span>
-          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }} />
-        </div>
-
-        {(selectedState !== 'all' || selectedSite !== 'all' || reportType !== 'all' || selectedParty !== 'all' || fromDate || toDate) && (
-          <button onClick={() => { setSelectedState('all'); setSelectedSite('all'); setReportType('all'); setSelectedParty('all'); setFromDate(''); setToDate(''); }} style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}>
-            Reset
-          </button>
-        )}
-      </div>
-
-      {/* PDF / Print Hidden Table Format */}
-      <div className="print-table-container">
-        <h2 style={{ textAlign: 'center', fontSize: '16px', fontWeight: 'bold', margin: '0 0 4px 0' }}>T&J Infra</h2>
-        <h3 style={{ textAlign: 'center', fontSize: '13px', margin: '0 0 5px 0' }}>Comprehensive Report ({reportType.toUpperCase()})</h3>
-        <div style={{ fontSize: '11px', marginBottom: '10px', textAlign: 'center' }}>
-          <strong>State:</strong> {selectedState} | <strong>Site:</strong> {selectedSite} | <strong>Party:</strong> {selectedParty}
-          {(fromDate || toDate) && (
-            <span> | <strong>Period:</strong> {fromDate || 'Start'} to {toDate || 'Present'}</span>
-          )}
-        </div>
-        
-        {(() => {
-          if (filteredData.length === 0) {
-            return <div style={{ textAlign: 'center', fontSize: '12px', padding: '20px' }}>No records found for the selected filters.</div>;
-          }
-
-          if (reportType === 'inward' || reportType === 'outward') {
-            const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))];
-            const totals = {};
-            allMaterials.forEach(mat => {
-              totals[mat] = filteredData.reduce((sum, item) => sum + (item.materialKey === mat ? (item.qty || 0) : 0), 0);
-            });
-
-            const groupedByDateAndVendor = {};
-            filteredData.forEach(item => {
-              const dKey = item.date || 'N/A';
-              const vKey = item.name || 'N/A';
-              const compKey = `${dKey}_${vKey}`;
-              if (!groupedByDateAndVendor[compKey]) {
-                groupedByDateAndVendor[compKey] = { date: dKey, vendor: vKey, items: [] };
-              }
-              groupedByDateAndVendor[compKey].items.push(item);
-            });
-
-            let currentDateTrack = {};
-            let currentVendorTrack = {};
-
-            return (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Vendor / Party</th>
-                    <th>DC No</th>
-                    {allMaterials.map(mat => (<th key={mat}>{mat}</th>))}
-                    <th>UOM</th>
-                    <th>Vehicle</th>
-                    <th>User ID</th>
-                    <th>Remarks</th>
-                    <th>Attachment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.values(groupedByDateAndVendor).map((group, gIdx) => {
-                    const dateVal = group.date;
-                    const vendorVal = group.vendor;
-
-                    return group.items.map((item, idx) => {
-                      let showDate = false;
-                      let dateSpan = 0;
-                      if (!currentDateTrack[dateVal]) {
-                        currentDateTrack[dateVal] = true;
-                        showDate = true;
-                        dateSpan = filteredData.filter(i => i.date === dateVal).length;
-                      }
-
-                      let showVendor = false;
-                      let vendorSpan = 0;
-                      const vendorCompKey = `${dateVal}_${vendorVal}`;
-                      if (!currentVendorTrack[vendorCompKey]) {
-                        currentVendorTrack[vendorCompKey] = true;
-                        showVendor = true;
-                        vendorSpan = group.items.length;
-                      }
-
-                      return (
-                        <tr key={`${gIdx}-${idx}`}>
-                          {showDate && (
-                            <td rowSpan={dateSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: 'bold' }}>
-                              {dateVal}
-                            </td>
-                          )}
-                          {showVendor && (
-                            <td rowSpan={vendorSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: '600' }}>
-                              {vendorVal}
-                            </td>
-                          )}
-                          <td>{item.dcNumber}</td>
-                          {allMaterials.map(mat => (
-                            <td key={mat}>{item.materialKey === mat ? item.qty : ''}</td>
-                          ))}
-                          <td>{item.unit}</td>
-                          <td>{item.vehicleNo}</td>
-                          <td>{item.userId}</td>
-                          <td>{item.remarks}</td>
-                          <td>
-                            {item.attachments && item.attachments.length > 0 ? (
-                              item.attachments.map((att, aIdx) => (
-                                <div key={aIdx}>
-                                  <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
-                                </div>
-                              ))
-                            ) : '-'}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
-                    <td colSpan="3" style={{ textAlign: 'right' }}>Total:</td>
-                    {allMaterials.map(mat => (
-                      <td key={mat}>{totals[mat] > 0 ? totals[mat] : ''}</td>
-                    ))}
-                    <td colSpan="5"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            );
-          } else if (reportType === 'usage' || reportType === 'paling' || reportType === 'final' || reportType === 'damage') {
-            const allMaterials = [...new Set(filteredData.map(item => item.materialKey || 'Material'))].filter(m => m !== 'Final Work');
-            const totals = {};
-            allMaterials.forEach(mat => {
-              totals[mat] = filteredData.reduce((sum, item) => sum + (item.materialKey === mat ? (item.qty || 0) : 0), 0);
-            });
-
-            const groupedByDateAndVendor = {};
-            filteredData.forEach(item => {
-              const dKey = item.date || 'N/A';
-              const vKey = item.name || 'N/A';
-              const compKey = `${dKey}_${vKey}`;
-              if (!groupedByDateAndVendor[compKey]) {
-                groupedByDateAndVendor[compKey] = { date: dKey, vendor: vKey, items: [] };
-              }
-              groupedByDateAndVendor[compKey].items.push(item);
-            });
-
-            let currentDateTrack = {};
-            let currentVendorTrack = {};
-
-            return (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Party / Contractor</th>
-                    {allMaterials.map(mat => (<th key={mat}>{mat}</th>))}
-                    <th>UOM</th>
-                    <th>User ID</th>
-                    <th>Remarks</th>
-                    <th>Attachment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.values(groupedByDateAndVendor).map((group, gIdx) => {
-                    const dateVal = group.date;
-                    const vendorVal = group.vendor;
-
-                    return group.items.map((item, idx) => {
-                      let showDate = false;
-                      let dateSpan = 0;
-                      if (!currentDateTrack[dateVal]) {
-                        currentDateTrack[dateVal] = true;
-                        showDate = true;
-                        dateSpan = filteredData.filter(i => i.date === dateVal).length;
-                      }
-
-                      let showVendor = false;
-                      let vendorSpan = 0;
-                      const vendorCompKey = `${dateVal}_${vendorVal}`;
-                      if (!currentVendorTrack[vendorCompKey]) {
-                        currentVendorTrack[vendorCompKey] = true;
-                        showVendor = true;
-                        vendorSpan = group.items.length;
-                      }
-
-                      return (
-                        <tr key={`${gIdx}-${idx}`}>
-                          {showDate && (
-                            <td rowSpan={dateSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: 'bold' }}>
-                              {dateVal}
-                            </td>
-                          )}
-                          {showVendor && (
-                            <td rowSpan={vendorSpan} style={{ verticalAlign: 'middle', textAlign: 'center', fontWeight: '600' }}>
-                              {vendorVal}
-                            </td>
-                          )}
-                          {allMaterials.map(mat => (
-                            <td key={mat}>{item.materialKey === mat ? item.qty : ''}</td>
-                          ))}
-                          <td>{item.unit}</td>
-                          <td>{item.userId}</td>
-                          <td>{item.remarks}</td>
-                          <td>
-                            {item.attachments && item.attachments.length > 0 ? (
-                              item.attachments.map((att, aIdx) => (
-                                <div key={aIdx}>
-                                  <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
-                                </div>
-                              ))
-                            ) : '-'}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
-                    <td colSpan="2" style={{ textAlign: 'right' }}>Total:</td>
-                    {allMaterials.map(mat => (
-                      <td key={mat}>{totals[mat] > 0 ? totals[mat] : ''}</td>
-                    ))}
-                    <td colSpan="4"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            );
-          } else {
-            const totalQty = filteredData.reduce((sum, item) => sum + (item.qty || 0), 0);
-            return (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Party Name</th>
-                    <th>Detail / Material</th>
-                    <th>Quantity</th>
-                    <th>Unit</th>
-                    <th>User ID</th>
-                    <th>Remarks</th>
-                    <th>Attachment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredData.map((item, idx) => (
-                    <tr key={idx}>
-                      <td>{item.date}</td>
-                      <td>{item.category}</td>
-                      <td>{item.name}</td>
-                      <td style={{ fontWeight: 'bold' }}>{item.detail}</td>
-                      <td>{item.qty}</td>
-                      <td>{item.unit}</td>
-                      <td>{item.userId}</td>
-                      <td>{item.remarks}</td>
-                      <td>
-                        {item.attachments && item.attachments.length > 0 ? (
-                          item.attachments.map((att, aIdx) => (
-                            <div key={aIdx}>
-                              <a href={att} target="_blank" rel="noopener noreferrer">View {aIdx + 1}</a>
-                            </div>
-                          ))
-                        ) : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ backgroundColor: '#f1f5f9', fontWeight: 'bold' }}>
-                    <td colSpan="4" style={{ textAlign: 'right' }}>Total Qty:</td>
-                    <td>{totalQty}</td>
-                    <td colSpan="4"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            );
-          }
-        })()}
-      </div>
-
-      {/* Material Summary & Table */}
-      <div className="no-print">
-        {Object.keys(materialSummary).length > 0 && (
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '16px', marginBottom: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-              <Package size={18} color="#2563eb" />
-              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>📊 Material Stock Summary</h4>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f1f5f9', color: '#475569', textAlign: 'left' }}>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0' }}>Item Name</th>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0' }}>Inward (+)</th>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0' }}>Usage (-)</th>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0' }}>Outward (-)</th>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0' }}>Damage (-)</th>
-                    <th style={{ padding: '8px', border: '1px solid #e2e8f0', backgroundColor: '#eff6ff', color: '#1e40af' }}>Current Stock (=)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(materialSummary).map(([key, data], idx) => {
-                    const stock = data.inward - data.usage - data.outward - data.damage;
-                    return (
-                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '8px', fontWeight: 'bold' }}>{data.name} <span style={{ color: '#94a3b8' }}>({data.unit})</span></td>
-                        <td style={{ padding: '8px', color: '#16a34a' }}>{data.inward}</td>
-                        <td style={{ padding: '8px', color: '#dc2626' }}>{data.usage}</td>
-                        <td style={{ padding: '8px', color: '#ea580c' }}>{data.outward}</td>
-                        <td style={{ padding: '8px', color: '#991b1b' }}>{data.damage}</td>
-                        <td style={{ padding: '8px', fontWeight: 'bold', color: stock < 0 ? '#dc2626' : '#2563eb' }}>{stock}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ margin: 0, fontSize: '16px', color: '#0f172a', fontWeight: 'bold' }}>
+              Admin Site Daily Progress Report
+            </h2>
+            <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+              Labour Billing & Upad Statement
+            </span>
           </div>
-        )}
+        </div>
 
-        {Object.keys(contractorSummary).length > 0 && (
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '16px', marginBottom: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-              <User size={18} color="#86198f" />
-              <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>👷 Contractor-wise Work Summary</h4>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-              {Object.entries(contractorSummary).map(([cName, cData], idx) => (
-                <div key={idx} style={{ backgroundColor: '#fdf4ff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #f5d0fe', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#86198f' }}>{cData.name}</div>
-                    <div style={{ fontSize: '10px', color: '#64748b' }}>{cData.category}</div>
-                  </div>
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#86198f', backgroundColor: '#fae8ff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #f0abfc' }}>
-                    {cData.totalQty} {cData.unit}
-                  </span>
+        {/* Date Filter Checkbox */}
+        <div style={{ backgroundColor: '#fff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', color: '#1e293b', marginBottom: isAllDates ? '0' : '8px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={isAllDates} onChange={(e) => setIsAllDates(e.target.checked)} style={{ width: '15px', height: '15px' }} />
+            બધી તારીખનો ડેટા (All Dates)
+          </label>
+          {!isAllDates && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: '10px', color: '#64748b', display: 'block', marginBottom: '2px' }}>From</span>
+                <div style={inputWrapperStyle}>
+                  <Calendar size={13} color="#64748b" />
+                  <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
-              Report Records ({filteredData.length} Found)
-            </h3>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>T&J Infra Management System</span>
-          </div>
-
-          {loading ? (
-            <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '30px' }}>Loading report data...</p>
-          ) : filteredData.length === 0 ? (
-            <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', padding: '30px' }}>No records found matching your filters.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {filteredData.map((item, index) => (
-                <div key={index} style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                  <div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap' }}>
-                      <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>🏗️ {item.site}</span>
-                      <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>{item.category}</span>
-                      <span style={{ fontSize: '11px', color: '#64748b' }}>📅 {item.date}</span>
-                      <span style={{ fontSize: '11px', color: '#0f172a', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                        <User size={11} /> {item.userId}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b' }}>
-                      {item.name !== 'N/A' && <span>👤 {item.name} — </span>}{item.detail}
-                    </div>
-                    {item.remarks && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Note: {item.remarks}</div>}
-                    
-                    {item.attachments && item.attachments.length > 0 && (
-                      <div style={{ marginTop: '6px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {item.attachments.map((att, aIdx) => (
-                          <a key={aIdx} href={att} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            <ExternalLink size={12} /> View File {aIdx + 1}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb', backgroundColor: '#eff6ff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
-                    {item.qty} {item.unit}
-                  </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: '10px', color: '#64748b', display: 'block', marginBottom: '2px' }}>To</span>
+                <div style={inputWrapperStyle}>
+                  <Calendar size={13} color="#64748b" />
+                  <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
                 </div>
-              ))}
+              </div>
             </div>
           )}
         </div>
+
+        {/* Site & Contractor Dropdowns */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
+          <div style={{ flex: 1 }}>
+            <div style={inputWrapperStyle}>
+              <MapPin size={13} color="#64748b" />
+              <select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)} style={inputStyle}>
+                <option value="All">બધી સાઇટ્સ (All Sites)</option>
+                {siteList.map((s, i) => <option key={i} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={inputWrapperStyle}>
+              <Globe size={13} color="#64748b" />
+              <select value={selectedContractor} onChange={(e) => setSelectedContractor(e.target.value)} style={inputStyle}>
+                <option value="All">બધા કોન્ટ્રાક્ટર્સ (All)</option>
+                {contractorList.map((c, i) => <option key={i} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
 
+      {/* Report Table Card */}
+      <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '13px', margin: 0, color: '#1e293b', textTransform: 'uppercase' }}>
+            📊 Site Billing & Production Format
+          </h3>
+          <button onClick={handlePrintPDF} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 12px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
+            <FileDown size={12} /> Export PDF / Print
+          </button>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>
+                <th style={{ padding: '8px 6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Date</th>
+                {dynamicColumns.map((col, idx) => (
+                  <th key={idx} style={{ padding: '8px 6px', border: '1px solid #cbd5e1', textTransform: 'capitalize' }}>{col}</th>
+                ))}
+                <th style={{ padding: '8px 6px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fef2f2' }}>Upad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={dynamicColumns.length + 2} style={{ padding: '20px', color: '#64748b' }}>Loading site reports...</td></tr>
+              ) : reportRows.length === 0 ? (
+                <tr><td colSpan={dynamicColumns.length + 2} style={{ padding: '20px', color: '#94a3b8' }}>કોઈ ડેટા મળ્યો નથી.</td></tr>
+              ) : (
+                reportRows.map((row, idx) => (
+                  <tr key={idx}>
+                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left', fontWeight: '600' }}>{formatDateToDDMMYYYY(row.date)}</td>
+                    {dynamicColumns.map((col, cIdx) => (
+                      <td key={cIdx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{row[col] !== undefined ? row[col] : '-'}</td>
+                    ))}
+                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', fontWeight: '700', backgroundColor: '#fff5f5' }}>
+                      {row.dayUpad ? `₹ ${row.dayUpad.toLocaleString('en-IN')}` : '-'}
+                    </td>
+                  </tr>
+                ))
+              )}
+
+              {/* Total Row */}
+              {reportRows.length > 0 && (
+                <tr style={{ fontWeight: '800', backgroundColor: '#f8fafc' }}>
+                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Total</td>
+                  {dynamicColumns.map((col, idx) => {
+                    const totalQty = reportRows.reduce((sum, row) => sum + (Number(row[col]) || 0), 0);
+                    return <td key={idx} style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{totalQty}</td>;
+                  })}
+                  <td style={{ padding: '6px', border: '1px solid #cbd5e1', color: '#dc2626', backgroundColor: '#fee2e2' }}>₹ {totalUpad.toLocaleString('en-IN')}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-  )
-}
+  );
+};
 
-export default SiteReportPage;
+// --- Styles ---
+const inputWrapperStyle = {
+  display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', gap: '6px'
+};
+
+const inputStyle = {
+  width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: '12px', color: '#334155', fontWeight: 'bold', appearance: 'none', cursor: 'pointer'
+};
+
+export default AdminSiteReportPage;

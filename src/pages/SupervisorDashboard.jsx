@@ -14,7 +14,8 @@ function SupervisorDashboard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [siteBoms, setSiteBoms] = useState([]);
-
+// ✏️ Edit & 24 Hours Lock States for Reports
+  const [editingReportId, setEditingReportId] = useState(null);
   const [filterSite, setFilterSite] = useState('all')
   const [filterDate, setFilterDate] = useState('')
   const [previewData, setPreviewData] = useState(null)
@@ -114,6 +115,25 @@ useEffect(() => {
     if (!error) setContractors(data || []);
   }
 
+  // ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
+  const handleRequestEditAfter24Hours = async (report) => {
+    try {
+      await supabase
+        .from('daily_reports')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', report.id);
+
+      const adminPhone = "918238598234"; // એડમિનનો વ્હોટ્સએપ નંબર
+      const portalLink = `${window.location.origin}/Dashboard`; // એપની મેઈન લિંક
+      
+      const message = `🔔 *DPR Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની DPR એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• સાઇટ: ${report.site_name}\n• તારીખ: ${report.report_date}\n\n👉 એપ્લિકેશનમાં લોગ-ઈન કરી *Bell Icon (🔔)* માંથી રિક્વેસ્ટ Approve કે Reject કરો.\nLink: ${portalLink}`;
+
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      loadReports(); 
+    } catch (err) {
+      console.error("Error requesting edit:", err);
+    }
+  };
 const loadMaterialsMaster = async () => {
     try {
       // 🌟 ૧. ટેબલનું નામ બદલીને 'site_material_stock_ledger' કર્યું

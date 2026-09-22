@@ -10,7 +10,9 @@ export default function PlantExpensesPage({ user }) {
   const [expensesHistory, setExpensesHistory] = useState([]);
   const [activeModalRowIndex, setActiveModalRowIndex] = useState(null);
   const [editingExpenseId, setEditingExpenseId] = useState(null);
-  
+  // ✏️ Edit & 24 Hours Lock States for Expenses
+  const [isLocked, setIsLocked] = useState(false);
+  const [editRequested, setEditRequested] = useState(false);
 
   // 🌟 રિપોર્ટના તમામ સ્ટેટ્સ અહીં ઉપર જ ડીકલેર કરો
   const [reportPlantFilter, setReportPlantFilter] = useState('All');
@@ -185,6 +187,69 @@ const [expenseRows, setExpenseRows] = useState([
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
+    }
+  };
+
+
+  // 🔓 એડમિન દ્વારા મંજૂર થયેલી એન્ટ્રી અનલોક કરવા માટે
+  const handleAutoUnlockExpense = async (entryId) => {
+    const { data, error } = await supabase
+      .from('plant_expenses')
+      .update({ 
+        is_locked: false, 
+        edit_requested: false,
+        created_at: new Date().toISOString() // 👈 નવો ૨૪ કલાકનો ટાઈમ આપવા
+      })
+      .eq('id', entryId)
+      .select();
+
+    if (error) {
+      triggerAlert("Database Error: " + error.message);
+    } else if (!data || data.length === 0) {
+      triggerAlert("⚠️ એક્સપેન્સ એન્ટ્રી મળી નહીં!");
+    } else {
+      triggerAlert("✅ ખર્ચ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ! તમારી પાસે એડિટ કરવા માટે નવા 24 કલાક છે.");
+      window.history.replaceState({}, document.title, window.location.pathname);
+      fetchExpensesHistory();
+    }
+  };
+
+ // ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
+  const handleRequestEditAfter24Hours = async (item) => {
+    try {
+      // ડેટાબેઝમાં is_locked અને edit_requested સેટ કરો જેથી એડમિનના બેલ આઇકનમાં દેખાય
+      await supabase
+        .from('plant_expenses')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', item.id);
+
+      const adminPhone = "918238598234"; // એડમિનનો વ્હોટ્સએપ નંબર
+      const portalLink = `${window.location.origin}/Dashboard`; // એપની મેઈન લિંક
+      
+      const message = `🔔 *Plant Expense Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની ખર્ચ એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન્ટ: ${item.plant_name}\n• કેટેગરી: ${item.expense_category}\n• રકમ: ₹${item.amount}\n• કોને આપ્યા: ${item.paid_to}\n\n👉 એપ્લિકેશનમાં લોગ-ઈન કરી *Bell Icon (🔔)* માંથી રિક્વેસ્ટ Approve કે Reject કરો.\nLink: ${portalLink}`;
+
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      fetchExpensesHistory(); 
+    } catch (err) {
+      triggerAlert("એરર: રિક્વેસ્ટ મોકલવામાં સમસ્યા આવી છે.");
+    }
+  };
+
+  // ⏳ એડિટ કરતાં પહેલાં ટાઈમ અને લૉક સ્ટેટસ ચેક કરવા
+  const handleEditClickWithTimeCheck = (item) => {
+    if (item.is_locked === true) {
+      handleRequestEditAfter24Hours(item);
+      return;
+    }
+
+    const entryTime = new Date(item.created_at || item.expense_date).getTime();
+    const currentTime = new Date().getTime();
+    const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+
+    if (hoursDifference > 24) {
+      handleRequestEditAfter24Hours(item); 
+    } else {
+      handleEditExpense(item); // 👈 તમારું જૂનું એડિટ ફંક્શન અહીં કોલ થશે
     }
   };
   
@@ -1375,53 +1440,79 @@ triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થ�
           </span>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto', paddingRight: '2px' }}>
-        {/* પાછળના પેજની Recent History માં: */}
-{expensesHistory
-  .filter(item => !selectedPlant || item.plant_name === selectedPlant)
-  .slice(0, 15)
-  .map((item) => (
-   
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
-              <div>
-                <div style={{ fontWeight: 'bold', color: '#0f172a' }}>
-                  {item.expense_category} <span style={{ color: '#dc2626', fontWeight: '800' }}>₹{item.amount}</span>
+<div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto', paddingRight: '2px' }}>
+          {expensesHistory
+            .filter(item => !selectedPlant || item.plant_name === selectedPlant)
+            .slice(0, 15)
+            .map((item) => {
+              
+              // 🎯 ૨૪ કલાક અને Lock સ્ટેટસનું લોજિક
+              const entryTime = new Date(item.created_at || item.expense_date).getTime();
+              const currentTime = new Date().getTime();
+              const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+              const isLocked = item.is_locked === true || hoursDifference > 24;
+
+              return (
+                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
+                  <div>
+                    <div style={{ fontWeight: 'bold', color: '#0f172a' }}>
+                      {item.expense_category} <span style={{ color: '#dc2626', fontWeight: '800' }}>₹{item.amount}</span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                      Paid To: <strong style={{ color: '#334155' }}>{item.paid_to}</strong> | Mode: <span style={{ color: '#dc2626', fontWeight: '600' }}>{item.payment_mode}</span> | Date: {item.expense_date}
+                      {item.remarks && <span style={{ color: '#94a3b8' }}> ({item.remarks})</span>}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    {item.bill_url && (
+                      <a href={item.bill_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '10px', fontWeight: 'bold', backgroundColor: '#dcfce7', color: '#15803d', padding: '4px 8px', borderRadius: '6px', textDecoration: 'none' }}>
+                        View Bill
+                      </a>
+                    )}
+
+                    {/* 🎯 લૉક હોય તો Request Edit, નહિતર Edit બટન */}
+                    {isLocked ? (
+                      <button
+                        type="button"
+                        onClick={() => handleEditClickWithTimeCheck(item)}
+                        style={{
+                          backgroundColor: '#fef2f2',
+                          color: '#b91c1c',
+                          border: '1px solid #fecaca',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        🔒 Request Edit
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleEditClickWithTimeCheck(item)}
+                        style={{
+                          backgroundColor: '#eff6ff',
+                          color: '#2563eb',
+                          border: '1px solid #bfdbfe',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {editingExpenseId === item.id ? 'Editing...' : 'Edit'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                  Paid To: <strong style={{ color: '#334155' }}>{item.paid_to}</strong> | Mode: <span style={{ color: '#dc2626', fontWeight: '600' }}>{item.payment_mode}</span> | Date: {item.expense_date}
-                  {item.remarks && <span style={{ color: '#94a3b8' }}> ({item.remarks})</span>}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-  {item.bill_url && (
-    <a href={item.bill_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '10px', fontWeight: 'bold', backgroundColor: '#dcfce7', color: '#15803d', padding: '4px 8px', borderRadius: '6px', textDecoration: 'none' }}>
-      View Bill
-    </a>
-  )}
-
-  {/* ✏️ Edit Button */}
-  <button
-    type="button"
-    onClick={() => handleEditExpense(item)}
-    style={{
-      backgroundColor: '#eff6ff',
-      color: '#2563eb',
-      border: '1px solid #bfdbfe',
-      padding: '4px 8px',
-      borderRadius: '6px',
-      fontSize: '10px',
-      fontWeight: 'bold',
-      cursor: 'pointer'
-    }}
-  >
-    Edit
-  </button>
-
-
-</div>
-            </div>
-          ))}
+              );
+            })}
 
           {expensesHistory.length === 0 && (
             <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '12px' }}>

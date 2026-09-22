@@ -338,6 +338,7 @@ const [attendanceInfo, setAttendanceInfo] = useState({
   columnInstallation: 0,
   singleColumn: 0,
   doubleColumn: 0,
+  panelErection: 0,
   finishingWork: 0,
   otherWork: 0
 }); 
@@ -628,7 +629,7 @@ if (selectedPlant && selectedPlant !== 'All') {
 }
 
 const { data: repData } = await reportQuery;
-let pTotal = 0, cInstTotal = 0, singleTotal = 0, doubleTotal = 0, finishTotal = 0, otherTotal = 0;
+let pTotal = 0, cInstTotal = 0 ,pErectionTotal = 0,singleTotal = 0, doubleTotal = 0, finishTotal = 0, otherTotal = 0;
 
 if (repData && repData.length > 0) {
   repData.forEach(rep => {
@@ -646,6 +647,8 @@ if (repData && repData.length > 0) {
           c.workItems.forEach(w => {
             if (w.workType === '1. Column Installation') {
               cInstTotal += Number(w.quantity || 0);
+            } else if (w.workType === '3. Panel Erection') {
+              pErectionTotal += Number(w.quantity || 0);
             } else if (w.workType === '2. Column Concrete') {
               singleTotal += Number(w.singleCastingQty || 0);
               doubleTotal += Number(w.doubleCastingQty || 0);
@@ -664,6 +667,7 @@ if (repData && repData.length > 0) {
 setTotalWorkSummary({
   paling: pTotal,
   columnInstallation: cInstTotal,
+  panelErection: pErectionTotal,
   singleColumn: singleTotal,
   doubleColumn: doubleTotal,
   finishingWork: finishTotal,
@@ -907,12 +911,17 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
     </div>
 
     <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>5. Finishing Work</span>
+  <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>5. Panel Erection</span>
+  <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.panelErection} Nos</strong>
+</div>
+
+    <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>6. Finishing Work</span>
       <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.finishingWork} R.Ft</strong>
     </div>
 
     <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>6. Other Work</span>
+      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700', display: 'block' }}>7. Other Work</span>
       <strong style={{ fontSize: '13px', color: '#0f172a' }}>{totalWorkSummary.otherWork}</strong>
     </div>
   </div>
@@ -933,7 +942,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Layers size={16} color="#2563eb" />
                 <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                  Live Plant Inventory
+                  Live Material Stock at Site
                 </span>
               </div>
               <span style={{ fontSize: '10px', fontWeight: '800', color: '#16a34a', backgroundColor: '#f0fdf4', padding: '2px 6px', borderRadius: '6px' }}>

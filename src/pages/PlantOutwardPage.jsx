@@ -35,6 +35,20 @@ const [existingBills, setExistingBills] = useState([]);
 
   useEffect(() => {
     fetchPlants();
+ const searchParams = new URLSearchParams(window.location.search);
+    let approveId = searchParams.get('approve_id');
+
+    if (!approveId) {
+      approveId = localStorage.getItem('pending_outward_approve_id');
+    } else {
+      localStorage.setItem('pending_outward_approve_id', approveId);
+    }
+
+    if (approveId) {
+      handleAutoUnlockEntry(approveId);
+      localStorage.removeItem('pending_outward_approve_id');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
  useEffect(() => {
@@ -122,6 +136,68 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
         setSites(siteData || []); // (જો તમે useState માં sites સ્ટેટ ન બનાવ્યું હોય તો const [sites, setSites] = useState([]); ઉપર ડિક્લેર કરી દેવું)
       };
   };
+// 🔓 એડમિન દ્વારા મંજૂર થયેલી એન્ટ્રી અનલોક કરવા માટે
+  const handleAutoUnlockEntry = async (entryId) => {
+    const { data, error } = await supabase
+      .from('plant_material_outward')
+      .update({ 
+        is_locked: false, 
+        edit_requested: false,
+        created_at: new Date().toISOString() // 👈 નવો ૨૪ કલાકનો ટાઈમ આપવા
+      })
+      .eq('id', entryId)
+      .select();
+
+    if (error) {
+      triggerAlert("Database Error: " + error.message);
+    } else if (!data || data.length === 0) {
+      triggerAlert("⚠️ એન્ટ્રી મળી નહીં!");
+    } else {
+      triggerAlert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ! તમારી પાસે એડિટ કરવા માટે નવા 24 કલાક છે.");
+      window.history.replaceState({}, document.title, window.location.pathname);
+      fetchRecentHistory();
+    }
+  };
+
+  // ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
+  const handleRequestEditAfter24Hours = async (entry) => {
+    try {
+      // 1. ડેટાબેઝમાં રિક્વેસ્ટ સેવ કરો જેથી એડમિનના બેલ આઇકનમાં દેખાય
+      await supabase
+        .from('plant_material_outward')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', entry.id);
+
+      const adminPhone = "918238598234"; // એડમિનનો વોટ્સએપ નંબર
+      const portalLink = `${window.location.origin}/Dashboard`; // એપની મેઈન લિંક
+      
+      const message = `🔔 *Outward Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની આઉટવર્ડ એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન્ટ: ${entry.plant_name}\n• પાર્ટી: ${entry.party_name}\n• સાઇટ: ${entry.site_name}\n\n👉 એપ્લિકેશનમાં લોગ-ઈન કરી *Bell Icon (🔔)* માંથી રિક્વેસ્ટ Approve કે Reject કરો.\nLink: ${portalLink}`;
+
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      fetchRecentHistory(); 
+    } catch (err) {
+      triggerAlert("એરર: રિક્વેસ્ટ મોકલવામાં સમસ્યા આવી છે.");
+    }
+  };
+
+  // ⏳ એડિટ કરતાં પહેલાં ટાઈમ અને લૉક સ્ટેટસ ચેક કરવા
+  const handleEditClickWithTimeCheck = (entry) => {
+    if (entry.is_locked === true) {
+      handleRequestEditAfter24Hours(entry);
+      return;
+    }
+
+    const entryTime = new Date(entry.created_at || entry.date).getTime();
+    const currentTime = new Date().getTime();
+    const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+
+    if (hoursDifference > 24) {
+      handleRequestEditAfter24Hours(entry); 
+    } else {
+      handleEditClick(entry); 
+    }
+  };
+
 // 📜 આઉટવર્ડની તાજેતરની હિસ્ટ્રી ફેચ કરવાનું ફંક્શન
   const fetchRecentHistory = async () => {
     if (!selectedPlant) return;
@@ -1811,10 +1887,12 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
 
   const groupedHistoryList = Object.values(groupedHistoryMap);
 
-  return (
+ 
+
+return (
     <div style={{ marginTop: '20px' }}>
       <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', paddingLeft: '4px' }}>
-        Recent Outward History
+        Recent Outward History (Last 24 Hours Editable)
       </h4>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {groupedHistoryList.map((item) => {
@@ -1835,6 +1913,12 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
             }
           }
 
+          // 🎯 ૨૪ કલાક અને Lock સ્ટેટસનું લોજિક
+          const entryTime = new Date(item.created_at || item.date).getTime();
+          const currentTime = new Date().getTime();
+          const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+          const isLocked = item.is_locked === true || hoursDifference > 24;
+
           return (
             <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
               <div>
@@ -1842,63 +1926,77 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                 <span style={{ fontWeight: 'bold', color: '#c2410c' }}>
                   {item.combinedMaterials.join(', ')}
                 </span> 
-                - <span style={{ color: '#64748b' }}>{item.party_name} ({item.site_name})</span>
+              - <span style={{ color: '#64748b' }}>{item.site_name}</span>
                 
                 <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
                   DC: {item.dc_number || 'EMPTY'} | Date: {displayDate}
                 </div>
               </div>
 
-              <button 
-                type="button"
-                onClick={() => handleEditClick(item)}
-                style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap', marginLeft: '10px' }}
-              >
-                {editingId === item.id ? 'Editing...' : 'Edit'}
-              </button>
-             <button 
-  type="button"
-  onClick={async () => {
-    try {
-      const { data: allRows, error } = await supabase
-        .from('plant_material_outward')
-        .select('*')
-        .eq('plant_name', selectedPlant)
-        .eq('dc_number', item.dc_number);
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                {/* 🎯 લૉક હોય તો Request Edit, નહિતર Edit બટન */}
+                {isLocked ? (
+                  <button 
+                    type="button"
+                    onClick={() => handleEditClickWithTimeCheck(item)}
+                    style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
+                  >
+                    🔒 Request Edit
+                  </button>
+                ) : (
+                  <button 
+                    type="button"
+                    onClick={() => handleEditClickWithTimeCheck(item)}
+                    style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
+                  >
+                    {editingId === item.id ? 'Editing...' : 'Edit'}
+                  </button>
+                )}
 
-      if (error) throw error;
+                <button 
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const { data: allRows, error } = await supabase
+                        .from('plant_material_outward')
+                        .select('*')
+                        .eq('plant_name', selectedPlant)
+                        .eq('dc_number', item.dc_number);
 
-      if (allRows && allRows.length > 0) {
-        await handlePrintDC(
-          item.dc_number, 
-          item.party_name, 
-          item.site_name, 
-          allRows, 
-          item.vehicle_no, 
-          item.transporter_name, 
-          displayDate,
-          item.submitted_by
-        );
-      } else {
-        await handlePrintDC(
-          item.dc_number, 
-          item.party_name, 
-          item.site_name, 
-          [item], 
-          item.vehicle_no, 
-          item.transporter_name, 
-          displayDate,
-          item.submitted_by
-        );
-      }
-    } catch (err) {
-      console.error("Print Error:", err);
-    }
-  }}
-  style={{ fontSize: '11px', fontWeight: 'bold', color: '#ea580c', backgroundColor: '#fff7ed', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fed7aa', marginLeft: '6px', whiteSpace: 'nowrap' }}
->
-  🖨️ Print DC
-</button>
+                      if (error) throw error;
+
+                      if (allRows && allRows.length > 0) {
+                        await handlePrintDC(
+                          item.dc_number, 
+                          item.party_name, 
+                          item.site_name, 
+                          allRows, 
+                          item.vehicle_no, 
+                          item.transporter_name, 
+                          displayDate,
+                          item.submitted_by
+                        );
+                      } else {
+                        await handlePrintDC(
+                          item.dc_number, 
+                          item.party_name, 
+                          item.site_name, 
+                          [item], 
+                          item.vehicle_no, 
+                          item.transporter_name, 
+                          displayDate,
+                          item.submitted_by
+                        );
+                      }
+                    } catch (err) {
+                      console.error("Print Error:", err);
+                    }
+                  }}
+                  style={{ fontSize: '11px', fontWeight: 'bold', color: '#ea580c', backgroundColor: '#fff7ed', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fed7aa', whiteSpace: 'nowrap' }}
+                >
+                  🖨️ Print DC
+                </button>
+              </div>
             </div>
           );
         })}

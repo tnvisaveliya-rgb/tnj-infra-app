@@ -12,6 +12,9 @@ function PlantDprEntry({ user }) {
   const [materials, setMaterials] = useState([]);
   const [products, setProducts] = useState([]);
   const [sites, setSites] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [recentHistory, setRecentHistory] = useState([]); // 📜 Recent History State
 const [editingId, setEditingId] = useState(null);
   const [productionSources, setProductionSources] = useState([
@@ -55,28 +58,40 @@ const triggerAlert = (msg) => {
   });
 };
   
-// 🔗 DPR પેજમાં URL અથવા LocalStorage માંથી approve_id પકડીને અનલોક કરવાનું પરફેક્ટ લોજિક
+// 🛡️ એડમિન ચેક કરો અને નોટિફિકેશન લાવો (જ્યારે plants નો ડેટા લોડ થાય ત્યારે)
   useEffect(() => {
-    // 1. URL માંથી approve_id શોધો
-    const searchParams = new URLSearchParams(window.location.search);
-    let approveId = searchParams.get('approve_id');
+    const checkAdminAndFetchRequests = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
+      const adminStatus = userEmail === 'infra.tnj@gmail.com';
+      setIsAdmin(adminStatus);
+      
+      // જો એડમિન હોય અથવા સુપરવાઈઝરના પ્લાન્ટ્સ લોડ થઈ ગયા હોય તો જ નોટિફિકેશન લાવો
+      if (adminStatus || plants.length > 0) {
+        fetchPendingRequests(adminStatus);
+      }
+    };
+    checkAdminAndFetchRequests();
+  }, [plants]); // 👈 plants લોડ થાય એટલે આ ઓટોમેટિક ચાલશે
 
-    // 2. જો URL માં ન મળે, તો localStorage માંથી ચેક કરો
-    if (!approveId) {
-      approveId = localStorage.getItem('pending_dpr_approve_id');
-    } else {
-      localStorage.setItem('pending_dpr_approve_id', approveId);
-    }
+  const fetchPendingRequests = async (adminStatus) => {
+    let query = supabase
+      .from('production_header')
+      .select('*')
+      .eq('edit_requested', true) // માત્ર એવી એન્ટ્રી જેની રિક્વેસ્ટ આવી હોય
+      .eq('is_locked', true)
+      .order('created_at', { ascending: false });
 
-    // 3. જો ID મળી જાય, તો ડાયરેક્ટ અનલોક ફંક્શન ચલાવો
-    if (approveId) {
-      handleAutoUnlockEntry(approveId);
-      localStorage.removeItem('pending_dpr_approve_id');
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (selectedPlant) {
-      fetchRecentHistory();
+    // જો સુપરવાઈઝર હોય, તો માત્ર એને અસાઇન થયેલા પ્લાન્ટની જ પેન્ડિંગ રિક્વેસ્ટ લાવો
+    if (!adminStatus) {
+      const assignedPlantNames = plants.map(p => p.plant_name);
+      if (assignedPlantNames.length === 0) return; 
+      query = query.in('plant_name', assignedPlantNames);
     }
-  }, [selectedPlant]);
+      
+    const { data, error } = await query;
+    if (!error) setPendingRequests(data || []);
+  };
 
   useEffect(() => {
     fetchPlants();
@@ -92,6 +107,7 @@ const triggerAlert = (msg) => {
       setSites([]);
     }
   }, [selectedPlantId]);
+  
 
   // 📜 પ્લાન્ટ સિલેક્ટ થાય એટલે હિસ્ટ્રી ફેચ કરવા માટે અને URL માંથી approve_id ચેક કરવા માટે
   useEffect(() => {
@@ -159,16 +175,58 @@ const triggerAlert = (msg) => {
       setPlants([]);
     }
   };
-  const fetchRecentHistory = async () => {
-    const { data } = await supabase
-      .from('production_header')
-      .select('*')
-      .eq('plant_name', selectedPlant)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    setRecentHistory(data || []);
-  };
+const fetchRecentHistory = async () => {
+  // 1. Header ani Items fetch kara
+  const { data: headerData } = await supabase
+    .from('production_header')
+    .select('*, production_items(*)') 
+    .eq('plant_name', selectedPlant)
+    .order('created_at', { ascending: false })
+    .limit(10);
 
+  if (!headerData || headerData.length === 0) {
+    setRecentHistory([]);
+    return;
+  }
+
+  // 2. Saglya Items che ID ekatra kara
+  const itemIds = [];
+  headerData.forEach(header => {
+    if (header.production_items) {
+      header.production_items.forEach(item => itemIds.push(item.id));
+    }
+  });
+
+  // 3. Ya IDs varun Stock Ledger madhun actual Qty fetch kara
+  let stockLedgerMap = {};
+  if (itemIds.length > 0) {
+    const { data: stockData } = await supabase
+      .from('stock_ledger')
+      .select('reference_id, qty, transaction_type')
+      .in('reference_id', itemIds)
+      .eq('transaction_type', 'PRODUCTION');
+
+    if (stockData) {
+      stockData.forEach(stock => {
+        if (!stockLedgerMap[stock.reference_id]) {
+          stockLedgerMap[stock.reference_id] = 0;
+        }
+        stockLedgerMap[stock.reference_id] += Number(stock.qty);
+      });
+    }
+  }
+
+  // 4. Header data madhe 'actual_qty' joda ani state madhe save kara
+  const finalHistory = headerData.map(header => {
+    const updatedItems = (header.production_items || []).map(item => ({
+      ...item,
+      actual_qty: stockLedgerMap[item.id] || 0
+    }));
+    return { ...header, production_items: updatedItems };
+  });
+
+  setRecentHistory(finalHistory);
+};
   const fetchMasters = async (plantId) => {
     const { data: siteData } = await supabase.from('sites').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);
     setSites(siteData || []);
@@ -231,6 +289,15 @@ const triggerAlert = (msg) => {
           const isColumn = item.product_name ? item.product_name.toLowerCase().includes('column') : false;
           const isPanel = item.product_name ? item.product_name.toLowerCase().includes('panel') : false;
 
+// 🎯 1. પ્રોડક્ટ અને સાઇઝ મુજબ ડાયનામિક ફેક્ટર શોધો (જો ડેટાબેઝમાં હોય તો તે, બાકી ડિફોલ્ટ 30)
+          const rawSize = item.size_variant ? String(item.size_variant).split('(')[0].trim() : '';
+          const matchedProd = products.find(p => 
+            (p.name || '').toLowerCase().trim() === (item.product_name || '').toLowerCase().trim() &&
+            (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+          ) || products.find(p => (p.name || '').toLowerCase().trim() === (item.product_name || '').toLowerCase().trim());
+
+          const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+
           let steelRowsFormatted = [];
           if (steelData && steelData.length > 0) {
             steelRowsFormatted = steelData.map(st => {
@@ -241,7 +308,7 @@ const triggerAlert = (msg) => {
                 productSize: item.size_variant || '',
                 wireSize: st.steel_size || '3mm',
                 wireCount: st.wires_or_bars ? st.wires_or_bars.replace(/[^0-9]/g, '') : '4',
-                totalLines: isPanel ? (st.total_qty / 30) : '', // પેનલ માટે લાઈન્સ (Total Qty / 30)
+                totalLines: isPanel ? (st.total_qty / dynamicFactor) : '', // 👈 હાર્ડકોડ 30 ની જગ્યાએ ડાયનામિક ફેક્ટર
                 qty: !isPanel ? (st.total_qty || '') : ''     // કૉલમ કે જનરલ માટે Qty
               };
             });
@@ -256,7 +323,7 @@ const triggerAlert = (msg) => {
             lineOfCasting: item.nos_of_line_casting || '',
             steelRows: steelRowsFormatted,
             brokenQty: item.broken_qty || 0,
-            qty: item.nos_of_line_casting ? item.nos_of_line_casting * 30 : (steelRowsFormatted[0]?.qty || '')
+           qty: item.nos_of_line_casting ? item.nos_of_line_casting * dynamicFactor : (steelRowsFormatted[0]?.qty || '') // 👈 અહીં પણ ડાયનામિક ફેક્ટર
           });
         }
 
@@ -293,6 +360,40 @@ const triggerAlert = (msg) => {
       triggerAlert("એરર: ડેટા લોડ કરવામાં સમસ્યા થઈ છે.");
     }
   };
+// ✅ App ma thi Approve karva mate
+  const handleApproveRequest = async (entry) => {
+    const { error } = await supabase
+      .from('production_header')
+      .update({ 
+        is_locked: false, 
+        edit_requested: false,
+        created_at: new Date().toISOString() // Navo 24 kalak no timer apva
+      })
+      .eq('id', entry.id);
+
+    if (!error) {
+      triggerAlert(`✅ ${entry.plant_name} (${entry.team_name}) ni request manjur thai gai che!`);
+      fetchPendingRequests(isAdmin); 
+      fetchRecentHistory();   
+    }
+  };
+
+  // ❌ App ma thi Reject karva mate
+  const handleRejectRequest = async (entry) => {
+    const { error } = await supabase
+      .from('production_header')
+      .update({ 
+        edit_requested: false,
+        is_locked: true 
+      })
+      .eq('id', entry.id);
+
+    if (!error) {
+      triggerAlert(`❌ ${entry.plant_name} (${entry.team_name}) ni request na manjur karvama aavi che.`);
+      fetchPendingRequests(isAdmin);
+      fetchRecentHistory();
+    }
+  };
  const handleEditClickWithTimeCheck = (entry) => {
     // 🎯 1. સૌથી પહેલાં ડેટાબેઝનું is_locked ચેક કરો (જો મેન્યુઅલી કે ટ્રિગરથી TRUE કર્યું હોય તો તરત પકડાઈ જાય)
     if (entry.is_locked === true) {
@@ -312,42 +413,56 @@ const triggerAlert = (msg) => {
     }
   };
 
-  // 🔔 ૨૪ કલાક પછી એડિટ માટે વોટ્સએપ રિક્વેસ્ટ મોકલવાનું ફંક્શન
-  const handleRequestEditAfter24Hours = (entry) => {
-    const adminPhone = "918238598234"; 
-    // 🎯 અહીં લિંકમાં '&type=dpr' અચૂક ઉમેરવું જેથી ડેશબોર્ડને ખબર પડે કે આ DPR ની લિંક છે
-    const approvalLink = `${window.location.origin}${window.location.pathname}?approve_id=${entry.id}&type=dpr`;
-    
-    const message = `🔔 *DPR Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની DPR એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન્ટ: ${entry.plant_name}\n• ટીમ: ${entry.team_name}\n• તારીખ: ${entry.production_date}\n\n👉 એડિટ મંજૂર કરવા માટે આ લિંક પર ક્લિક કરો:\n${approvalLink}`;
+const handleRequestEditAfter24Hours = async (entry) => {
+    try {
+      // 1. Database ma request flag true karo jethi admin na bell icon ma notification aave
+      const { error } = await supabase
+        .from('production_header')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', entry.id);
 
-    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
-  };
-// 🔓 DPR એડમિન લિંક પર ક્લિક કરે એટલે એન્ટ્રી અનલોક કરવાનું ફંક્શન
- const handleAutoUnlockEntry = async (entryId) => {
-    console.log("Attempting to unlock DPR entry ID:", entryId);
+      if (error) throw error;
 
-    const { data, error } = await supabase
-      .from('production_header') // 👈 DPR નું મુખ્ય ટેબલ
-      .update({ 
-        is_locked: false, 
-        edit_requested: false 
-      })
-      .eq('id', entryId)
-      .select();
+      const adminPhone = "918238598234"; // Tamaro admin no WhatsApp number
+      const portalLink = `${window.location.origin}${window.location.pathname}`; // Siki portal ni link
+      
+      const message = `🔔 *DPR Edit Approval Request*\n\nUser e 24 kalak juni nicheni DPR entry sudharva mate parvanagi mangi che:\n• Plant: ${entry.plant_name}\n• Team: ${entry.team_name}\n• Date: ${entry.production_date}\n\n👉 App open kari *Bell Icon (🔔)* mathi Request Approve ya Reject karo.\nLink: ${portalLink}`;
 
-    console.log("DPR Supabase Response - Data:", data, "Error:", error);
-
-    if (error) {
-      triggerAlert("Database Error: " + error.message);
-    } else if (!data || data.length === 0) {
-      triggerAlert("⚠️ DPR એન્ટ્રી મળી નહીં!");
-    } else {
-      triggerAlert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
-      window.history.replaceState({}, document.title, window.location.pathname);
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
       fetchRecentHistory();
+      fetchPendingRequests(isAdmin);
+
+    } catch (err) {
+      triggerAlert("Eror: Request moklavama samasya aavi che.");
     }
   };
+const handleAutoUnlockEntry = async (entryId) => {
+  console.log("Attempting to unlock DPR entry ID:", entryId);
 
+  const { data, error } = await supabase
+    .from('production_header')
+    .update({ 
+      is_locked: false, 
+      edit_requested: false,
+      created_at: new Date().toISOString() // 👈 સ્માર્ટ ટ્રીક: ટાઈમર રિસેટ થઈ જશે!
+    })
+    .eq('id', Number(entryId))
+    .select();
+
+  if (error) {
+    triggerAlert("Database Update Error: " + error.message);
+  } else if (!data || data.length === 0) {
+    triggerAlert("⚠️ આ ID વાળી DPR એન્ટ્રી ડેટાબેઝમાં મળી નહીં!");
+  } else {
+    triggerAlert("✅ DPR એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ! તમારી પાસે એડિટ કરવા માટે નવા 24 કલાક છે.");
+    window.history.replaceState({}, document.title, window.location.pathname);
+    
+    if (data[0] && data[0].plant_name) {
+      setSelectedPlant(data[0].plant_name);
+    }
+    await fetchRecentHistory();
+  }
+};
  const updateBomCementForSource = async (sIdx, updatedSources) => {
     const source = updatedSources[sIdx];
     if (source.concreteSource !== 'Site Mix') return;
@@ -358,22 +473,42 @@ const triggerAlert = (msg) => {
       if (!item.product) continue;
       const isColumn = item.product.toLowerCase().includes('column');
       const isPanel = item.product.toLowerCase().includes('panel');
+
+let productVariant = item.sizeVariant || 'Standard';
+
+      // 🎯 કૉલમ માટે સાઇઝ પકડવાની 3 લાઈનો (જે તમારા કોડમાં ખૂટતી હતી)
+      if (isColumn && item.steelRows && item.steelRows.length > 0) {
+        productVariant = item.steelRows[0].productSize || 'Standard';
+      }
+
+      // કૌંસ ( ) દૂર કરવા માટે
+      if (typeof productVariant === 'string' && productVariant.includes(' (')) {
+        productVariant = productVariant.split(' (')[0].trim();
+      }
+
+     
       
       let totalProducedQty = 0;
       if (isColumn) {
         totalProducedQty = item.steelRows ? item.steelRows.reduce((acc, s) => acc + (Number(s.qty) || 0), 0) : 0;
       } else if (isPanel) {
-        totalProducedQty = (Number(item.lineOfCasting) || 0) * 30;
+ // 🎯 1. લોકલ products સ્ટેટમાંથી ડાયનામિક ફેક્ટર શોધો
+      const rawSize = String(productVariant).split('(')[0].trim();
+      const matchedProd = products.find(p => 
+        (p.name || '').toLowerCase().trim() === item.product.toLowerCase().trim() &&
+        (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+      ) || products.find(p => (p.name || '').toLowerCase().trim() === item.product.toLowerCase().trim());
+
+      const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+
+        totalProducedQty = (Number(item.lineOfCasting) || 0) * dynamicFactor; // 👈 હાર્ડકોડ 30 ની જગ્યાએ ડાયનામિક ફેક્ટર
       } else {
         totalProducedQty = Number(item.qty) || 0;
       }
 
       if (totalProducedQty <= 0) continue;
 
-      let productVariant = item.sizeVariant || 'Standard';
-      if (typeof productVariant === 'string' && productVariant.includes(' (')) {
-        productVariant = productVariant.split(' (')[0].trim();
-      }
+     
 
       try {
         // 🎯 UDrain કે ગમે તે પ્રોડક્ટ હોય, .ilike વાપરીને પરફેક્ટ BOM ફેચ કરશે
@@ -422,11 +557,20 @@ const triggerAlert = (msg) => {
       const isColumn = item.product.toLowerCase().includes('column');
       const isPanel = item.product.toLowerCase().includes('panel');
       
+   // 🎯 1. લોકલ products સ્ટેટમાંથી ડાયનામિક ફેક્ટર શોધો
+      const rawSize = String(item.sizeVariant).split('(')[0].trim();
+      const matchedProd = products.find(p => 
+        (p.name || '').toLowerCase().trim() === item.product.toLowerCase().trim() &&
+        (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+      ) || products.find(p => (p.name || '').toLowerCase().trim() === item.product.toLowerCase().trim());
+
+      const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+
       let totalProducedQty = 0;
       if (isColumn) {
         totalProducedQty = item.steelRows ? item.steelRows.reduce((acc, s) => acc + (Number(s.qty) || 0), 0) : 0;
       } else if (isPanel) {
-        totalProducedQty = (Number(item.lineOfCasting) || 0) * 30;
+        totalProducedQty = (Number(item.lineOfCasting) || 0) * dynamicFactor; // 👈 હાર્ડકોડ 30 ની જગ્યાએ ડાયનામિક ફેક્ટર
       } else {
         totalProducedQty = Number(item.qty) || 0;
       }
@@ -495,8 +639,21 @@ const triggerAlert = (msg) => {
     updated[sIdx].items[iIdx][field] = val;
     if (field === 'lineOfCasting') {
       const lineVal = Number(val) || 0;
-      updated[sIdx].items[iIdx].qty = lineVal ? lineVal * 30 : '';
+     const currentItem = updated[sIdx].items[iIdx];
+      
+      // 🎯 પ્રોડક્ટ અને સાઇઝ મુજબ ડેટાબેઝમાંથી ડાયનામિક ફેક્ટર શોધો
+      const rawSize = String(currentItem.sizeVariant || '').split('(')[0].trim();
+      const matchedProd = products.find(p => 
+        (p.name || '').toLowerCase().trim() === (currentItem.product || '').toLowerCase().trim() &&
+        (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+      ) || products.find(p => (p.name || '').toLowerCase().trim() === (currentItem.product || '').toLowerCase().trim());
+
+      const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+
+      // 👈 હાર્ડકોડ 30 ની જગ્યાએ ડાયનામિક ફેક્ટર ગુણ્યો
+      currentItem.qty = lineVal ? lineVal * dynamicFactor : '';
     }
+    
     await updateBomCementForSource(sIdx, updated);
     await updateBomM3ForSource(sIdx, updated);
   };
@@ -693,6 +850,14 @@ if (source.workType === 'Other Work') {
                 }
                 baseSize = colSize;
               }
+// 🎯 ડેટાબેઝમાંથી ડાયનામિક ફેક્ટર શોધો
+              const matchedProd = products.find(p => 
+                (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim() &&
+                (p.product_size || '').toLowerCase().trim() === baseSize.toLowerCase().trim()
+              ) || products.find(p => (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim());
+
+              const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+
 
               let steelDesc = '';
               if (isPanel || isColumn) {
@@ -726,7 +891,7 @@ let totalProducedQty = 0;
               } else if (isPanel) {
                 // 🎯 પેનલ માટે: કુલ સરવાળો (જે માત્ર કાચો માલ/BOM કાપવા માટે વપરાશે)
                 const totalPanelLines = item.steelRows ? item.steelRows.reduce((acc, s) => acc + (Number(s.totalLines) || 0), 0) : 0;
-                totalProducedQty = totalPanelLines > 0 ? totalPanelLines * 30 : mainLines * 30;
+               totalProducedQty = totalPanelLines > 0 ? totalPanelLines * dynamicFactor : mainLines * dynamicFactor; // 👈 ડાયનામિક ફેક્ટર
               } else {
                 totalProducedQty = Number(item.qty) || 0;
               }
@@ -737,7 +902,7 @@ let totalProducedQty = 0;
                   for (const steelRow of item.steelRows) {
                     let rowQty = 0;
                     if (isPanel) {
-                      rowQty = (Number(steelRow.totalLines) || 0) * 30; // દરેક લાઈન ગુણ્યા ૩૦ (દા.ત. 1 * 30, 2 * 30)
+                     rowQty = (Number(steelRow.totalLines) || 0) * dynamicFactor; // 👈 ડાયનામિક ફેક્ટર
                     } else if (isColumn) {
                       rowQty = Number(steelRow.qty) || 0;
                     }
@@ -859,7 +1024,7 @@ if (item.steelRows && item.steelRows.length > 0) {
     if (isColumn) {
       producedCount = Number(steel.qty) || 0;
     } else if (isPanel) {
-      producedCount = (Number(steel.totalLines) || 0) * 30;
+     producedCount = (Number(steel.totalLines) || 0) * dynamicFactor; // 👈 ડાયનામિક ફેક્ટર
     } else {
       producedCount = Number(item.qty) || 0;
     }
@@ -1341,10 +1506,30 @@ if (item.steelRows && item.steelRows.length > 0) {
                               <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Number of Line</label>
                               <input type="number" placeholder="Enter lines" value={item.lineOfCasting} onChange={(e) => updateProductionItem(sIndex, iIndex, 'lineOfCasting', e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
                             </div>
-                            <div>
-                              <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>Auto Calculate Qty (x30)</label>
-                              <input type="number" placeholder="Qty" value={item.qty} readOnly style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#f1f5f9', boxSizing: 'border-box' }} />
-                            </div>
+                            {/* ---------------- UI CODE CHANGE ---------------- */}
+
+{/* જ્યાં Auto Calculate Qty (x30) લખેલું છે ત્યાં આ રીતે બદલો: */}
+<div>
+  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '2px' }}>
+    {(() => {
+      const rawSize = String(item.sizeVariant || '').split('(')[0].trim();
+      const matchedProd = products.find(p => 
+        (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim() &&
+        (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+      ) || products.find(p => (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim());
+
+      const factor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+      return `Auto Calculate Qty (x${factor})`;
+    })()}
+  </label>
+  <input 
+    type="number" 
+    placeholder="Qty" 
+    value={item.qty} 
+    readOnly 
+    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', backgroundColor: '#f1f5f9', boxSizing: 'border-box' }} 
+  />
+</div>
                           </div>
                         )
                       )}
@@ -1787,26 +1972,42 @@ if (item.steelRows && item.steelRows.length > 0) {
 {/* ૨. PANEL: કુલ ઉત્પાદન + લાઈન વાઈઝ સ્ટીલ ડિટેલ્સ */}
 {isPan && (
   <div style={{ marginTop: '3px', display: 'flex', flexDirection: 'column', gap: '3px', paddingLeft: '4px' }}>
-    <div style={{ color: '#475569', fontSize: '11px' }}>
-      {item.sizeVariant && <span>સાઇઝ: <strong>{item.sizeVariant}</strong> | </span>}
-      કુલ ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{(Number(item.lineOfCasting) || 0) * 30} Nos</strong>
-    </div>
+    {(() => {
+      // 🎯 ડેટાબેઝમાંથી ડાયનામિક ફેક્ટર શોધો
+      const rawSize = String(item.sizeVariant || '').split('(')[0].trim();
+      const matchedProd = products.find(p => 
+        (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim() &&
+        (p.product_size || '').toLowerCase().trim() === rawSize.toLowerCase().trim()
+      ) || products.find(p => (p.name || '').toLowerCase().trim() === (item.product || '').toLowerCase().trim());
 
-    {/* 🛠️ Panel Steel Rows (લાઈન વાઇઝ સ્ટીલ અને નંગ) */}
-    {item.steelRows && item.steelRows.length > 0 && (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px', marginTop: '2px' }}>
-        {item.steelRows.map((st, sIndex) => {
-          const lines = Number(st.totalLines) || 0;
-          const nos = lines * 30;
-          return (
-            <div key={sIndex} style={{ fontSize: '10.5px', color: '#334155' }}>
-              ↳ સ્ટીલ: <strong>{st.wireSize || '3mm'}</strong> ({st.wireCount || '4'} Wires)
-              {' '}— <strong>{lines} Line</strong> ({nos} Nos)
+      const dynamicFactor = matchedProd?.qty_per_line || matchedProd?.pieces_per_line || 30;
+      const totalNos = (Number(item.lineOfCasting) || 0) * dynamicFactor;
+
+      return (
+        <>
+          <div style={{ color: '#475569', fontSize: '11px' }}>
+            {item.sizeVariant && <span>સાઇઝ: <strong>{item.sizeVariant}</strong> | </span>}
+            કુલ ઉત્પાદન: <strong style={{ color: '#16a34a' }}>{totalNos} Nos</strong>
+          </div>
+
+          {/* 🛠️ Panel Steel Rows (લાઈન વાઇઝ સ્ટીલ અને નંગ) */}
+          {item.steelRows && item.steelRows.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '8px', marginTop: '2px' }}>
+              {item.steelRows.map((st, sIndex) => {
+                const lines = Number(st.totalLines) || 0;
+                const nos = lines * dynamicFactor; // 👈 હાર્ડકોડ 30 ની જગ્યાએ ડાયનામિક ફેક્ટર
+                return (
+                  <div key={sIndex} style={{ fontSize: '10.5px', color: '#334155' }}>
+                    ↳ સ્ટીલ: <strong>{st.wireSize || '3mm'}</strong> ({st.wireCount || '4'} Wires)
+                    {' '}— <strong>{lines} Line</strong> ({nos} Nos)
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
-    )}
+          )}
+        </>
+      );
+    })()}
   </div>
 )}
 
@@ -1913,41 +2114,97 @@ if (item.steelRows && item.steelRows.length > 0) {
             Recent DPR History (Last 24 Hours Editable)
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {recentHistory.map((item) => {
-              const entryTime = new Date(item.created_at || item.production_date).getTime();
-              const currentTime = new Date().getTime();
-              const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
-              
-              // જો 24 કલાક વીતી ગયા હોય અને ડેટાબેઝમાં is_locked True હોય
-         const isLocked = item.is_locked === true || hoursDifference > 24;
+            
+{recentHistory.map((item) => {
+  const entryTime = new Date(item.created_at || item.production_date).getTime();
+  const currentTime = new Date().getTime();
+  const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+  const isLocked = item.is_locked === true || hoursDifference > 24;
 
-              return (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                  <div>
-                    <span style={{ fontWeight: 'bold', color: '#1d4ed8' }}>Team: {item.team_name}</span>
-                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Date: {item.production_date} | Cement/RMC Used: {item.actual_cement_used || item.total_rmc_used || 0}</div>
-                  </div>
-{isLocked ? (
-                <button 
-                  type="button"
-                  onClick={() => handleEditClickWithTimeCheck(item)}
-                  style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca' }}
-                >
-                  🔒 Request Edit
-                </button>
-              ) : (
-                <button 
-                  type="button"
-                  onClick={() => handleEditClickWithTimeCheck(item)}
-                  style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe' }}
-                >
-                  {editingId === item.id ? 'Editing...' : 'Edit'}
-                </button>
-           
-                )}
-                </div>
-              );
-            })}
+// 🎯 Navin line: Products chi summary tayar karnyache logic
+  let itemSummary = "";
+  if (item.production_items && item.production_items.length > 0) {
+    itemSummary = item.production_items.map(p => {
+      const prodName = (p.product_name || '').toLowerCase();
+      const isPanel = prodName.includes('panel');
+      const isColumn = prodName.includes('column');
+     const isCleaning = prodName.includes('cleaning') || prodName.includes('other');
+      
+      // Panel mate: production_items mathi Lines
+      if (isPanel) {
+        return `${p.product_name} - ${p.nos_of_line_casting || 0} Lines`;
+      } 
+      // Column mate: production_items mathi Nos
+      else if (isColumn) {
+        return `${p.product_name} - ${p.nos_of_line_casting || 0} Lines`;
+      } 
+
+ else if (isCleaning) {
+        return `${p.product_name} - ${p.nos_of_line_casting || 0} Hajari`;
+      } 
+
+      // Itar products (U-Drain vagere) mate: stock_ledger mathi actual_qty
+      else {
+        return `${p.product_name} - ${p.actual_qty || 0} Nos`;
+      }
+      
+
+
+    }).join(' | ');
+  } else {
+    itemSummary = "Other / Day Work"; // jo koi product n hoy (khali hajari hoy)
+  }
+  // 📅 1. Date ne DD/MM/YYYY format ma set karvanu logic
+  let displayDate = item.production_date || '';
+  if (displayDate.includes('-')) {
+    const [year, month, day] = displayDate.split('-');
+    displayDate = `${day}/${month}/${year}`;
+  }
+
+  // 🧱 2. Cement ke RMC je use thayu hoy tej batavanu logic
+  let concreteText = '';
+  if (Number(item.total_rmc_used) > 0) {
+    concreteText = `RMC: ${item.total_rmc_used} M3`;
+  } else if (Number(item.actual_cement_used) > 0) {
+    concreteText = `Cement: ${item.actual_cement_used} Bags`;
+  } else {
+    concreteText = 'No Cement/RMC'; // Jo koi material use na thayu hoy (like Other work)
+  }
+ return (
+    <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+      <div style={{ flex: 1, paddingRight: '10px' }}>
+        <span style={{ fontWeight: 'bold', color: '#1d4ed8' }}>Team: {item.team_name}</span>
+        
+        <div style={{ fontSize: '11px', fontWeight: '600', color: '#475569', marginTop: '4px' }}>
+          📦 {itemSummary}
+        </div>
+        
+        {/* 🎯 UI Change: Navo Date format ane Concrete text ahiya aavse */}
+        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
+          Date: {displayDate} | {concreteText}
+        </div>
+      </div>
+
+      {isLocked ? (
+        <button 
+          type="button"
+          onClick={() => handleEditClickWithTimeCheck(item)}
+          style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
+        >
+          🔒 Request Edit
+        </button>
+      ) : (
+        <button 
+          type="button"
+          onClick={() => handleEditClickWithTimeCheck(item)}
+          style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
+        >
+          {editingId === item.id ? 'Editing...' : 'Edit'}
+        </button>
+      )}
+    </div>
+  );
+})}
           </div>
         </div>
       )}

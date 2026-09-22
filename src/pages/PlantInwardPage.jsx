@@ -132,15 +132,28 @@ const fetchPlants = async () => {
       }
     ]);
   };
-// 🕒 ૨૪ કલાક પછી એડિટ માટે પરવાનગી ચેક કરવાનું ફંક્શન
+// ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
   const handleEditClickWithTimeCheck = (entry) => {
-    const entryTime = new Date(entry.date).getTime();
+    // 1. જો ડેટાબેઝમાં લૉક હોય અથવા ૨૪ કલાક થઈ ગયા હોય
+    const entryTime = new Date(entry.created_at || entry.date).getTime();
     const currentTime = new Date().getTime();
     const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
 
-    // 🎯 અહીં 0.01 ની જગ્યાએ 24 કલાક કરી દીધા છે
-    if (hoursDifference > 24) {
-      handleRequestEditAfter24Hours(entry); // 24 કલાકથી જૂની હોય તો વોટ્સએપ લિંક ખોલશે
+    if (entry.is_locked === true || hoursDifference > 24) {
+      // ડેટાબેઝમાં is_locked: true અને edit_requested: true અપડેટ કરો
+      supabase
+        .from('plant_material_inward')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', entry.id)
+        .then(({ error }) => {
+          if (!error) {
+            const adminPhone = "918238598234"; // એડમિનનો વોટ્સએપ નંબર
+            const message = `🔔 *Inward Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની Inward એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન્ટ: ${entry.plant_name}\n• સપ્લાયર: ${entry.supplier_name}\n• મટીરિયલ: ${entry.material_name}\n\nકૃપા કરીને મંજૂરી આપો.`;
+
+            window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+            fetchRecentHistory();
+          }
+        });
     } else {
       handleEditClick(entry); // 24 કલાકની અંદર હોય તો સીધું એડિટ ચાલુ થશે
     }
@@ -571,14 +584,15 @@ const handleDeleteExistingBill = async (billUrlToRemove) => {
       console.error("Error deleting file from bucket:", err);
     }
   };
-  const handleAutoUnlockEntry = async (entryId) => {
+const handleAutoUnlockEntry = async (entryId) => {
     console.log("Attempting to unlock entry ID:", entryId);
 
     const { data, error } = await supabase
       .from('plant_material_inward')
       .update({ 
         is_locked: false, 
-        edit_requested: false 
+        edit_requested: false,
+        created_at: new Date().toISOString() // 👈 સ્માર્ટ ટ્રીક: ટાઈમર રિસેટ થઈ જશે!
       })
       .eq('id', entryId)
       .select();
@@ -590,22 +604,32 @@ const handleDeleteExistingBill = async (billUrlToRemove) => {
     } else if (!data || data.length === 0) {
       triggerAlert("⚠️ એન્ટ્રી મળી નહીં અથવા RLS પોલીસીના લીધે અપડેટ થઈ શકી નથી!");
     } else {
-      triggerAlert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
+      triggerAlert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ! તમારી પાસે એડિટ કરવા માટે નવા 24 કલાક છે.");
       window.history.replaceState({}, document.title, window.location.pathname);
       fetchRecentHistory();
     }
   };
+ // ⏰ ૨૪ કલાક પછી એડિટ માટે પરવાનગી માંગવાનું ફંક્શન
+  const handleRequestEditAfter24Hours = async (entry) => {
+    try {
+      // 1. ડેટાબેઝમાં રિક્વેસ્ટ સેવ કરો
+      await supabase
+        .from('plant_material_inward')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', entry.id);
 
-  // ⏰ ૨૪ કલાક પછી એડિટ માટે પરવાનગી માંગવાનું ફંક્શન
-  const handleRequestEditAfter24Hours = (entry) => {
-    const adminPhone = "918238598234"; // અહીં એડમિનનો વોટ્સએપ નંબર નાખવો
-    const approvalLink = `${window.location.origin}${window.location.pathname}?approve_id=${entry.id}`;
-    
-    const message = `🔔 *Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન: ${entry.plant_name}\n• સપ્લાયર: ${entry.supplier_name}\n• મટીરિયલ: ${entry.material_name}\n\n👉 એડિટ મંજૂર કરવા માટે આ લિંક પર ક્લિક કરો:\n${approvalLink}`;
+      const adminPhone = "918238598234"; // અહીં એડમિનનો વોટ્સએપ નંબર નાખવો
+      const approvalLink = `${window.location.origin}${window.location.pathname}?approve_id=${entry.id}`;
+      
+      const message = `🔔 *Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• પ્લાન્ટ: ${entry.plant_name}\n• સપ્લાયર: ${entry.supplier_name}\n• મટીરિયલ: ${entry.material_name}\n\n👉 એડિટ મંજૂર કરવા માટે આ લિંક પર ક્લિક કરો:\n${approvalLink}`;
 
-    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      
+      fetchRecentHistory(); // હિસ્ટ્રી અપડેટ કરો
+    } catch (err) {
+      triggerAlert("એરર: રિક્વેસ્ટ મોકલવામાં સમસ્યા આવી છે.");
+    }
   };
-
 return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '650px', margin: '0 auto', paddingBottom: '20px', fontFamily: 'Inter, sans-serif' }}>
       
@@ -1358,7 +1382,7 @@ const supplierMaterials = selectedSupplierData?.materials_supplied || [];
     </div>
   </div>
 )}
-{/* 📜 Recent Inward History (Clean Look & 24h Edit) */}
+{/* 📜 Recent Inward History */}
 {recentHistory.length > 0 && (
   <div style={{ marginTop: '15px' }}>
     <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', paddingLeft: '4px' }}>
@@ -1366,14 +1390,12 @@ const supplierMaterials = selectedSupplierData?.materials_supplied || [];
     </h4>
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {recentHistory.map((item) => {
-        // ⏰ ૨૪ કલાક (24 Hours) ચેક કરવાનું લોજિક (ટેસ્ટિંગ માટે 0.01 રાખ્યું છે, પછી 24 કરી દેજો)
+        
         const entryTime = new Date(item.created_at || item.date).getTime();
         const currentTime = new Date().getTime();
         const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
         
-        // જો સમય વીતી ગયો હોય અથવા is_locked True હોય
-        // 🛠️ સુધારેલું લોજિક: જો ડેટાબેઝમાં is_locked explicitly false હોય, તો સમય ગમે તે હોય તો પણ અનલોક ગણવું!
-const isLocked = item.is_locked === true;
+        const isLocked = item.is_locked === true || hoursDifference > 24;
 
         return (
           <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
@@ -1386,7 +1408,7 @@ const isLocked = item.is_locked === true;
               <button 
                 type="button"
                 onClick={() => handleEditClickWithTimeCheck(item)}
-                style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca' }}
+                style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
               >
                 🔒 Request Edit
               </button>
@@ -1394,7 +1416,7 @@ const isLocked = item.is_locked === true;
               <button 
                 type="button"
                 onClick={() => handleEditClickWithTimeCheck(item)}
-                style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe' }}
+                style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
               >
                 {editingId === item.id ? 'Editing...' : 'Edit'}
               </button>

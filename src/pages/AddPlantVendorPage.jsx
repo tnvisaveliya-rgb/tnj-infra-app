@@ -15,6 +15,7 @@ const statesList = [
 
 function AddPlantVendorPage() {
   const { user } = useAuth()
+  const [qtyPerLine, setQtyPerLine] = useState(''); // 👈 નવું સ્ટેટ
   const [sites, setSites] = useState([])
   const [plants, setPlants] = useState([])
   const [transferForm, setTransferForm] = useState({ id: '', name: '', mobile: '', plant_id: '', site_name: '' });
@@ -481,7 +482,8 @@ const handleSaveProduct = async () => {
       product_category: productCategory.trim(),
       expected_m3: expectedM3 ? Number(expectedM3) : 0,
       effective_date: effectiveDate || new Date().toISOString().split('T')[0], // 👈 Effective Date સેટ થઈ ગઈ
-      bom_items: bomItems 
+      bom_items: bomItems,
+      qty_per_line: (productName.toLowerCase().includes('panel') || productName.toLowerCase().includes('pa')) && qtyPerLine ? Number(qtyPerLine) : 30 // 👈 ડેટાબેઝમાં સેવ થશે
     };
 
     let error;
@@ -507,6 +509,7 @@ const handleSaveProduct = async () => {
       setProductCategory(''); 
       setExpectedM3('');
       setEffectiveDate('');
+      setQtyPerLine('');
       setBomItems([{ material: '', consumption: '', unit: 'Nos' }]); 
       loadAllData();
     }
@@ -649,18 +652,20 @@ const handleUpdateSite = async (id) => {
     setEditingSiteId(null);
     loadAllData();
   };
- const handleGenericUpdate = async (tableName, id, formData) => {
-    if (!formData.name || !formData.name.trim()) { 
-      showAlert("Please enter name!"); 
-      return; 
-    }
+const handleGenericUpdate = async (tableName, id, formData) => {
+  if (!formData.name || !formData.name.trim()) { 
+    showAlert("Please enter name!"); 
+    return; 
+  }
 
-    // ડુપ્લિકેટ ચેક
+  // 🎯 જો ટેબલ પ્લેન્ટ વર્ક ડિસ્ક્રિપ્શન હોય તો નામ + સાઇઝ બંને ચેક કરવા અથવા ડુપ્લિકેટ ચેકને ટેબલ મુજબ સેફ કરવો
+  if (tableName === 'plant_work_descriptions') {
     const { data: duplicateCheck, error: checkErr } = await supabase
       .from(tableName)
-      .select('id, name')
+      .select('id, name, product_size')
       .ilike('name', formData.name.trim())
-      .neq('id', id);
+      .eq('product_size', formData.product_size || '')
+      .neq('id', id); // 👈 પોતાની આઈડી છોડીને જ ચેક કરશે
 
     if (checkErr) {
       showAlert("Error checking duplicate: " + checkErr.message);
@@ -668,24 +673,25 @@ const handleUpdateSite = async (id) => {
     }
 
     if (duplicateCheck && duplicateCheck.length > 0) {
-      showAlert("❌ આ નામની એન્ટ્રી પહેલેથી જ અવેલેબલ છે!");
+      showAlert("❌ આ નામ અને સાઇઝની એન્ટ્રી પહેલેથી જ અવેલેબલ છે!");
       return;
     }
+  }
 
-    // 🎯 formData ની અંદર જેટલી પણ કોલમ્સ હશે તે બધી જ એકસાથે અપડેટ થઈ જશે
-    const { error } = await supabase
-      .from(tableName)
-      .update(formData)
-      .eq('id', id);
+  // ડેટાબેઝ અપડેટ કરો
+  const { error } = await supabase
+    .from(tableName)
+    .update(formData)
+    .eq('id', id);
 
-    if (error) {
-      showAlert("Error updating: " + error.message);
-    } else {
-      showAlert("✅ Successfully Updated!");
-      setEditingListId(null);
-      loadAllData();
-    }
-  };
+  if (error) {
+    showAlert("Error updating: " + error.message);
+  } else {
+    showAlert("✅ Successfully Updated!");
+    setEditingListId(null);
+    loadAllData();
+  }
+};
   const handleTransporterUpdate = async (id, formData) => {
     if (!formData.transporter_name || !formData.transporter_name.trim()) {
       showAlert("Please enter transporter name!");
@@ -2382,6 +2388,27 @@ return (
                               <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Size</label>
                               <input value={editListForm.product_size || ''} onChange={(e) => setEditListForm({ ...editListForm, product_size: e.target.value })} style={{ width: '100%', padding: '8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                             </div>
+{/* 🎯 એડિટ અથવા નવું ઉમેરતી વખતે જો નામમાં panel કે pa/patiya હોય તો જ બોક્સ દેખાશે */}
+{((productName || editListForm.name || '').toLowerCase().includes('panel') || 
+  (productName || editListForm.name || '').toLowerCase().includes('pa') || 
+  (productName || editListForm.name || '').toLowerCase().includes('patiya')) && (
+  <div style={{ backgroundColor: '#fef3c7', padding: '10px', borderRadius: '8px', border: '1px solid #f59e0b', boxSizing: 'border-box', width: '100%', marginTop: '8px' }}>
+    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', display: 'block', marginBottom: '4px' }}>
+      લાઈન નંગ (Qty Per Line / Multiplier) *
+    </label>
+    <input 
+      type="number" 
+      placeholder="દા.ત. 30 અથવા 24" 
+      value={qtyPerLine} 
+      onChange={(e) => setQtyPerLine(e.target.value)} 
+      style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #d97706', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#fff', fontWeight: 'bold' }} 
+    />
+    <span style={{ fontSize: '10px', color: '#92400e', display: 'block', marginTop: '3px' }}>
+      આ પૅનલ/પટિયા માટે એક લાઈનમાં કેટલા નંગ બને છે તે લખો.
+    </span>
+  </div>
+)}
+
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                               <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Category</label>
                               <input value={editListForm.product_category || ''} onChange={(e) => setEditListForm({ ...editListForm, product_category: e.target.value })} style={{ width: '100%', padding: '8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
@@ -2392,6 +2419,15 @@ return (
                             <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Expected Concrete (M3)</label>
                             <input type="number" step="0.001" value={editListForm.expected_m3 || ''} onChange={(e) => setEditListForm({ ...editListForm, expected_m3: e.target.value })} style={{ width: '100%', padding: '8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
                           </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+  <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Effective From Date</label>
+  <input 
+    type="date" 
+    value={editListForm.effective_date || new Date().toISOString().split('T')[0]} 
+    onChange={(e) => setEditListForm({ ...editListForm, effective_date: e.target.value })} 
+    style={{ width: '100%', padding: '8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} 
+  />
+</div>
 
                           <div style={{ backgroundColor: '#f8fafc', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
@@ -2446,7 +2482,9 @@ return (
                            <button onClick={() => handleDelete('plant_work_descriptions', p.id)} style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}><Trash2 size={13} /> Delete</button>
                            <div style={{ display: 'flex', gap: '6px' }}>
                              <button onClick={() => setEditingListId(null)} style={{ backgroundColor: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', padding: '6px 14px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
-                             <button onClick={() => handleGenericUpdate('plant_work_descriptions', p.id, editListForm)} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}><Check size={13} /> Save All Changes</button>
+                             <button onClick={() => handleGenericUpdate('plant_work_descriptions', p.id, { 
+  ...editListForm, 
+  qty_per_line: qtyPerLine ? Number(qtyPerLine) : 30})} style={{ backgroundColor: '#0891b2', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}><Check size={13} /> Save All Changes</button>
                            </div>
                          </div>
                        </div>
@@ -2460,7 +2498,11 @@ return (
                            <span style={{ fontSize: '10px', color: '#0284c7', marginLeft: '6px' }}>[{p.site_name}]</span>
                          </div>
                          <div style={{ display: 'flex' }}>
-                           <button onClick={() => { setEditingListId(p.id); setEditListForm({ ...p }); }} style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold', fontSize: '11px' }}><Edit2 size={12} /> Edit</button>
+                          <button onClick={() => { 
+  setEditingListId(p.id); 
+  setEditListForm({ ...p }); 
+  setProductName(p.name || '');
+  setQtyPerLine(p.qty_per_line ? p.qty_per_line.toString() : '30'); }} style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold', fontSize: '11px' }}><Edit2 size={12} /> Edit</button>
                          </div>
                        </div>
                      )}
@@ -2657,6 +2699,24 @@ return (
                     <input placeholder="e.g. 600x600" value={productSize} onChange={(e) => setProductSize(e.target.value)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }} />
                   </div>
                 </div>
+                {/* 🎯 જો પ્રોડક્ટના નામમાં panel કે patiya હોય તો જ આ બોક્સ દેખાશે */}
+{(productName.toLowerCase().includes('panel') || productName.toLowerCase().includes('pa')) && (
+  <div style={{ backgroundColor: '#fef3c7', padding: '10px', borderRadius: '8px', border: '1px solid #f59e0b', boxSizing: 'border-box', width: '100%' }}>
+    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', display: 'block', marginBottom: '4px' }}>
+      લાઈન નંગ (Qty Per Line / Multiplier) *
+    </label>
+    <input 
+      type="number" 
+      placeholder="દા.ત. 30 અથવા 24" 
+      value={qtyPerLine} 
+      onChange={(e) => setQtyPerLine(e.target.value)} 
+      style={{ width: '100%', padding: '9px', borderRadius: '6px', border: '1px solid #d97706', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#fff', fontWeight: 'bold' }} 
+    />
+    <span style={{ fontSize: '10px', color: '#92400e', display: 'block', marginTop: '3px' }}>
+      આ પૅનલ/પટિયા માટે એક લાઈનમાં કેટલા નંગ બને છે તે લખો.
+    </span>
+  </div>
+)}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', boxSizing: 'border-box', width: '100%' }}>
                   <div>
