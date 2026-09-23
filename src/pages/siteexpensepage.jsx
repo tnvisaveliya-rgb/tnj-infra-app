@@ -325,7 +325,8 @@ const handleEditClickWithTimeCheck = (entry) => {
       const { data, error } = await supabase
         .from('contractors')
         .select('*')
-        .eq('site_name', siteName);
+        .eq('site_name', siteName)
+        .or('is_active.eq.true,is_active.is.null');
 
       if (!error && data) setPlantLabours(data);
     } catch (err) {

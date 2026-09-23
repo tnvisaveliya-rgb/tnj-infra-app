@@ -231,7 +231,12 @@ const fetchRecentHistory = async () => {
     const { data: siteData } = await supabase.from('sites').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);
     setSites(siteData || []);
 
-    const { data: labData } = await supabase.from('contractors').select('*').eq('plant_id', plantId).eq('site_name', selectedPlant);
+  const { data: labData } = await supabase
+      .from('contractors')
+      .select('*')
+      .eq('plant_id', plantId)
+      .eq('site_name', selectedPlant)
+      .or('is_active.eq.true,is_active.is.null'); //
     setLabours(labData || []);
 
     const { data: matData } = await supabase.from('site_materials_master').select('*').or(`plant_id.eq.${plantId},plant_id.is.null`);

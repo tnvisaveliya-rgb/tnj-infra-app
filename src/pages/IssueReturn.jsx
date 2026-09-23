@@ -156,7 +156,8 @@ export default function IssueReturnPage({ user }) {
         const { data, error } = await supabase
           .from('contractors')
           .select('*')
-          .or(`site_name.eq.${selectedPlant},site_name.is.null`);
+          .or(`site_name.eq.${selectedPlant},site_name.is.null`)
+          .or('is_active.eq.true,is_active.is.null');
 
         if (error) {
           console.error("Contractors Fetch Error:", error.message);

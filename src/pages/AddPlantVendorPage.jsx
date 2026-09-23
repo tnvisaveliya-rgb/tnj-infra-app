@@ -332,7 +332,11 @@ const handleSaveSite = async () => {
 
 
 const handleSaveModalData = async () => {
-    if (!formName.trim()) { showAlert("Please enter name!"); return; }
+    // 🎯 Use formCompanyName instead of formCompany_name
+    if (!formCompanyName || !formCompanyName.trim()) { 
+      showAlert("Please enter company name!"); 
+      return; 
+    }
     
     // 🎯 અહીંથી 'all' વાળી શરત હટાવી દીધી છે, જેથી All Plants સિલેક્ટ કરવા પર એરર ન આવે
   if (activeModal !== 'party') {
@@ -653,11 +657,21 @@ const handleUpdateSite = async (id) => {
     loadAllData();
   };
 const handleGenericUpdate = async (tableName, id, formData) => {
-  if (!formData.name || !formData.name.trim()) { 
-    showAlert("Please enter name!"); 
-    return; 
+  // 🎯 જો ટેબલ 'site_vendors' હોય તો name ના બદલે company_name ચેક કરો
+  if (tableName === 'site_vendors') {
+    if (!formData.company_name || !formData.company_name.trim()) { 
+      showAlert("Please enter company name!"); 
+      return; 
+    }
+  } else {
+    // બાકીના બધા ટેબલ માટે જૂનું નામ ચેક કરવાનું ચાલુ રહેશે
+    if (!formData.name || !formData.name.trim()) { 
+      showAlert("Please enter name!"); 
+      return; 
+    }
   }
-
+  
+  // બાકીનો અપડેટ કરવાનો કોડ...
   // 🎯 જો ટેબલ પ્લેન્ટ વર્ક ડિસ્ક્રિપ્શન હોય તો નામ + સાઇઝ બંને ચેક કરવા અથવા ડુપ્લિકેટ ચેકને ટેબલ મુજબ સેફ કરવો
   if (tableName === 'plant_work_descriptions') {
     const { data: duplicateCheck, error: checkErr } = await supabase
@@ -1809,8 +1823,8 @@ return (
                       ) : (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
-                            <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{v.name}</span>
-                            {v.company_name && <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '6px' }}>({v.company_name})</span>}
+                            <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{v.company_name}</span>
+                            {v.name && <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '6px' }}>({v.name})</span>}
                             {v.mobile ? (
                               <a href={`tel:${v.mobile}`} style={{ fontSize: '11px', color: '#0284c7', marginLeft: '8px', textDecoration: 'none', fontWeight: '600' }}>📞 {v.mobile}</a>
                             ) : ( <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: '6px' }}>(No Mobile)</span> )}

@@ -15,25 +15,25 @@ function Dashboard() {
       ]
     },
     {
-      title: "🏗️ Site Operations",
+      title: "🏗️ Site Operations  🏭 Plant Operations",
       items: [
-       
-        { id: 'site_Transaction', label: '3. Site Transaction', icon: ArrowLeftRight, color: '#7c3aed', path: '/site-transaction' },
+        
+       { id: 'Admin_plant_report', label: '6. Plant Report', icon: FileText, color: '#4f46e5', path: '/Admin-plant-report' },
         { id: 'site_report', label: '4. Site Report', icon: ClipboardList, color: '#2563eb', path: '/site-report' },
       ]
     },
     {
-      title: "🏭 Plant Operations",
+      title: "📑 Site and Plant Transaction Report",
       items: [
-       
-        { id: 'plant_Transaction', label: '5. Plant Transaction', icon: Receipt, color: '#0891b2', path: '/plant-transaction' },
-        { id: 'Admin_plant_report', label: '6. Plant Report', icon: FileText, color: '#4f46e5', path: '/Admin-plant-report' },
+        
+        { id: 'plant_Transaction', label: '5. Plant and Site Transaction', icon: Receipt, color: '#0891b2', path: '/plant-transaction' },
+        
       ]
     },
     {
       title: "📊 Reports & Analytics",
       items: [
-       
+        
         { id: 'employee_report', label: '7. Employee Report', icon: Users, color: '#db2777', path: '/employee-report' },
         { id: 'crm_report', label: '8. CRM Report', icon: Briefcase, color: '#d97706', path: '/crm-report' },
       ]
@@ -85,6 +85,8 @@ function Dashboard() {
                   key={tab.id}
                   onClick={() => navigate(tab.path)}
                   style={{
+                    // 🎯 આ એક લાઈન ઉમેરી છે: જો સેક્શનમાં માત્ર ૧ જ આઇટમ હોય તો તે આખી જગ્યા લેશે
+                    gridColumn: section.items.length === 1 ? '1 / -1' : 'auto', 
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '6px',

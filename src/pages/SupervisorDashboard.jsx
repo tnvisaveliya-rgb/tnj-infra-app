@@ -111,7 +111,8 @@ useEffect(() => {
   }
 
   const loadContractors = async () => {
-    const { data, error } = await supabase.from('contractors').select('*');
+    const { data, error } = await supabase.from('contractors').select('*')
+    .or('is_active.eq.true,is_active.is.null');
     if (!error) setContractors(data || []);
   }
 

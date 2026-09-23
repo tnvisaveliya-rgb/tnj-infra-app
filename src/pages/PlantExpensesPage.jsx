@@ -343,7 +343,8 @@ const handleOpenPreview = (e) => {
       const { data, error } = await supabase
         .from('contractors')
         .select('*')
-        .or(`site_name.eq.${plantName},site_name.is.null`);
+        .or(`site_name.eq.${plantName},site_name.is.null`)
+        .or('is_active.eq.true,is_active.is.null');
 
       if (!error && data) setPlantLabours(data);
     } catch (err) {

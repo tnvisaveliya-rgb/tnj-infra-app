@@ -22,6 +22,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import UpdatePassword from './pages/UpdatePassword';
 import SiteEmployeeDashboard from './pages/SiteEmployeeDashboard';
 import PlantEmployeeDashboard from './pages/PlantEmployeeDashboard';
+import Admindashboardstats from './pages/AdminDashboardStats';
 
 import { initializeApp } from "firebase/app";
 import { getMessaging, getToken } from "firebase/messaging";
@@ -90,7 +91,8 @@ function AppRoutes({ notifications, isNotifOpen, setIsNotifOpen }) {
           <Route path="/staff-management" element={<StaffManagement />} />
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/admin-dashboard-stats" element={<Admindashboardstats />} />
+          <Route path="*" element={<Navigate to="/admin-dashboard-stats" replace />} />
         </>
       ) : (
         <>
