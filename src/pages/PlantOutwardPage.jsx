@@ -215,6 +215,7 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
       fetchRecentHistory();
     }
   }, [selectedPlant]); // 👈 અહીં selectedPlant ફિક્સ સ્ટ્રિંગ હોવી જોઈએ, એરે નહીં
+
  const handleEditClick = async (entry) => {
     setEditingId(entry.id);
     setDprDate(entry.date || dprDate);
@@ -315,6 +316,18 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
         billFiles: []
       }
     ]);
+// 🌟 ૪. અહી નવો કોડ આવશે (Steel Spec લાવવા માટે)
+    mappedItems.forEach((item, index) => {
+      const isColOrPan = (item.material || '').toLowerCase().includes('column') || 
+                         (item.material || '').toLowerCase().includes('panel');
+                         
+      if (isColOrPan && item.size) {
+        // 🎯 આ ફંક્શન સ્ટોક ચેક કરશે અને ડેટાબેઝના જૂના steelSpec ને ડ્રોપડાઉનમાં એડ કરી દેશે
+        fetchAvailableSteelSpecs(0, index, item.material, item.size, item.steelSpec);
+      }
+    });
+
+
   };
   // 🎯 પ્લાન્ટ બદલાય ત્યારે ID સેટ થાય અને ઓટો DC નંબર જનરેટ થઈને સેટ થાય
   const handlePlantChange = async (e) => {
@@ -363,53 +376,52 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
     }
     return true;
   };
-  const fetchAvailableSteelSpecs = async (sIndex, iIndex, productName, productSize) => {
-  if (!selectedPlant || !productName || !productSize) return;
+const fetchAvailableSteelSpecs = async (sIndex, iIndex, productName, productSize, existingSpec = '') => {
+    if (!selectedPlant || !productName || !productSize) return;
 
-  try {
-    // 🎯 stock_ledger માંથી તે જ પ્લાન્ટ, પ્રોડક્ટ અને સાઈઝ ધરાવતી રો લાવો
-    const { data, error } = await supabase
-      .from('stock_ledger')
-      .select('size_variant')
-      .eq('plant_name', selectedPlant)
-      .ilike('product_name', productName.trim())
-      .ilike('size_variant', `${productSize.trim()}%`);
+    try {
+      const { data, error } = await supabase
+        .from('stock_ledger')
+        .select('size_variant')
+        .eq('plant_name', selectedPlant)
+        .ilike('product_name', productName.trim())
+        .ilike('size_variant', `${productSize.trim()}%`);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    if (data && data.length > 0) {
       const extractedSpecs = new Set();
 
-      data.forEach(row => {
-        const variant = row.size_variant || '';
-        // દા.ત. "2950x150x150 (3mm - 5 wires)" માંથી કૌંસ અંદરની વિગત અલગ પાડો
-        if (variant.includes('(') && variant.includes(')')) {
-          const spec = variant.substring(variant.indexOf('(') + 1, variant.lastIndexOf(')')).trim();
-          if (spec) extractedSpecs.add(spec);
-        }
-      });
+      // 🎯 સૌથી અગત્યનું: જો એડિટ મોડ હોય અને જૂનો સ્પેક હોય તો એને લિસ્ટમાં રાખો
+      if (existingSpec && existingSpec.trim() !== '') {
+        extractedSpecs.add(existingSpec);
+      }
+
+      if (data && data.length > 0) {
+        data.forEach(row => {
+          const variant = row.size_variant || '';
+          // દા.ત. "2950x150x150 (3mm - 5 wires)" માંથી કૌંસ અંદરની વિગત અલગ પાડો
+          if (variant.includes('(') && variant.includes(')')) {
+            const spec = variant.substring(variant.indexOf('(') + 1, variant.lastIndexOf(')')).trim();
+            if (spec) extractedSpecs.add(spec);
+          }
+        });
+      }
 
       const specsList = Array.from(extractedSpecs);
+      
       setAvailableSpecs(prev => ({
         ...prev,
         [`${sIndex}-${iIndex}`]: specsList
       }));
 
-      // જો ફક્ત એક જ સ્પેસિફિકેશન સ્ટોકમાં હોય, તો ઓટોમેટિક સિલેક્ટ કરી દેવું
-      if (specsList.length === 1) {
+      // જો નવો આઇટમ એડ કરતા હોય અને માત્ર 1 જ સ્પેક હોય તો ઓટો સિલેક્ટ કરો (એડિટ વખતે નહીં)
+      if (specsList.length === 1 && (!existingSpec || existingSpec.trim() === '')) {
         updateOutwardItem(sIndex, iIndex, 'steelSpec', specsList[0]);
       }
-    } else {
-      // જો સ્ટોકમાં કોઈ ખાસ સ્પેક ન મળે
-      setAvailableSpecs(prev => ({
-        ...prev,
-        [`${sIndex}-${iIndex}`]: []
-      }));
+    } catch (err) {
+      console.error("Error fetching stock steel specs:", err);
     }
-  } catch (err) {
-    console.error("Error fetching stock steel specs:", err);
-  }
-};
+  };
   // 🎯 આગામી DC નંબર ડેટાબેઝમાંથી શોધીને લાવવાનું મુખ્ય ફંક્શન
   const fetchNextDcNumber = async (plantName) => {
     if (!plantName) return '';

@@ -358,12 +358,12 @@ const location = useLocation();
     const type = params.get('type');
     
     if (approveId) {
-      if (type === 'dpr') {
+      if (type === 'sitedpr') {
         localStorage.setItem('pending_dpr_approve_id', approveId);
-        setActiveTab('dpr');
+        setActiveTab('sitedpr');
       } else {
         localStorage.setItem('pending_approve_id', approveId);
-        setActiveTab('inward');
+        setActiveTab('siteinward');
       }
       window.history.replaceState({}, document.title, window.location.pathname);
     }
@@ -1139,11 +1139,11 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
         </div>
       )}
 
-      {activeTab === 'dpr' && <SupervisorDashboard />}
+      {activeTab === 'sitedpr' && <SupervisorDashboard />}
       {activeTab === 'attendance' && <SiteAttendancePage />}
      {/* આ લાઈનને બદલો */}
 {activeTab === 'sitesupervisorfundrequest' && <SiteSupervisorFundRequest defaultType={incomeInitialTab} />}
-      {activeTab === 'inward' && <SiteInwardPage />}
+    {activeTab === 'siteinward' && <SiteInwardPage />}
       {activeTab === 'outward' && <SiteOutwardPage />}
       {activeTab === 'site_return' && <SiteMaterialDamage />}
       {activeTab === 'issue_return' && <SiteIssueReturn />}
@@ -1189,7 +1189,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
               </button>
             </div>
 
-            <div onClick={() => { setActiveTab('inward'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer' }}>
+            <div onClick={() => { setActiveTab('siteinward'); setIsPopupOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '14px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer' }}>
               <span style={{ fontSize: '18px', backgroundColor: '#dcfce7', padding: '6px', borderRadius: '10px' }}>📥</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 <span style={{ fontSize: '12px', fontWeight: '900', color: '#15803d' }}>1. SITE INWARD</span>
@@ -1338,11 +1338,11 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
 
         {/* DPR */}
         <div 
-          onClick={() => setActiveTab('dpr')} 
+          onClick={() => setActiveTab('sitedpr')} 
           style={{ 
             textAlign: 'center', 
             cursor: 'pointer', 
-            color: activeTab === 'dpr' ? '#2563eb' : '#64748b', 
+            color: activeTab === 'sitedpr' ? '#2563eb' : '#64748b', 
             display: 'flex', 
             flexDirection: 'column', 
             alignItems: 'center', 
@@ -1351,7 +1351,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
         >
           <div 
             style={{
-              backgroundColor: activeTab === 'dpr' ? '#dbeafe' : 'transparent',
+              backgroundColor: activeTab === 'sitedpr' ? '#dbeafe' : 'transparent',
               padding: '4px 16px',
               borderRadius: '9999px',
               display: 'flex',
@@ -1362,7 +1362,7 @@ const finishedItems = rawMaterialsStock.filter(i => i.category === 'finished'); 
           >
             <ClipboardEdit size={19} />
           </div>
-          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'dpr' ? '800' : '600' }}>DPR</span>
+          <span style={{ fontSize: '9px', marginTop: '3px', fontWeight: activeTab === 'sitedpr' ? '800' : '600' }}>DPR</span>
         </div>
 
         {/* Floating Center Button */}

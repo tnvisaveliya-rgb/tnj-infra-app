@@ -132,8 +132,14 @@ export default function SiteMaterialInward({ user }) {
     ]);
   };
 
-  const handleEditClickWithTimeCheck = (entry) => {
-    const entryTime = new Date(entry.date).getTime();
+const handleEditClickWithTimeCheck = (entry) => {
+    // 🎯 ૧. સૌથી પહેલાં ડેટાબેઝનું is_locked ચેક કરો
+    if (entry.is_locked === true) {
+      handleRequestEditAfter24Hours(entry);
+      return;
+    }
+
+    const entryTime = new Date(entry.created_at || entry.date).getTime();
     const currentTime = new Date().getTime();
     const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
 
@@ -178,26 +184,7 @@ export default function SiteMaterialInward({ user }) {
     }
   }, [selectedSite]);
 
-  useEffect(() => {
-    fetchSites();
 
-    const searchParams = new URLSearchParams(window.location.search);
-    let approveId = searchParams.get('approve_id');
-
-    if (!approveId) {
-      approveId = localStorage.getItem('pending_approve_id');
-    } else {
-      localStorage.setItem('pending_approve_id', approveId);
-    }
-
-    if (approveId) {
-      handleAutoUnlockEntry(approveId);
-      localStorage.removeItem('pending_approve_id');
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else {
-      fetchRecentHistory();
-    }
-  }, []);
   
   const [recentHistory, setRecentHistory] = useState([]);
 
@@ -625,12 +612,13 @@ const handleSiteChange = (e) => {
     }
   };
 
-  const handleAutoUnlockEntry = async (entryId) => {
+const handleAutoUnlockEntry = async (entryId) => {
     const { data, error } = await supabase
       .from('site_material_inward')
       .update({ 
         is_locked: false, 
-        edit_requested: false 
+        edit_requested: false,
+        created_at: new Date().toISOString() // 👈 આનાથી 24 કલાક નવેસરથી ચાલુ થઈ જશે!
       })
       .eq('id', entryId)
       .select();
@@ -638,21 +626,52 @@ const handleSiteChange = (e) => {
     if (error) {
       triggerAlert("Database Error: " + error.message);
     } else if (!data || data.length === 0) {
-      triggerAlert("⚠️ એન્ટ્રી મળી નહીં અથવા RLS પોલીસીના લીધે અપડેટ થઈ શકી નથી!");
+      triggerAlert("⚠️ એન્ટ્રી મળી નહીં!");
     } else {
-      triggerAlert("✅ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ!");
+      triggerAlert("✅ ઇનવર્ડ એન્ટ્રી સફળતાપૂર્વક અનલોક થઈ ગઈ! તમારી પાસે એડિટ કરવા માટે નવા 24 કલાક છે.");
       window.history.replaceState({}, document.title, window.location.pathname);
       fetchRecentHistory();
     }
-  };
+  };;
 
-  const handleRequestEditAfter24Hours = (entry) => {
-    const adminPhone = "918238598234";
-    const approvalLink = `${window.location.origin}${window.location.pathname}?approve_id=${entry.id}`;
-    
-    const message = `🔔 *Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• સાઇટ: ${entry.site_name}\n• સપ્લાયર: ${entry.supplier_name}\n• મટીરિયલ: ${entry.material_name}\n\n👉 એડિટ મંજૂર કરવા માટે આ લિંક પર ક્લિક કરો:\n${approvalLink}`;
+  // 🎯 પેજ લોડ થાય ત્યારે approve_id ચેક કરવા માટેનો useEffect
+  useEffect(() => {
+    fetchSites();
 
-    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+    const searchParams = new URLSearchParams(window.location.search);
+    let approveId = searchParams.get('approve_id');
+
+    if (!approveId) {
+      approveId = localStorage.getItem('pending_approve_id');
+    } else {
+      localStorage.setItem('pending_approve_id', approveId);
+    }
+
+    if (approveId) {
+      handleAutoUnlockEntry(approveId);
+      localStorage.removeItem('pending_approve_id');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else {
+      fetchRecentHistory();
+    }
+  }, []);
+const handleRequestEditAfter24Hours = async (entry) => {
+    try {
+      await supabase
+        .from('site_material_inward')
+        .update({ is_locked: true, edit_requested: true })
+        .eq('id', entry.id);
+
+      const adminPhone = "918238598234"; // એડમિનનો વ્હોટ્સએપ નંબર
+      const portalLink = `${window.location.origin}/Dashboard`; // એપની મેઈન લિંક
+      
+      const message = `🔔 *Inward Edit Approval Request*\n\nયુઝરે 24 કલાક જૂની નીચેની ઇનવર્ડ એન્ટ્રી સુધારવા માટે પરવાનગી માંગી છે:\n• સાઇટ: ${entry.site_name}\n• સપ્લાયર: ${entry.supplier_name}\n• મટીરિયલ: ${entry.material_name}\n\n👉 એપ્લિકેશનમાં લોગ-ઈન કરી *Bell Icon (🔔)* માંથી રિક્વેસ્ટ Approve કે Reject કરો.\nLink: ${portalLink}`;
+
+      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      fetchRecentHistory(); 
+    } catch (err) {
+      console.error("Error requesting edit:", err);
+    }
   };
 
   return (
@@ -1237,7 +1256,11 @@ const handleSiteChange = (e) => {
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {recentHistory.map((item) => {
-              const isLocked = item.is_locked === true;
+          // 🎯 ૨૪ કલાકનું ટાઈમ લૉજિક કેલ્ક્યુલેટ કરવા માટે
+              const entryTime = new Date(item.created_at || item.date).getTime();
+              const currentTime = new Date().getTime();
+              const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+              const isLocked = item.is_locked === true || hoursDifference > 24;
 
               return (
                 <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>

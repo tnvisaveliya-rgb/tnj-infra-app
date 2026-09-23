@@ -275,9 +275,35 @@ const fetchRecentHistory = async () => {
         .select('*')
         .eq('header_id', entry.id);
 
-      if (error) throw error;
+     if (error) throw error;
 
       if (itemsData && itemsData.length > 0) {
+        
+        // 🎯 1. ચેક કરો કે આ કયા પ્રકારનું કામ છે? (Other Work છે કે Normal Production?)
+        const firstItem = itemsData[0];
+        const isOtherWork = 
+          (firstItem.size_variant || '').toLowerCase().includes('day work') ||
+          (firstItem.concrete_source || '') === 'N/A' ||
+          (firstItem.product_name || '').toLowerCase().includes('cleaning');
+
+        if (isOtherWork) {
+          // 🧹 A. જો Other Work (હાજરી/સાફસફાઈ) હોય, તો આ મુજબ ડેટા સેટ કરો:
+          setProductionSources([
+            {
+              id: Date.now(),
+              labour: entry.team_name || '',
+              workType: 'Other Work', // 👈 ખાસ Other Work લખવું
+              otherWorkName: firstItem.product_name || 'Plant Cleaning',
+              otherWorkDays: firstItem.nos_of_line_casting || 1,
+              concreteSource: 'Site Mix',
+              actualCementUsed: '',
+              bomSuggestedCement: 0,
+              bomSuggestedM3: 0,
+              items: [], // Other Work માં કોઈ પ્રોડક્ટ ના હોય એટલે ખાલી
+              remarks: ''
+            }
+          ]);
+        } else {
         let formattedItems = [];
 
         for (const item of itemsData) {
@@ -339,6 +365,7 @@ const fetchRecentHistory = async () => {
             remarks: ''
           }
         ]);
+      }
       } else {
         setProductionSources([
           {

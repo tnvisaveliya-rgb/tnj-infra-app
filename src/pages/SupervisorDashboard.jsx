@@ -115,6 +115,92 @@ useEffect(() => {
     if (!error) setContractors(data || []);
   }
 
+
+
+  // ⏰ ૨૪ કલાક ચેક કરવા માટે
+  const isOlderThan24Hours = (createdAt) => {
+    const reportTime = new Date(createdAt).getTime();
+    const currentTime = new Date().getTime();
+    const hoursDifference = (currentTime - reportTime) / (1000 * 60 * 60);
+    return hoursDifference > 24;
+  };
+
+  // ✏️ રિપોર્ટ એડિટ કરવા માટે
+  const handleEditReport = (report) => {
+    if (isOlderThan24Hours(report.created_at) && !report.is_locked) {
+      handleRequestEditAfter24Hours(report);
+      return;
+    }
+    
+    setEditingReportId(report.id);
+    setReportForm({
+      siteName: report.site_name || '',
+      reportDate: report.report_date || getTodayString(),
+      palingWorkRows: report.paling_work || [],
+      contractorRows: report.contractor_details || [],
+      description: report.description || ''
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' }); // ફોર્મ પર જવા માટે
+  };
+
+  // ❌ એડિટ કેન્સલ કરવા માટે
+  const handleCancelEdit = () => {
+    setEditingReportId(null);
+    setReportForm({
+      siteName: '',
+      reportDate: getTodayString(),
+      palingWorkRows: [{ contractorName: '', qty: '', description: '' }],
+      contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', workItems: [{ workType: '', columnSize: '', concreteType: 'RMC', singleCastingQty: '', doubleCastingQty: '', runningFeet: '', height: '', cementBags: '', customWorkName: '', quantity: '', unit: 'NOS' }] }],
+      description: ''
+    });
+  };
+
+const handleDeleteReport = (reportId) => {
+    setModal({
+      isOpen: true,
+      message: 'શું તમે ખરેખર આ રિપોર્ટ ડીલીટ કરવા માંગો છો? મટીરીયલ લેજરમાંથી પણ એન્ટ્રી કાયમ માટે ડીલીટ થઇ જશે.',
+      confirmText: 'Yes, Delete',
+      cancelText: 'Cancel',
+      confirmColor: '#dc2626',
+      onConfirm: async () => {
+        try {
+          // ૧. લેજરમાંથી આ રિપોર્ટની એન્ટ્રી ડીલીટ કરો
+          const { error: ledgerError } = await supabase
+            .from('site_material_stock_ledger')
+            .delete()
+            .eq('reference_id', reportId);
+            
+          if (ledgerError) console.error('Ledger delete error:', ledgerError);
+
+          // ૨. મેઈન ડેઈલી રિપોર્ટ ડીલીટ કરો
+          const { error: reportError } = await supabase
+            .from('daily_reports')
+            .delete()
+            .eq('id', reportId);
+
+          if (reportError) throw reportError;
+          
+          setModal({ 
+            isOpen: true, 
+            message: 'રિપોર્ટ અને તેની મટીરીયલ લેજર એન્ટ્રી સફળતાપૂર્વક ડીલીટ થઈ ગયા છે.', 
+            onConfirm: () => setModal({ isOpen: false }) 
+          });
+          
+          loadReports();
+          handleCancelEdit();
+        } catch (err) {
+          setModal({ 
+            isOpen: true, 
+            message: 'ભૂલ: ' + err.message, 
+            onConfirm: () => setModal({ isOpen: false }) 
+          });
+        }
+      },
+      onCancel: () => setModal({ isOpen: false })
+    });
+  };
+
+
   // ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
   const handleRequestEditAfter24Hours = async (report) => {
     try {
@@ -308,29 +394,56 @@ const confirmAndSave = async () => {
     setError('')
     try {
       const supervisorEmail = user?.email || 'Supervisor'
+      let reportId = null;
 
-      // ૧. દૈનિક રિપોર્ટ ઇન્સર્ટ કરો અને તેની ID મેળવો
-      const { data: insertedReport, error: repError } = await supabase
-        .from('daily_reports')
-        .insert([{
-          site_name: reportForm.siteName,
-          contractor_details: reportForm.contractorRows,
-          paling_work: reportForm.palingWorkRows,
-          damage_items: [],
-          final_work: [],
-          description: reportForm.description,
-          photo_urls: [],
-          report_date: reportForm.reportDate,
-          user_id: supervisorEmail
-        }])
-        .select('id')
-        .single();
+      if (editingReportId) {
+        // --- ✏️ UPDATE EXISTING REPORT ---
+        const { error: repError } = await supabase
+          .from('daily_reports')
+          .update({
+            site_name: reportForm.siteName,
+            contractor_details: reportForm.contractorRows,
+            paling_work: reportForm.palingWorkRows,
+            description: reportForm.description,
+            report_date: reportForm.reportDate,
+          })
+          .eq('id', editingReportId);
 
-      if (repError) throw new Error("Daily report insert failed: " + repError.message);
-      
-      const reportId = insertedReport ? insertedReport.id : null; // 🌟 સેફ રિપોર્ટ આઈડી
+        if (repError) throw new Error("Daily report update failed: " + repError.message);
+        
+        reportId = editingReportId;
 
-      // ૨. સાઇટ મટીરિયલ સ્ટોક લેજરમાં એન્ટ્રી કરવા માટે
+        // 🌟 લેજર (Stock) માંથી જૂની એન્ટ્રીઓ ડીલીટ કરો (જેથી નવી એન્ટ્રી બેવડાય નહીં)
+        const { error: ledgerDelError } = await supabase
+          .from('site_material_stock_ledger')
+          .delete()
+          .eq('reference_id', reportId);
+          
+        if (ledgerDelError) console.error("Error deleting old ledger entries:", ledgerDelError);
+
+      } else {
+        // --- 🆕 INSERT NEW REPORT ---
+        const { data: insertedReport, error: repError } = await supabase
+          .from('daily_reports')
+          .insert([{
+            site_name: reportForm.siteName,
+            contractor_details: reportForm.contractorRows,
+            paling_work: reportForm.palingWorkRows,
+            damage_items: [],
+            final_work: [],
+            description: reportForm.description,
+            photo_urls: [],
+            report_date: reportForm.reportDate,
+            user_id: supervisorEmail
+          }])
+          .select('id')
+          .single();
+
+        if (repError) throw new Error("Daily report insert failed: " + repError.message);
+        reportId = insertedReport ? insertedReport.id : null;
+      }
+
+      // --- 📦 ૨. સાઇટ મટીરિયલ સ્ટોક લેજરમાં નવી એન્ટ્રી કરવા માટે ગણતરી ---
       const ledgerRows = [];
 
       for (const cRow of reportForm.contractorRows) {
@@ -447,31 +560,32 @@ const confirmAndSave = async () => {
                 reference_id: reportId
               });
             }
-
           }
         }
       }
 
-      if (ledgerRows.length > 0) {
+      // 📝 નવો લેજર ડેટા ઈન્સર્ટ કરો
+      if (ledgerRows.length > 0 && reportId) {
         const { error: ledgerErr } = await supabase.from('site_material_stock_ledger').insert(ledgerRows);
         if (ledgerErr) {
           console.error("Ledger Insert Error:", ledgerErr);
         }
       }
 
-      await loadReports()
+      await loadReports();
+      setEditingReportId(null); // એડિટ મોડ બંધ કરવા 
       setReportForm({
         siteName: '',
         reportDate: getTodayString(),
         palingWorkRows: [{ contractorName: '', qty: '', description: '' }],
         contractorRows: [{ contractorName: '', labourCount: '', labourNotes: '', workItems: [{ workType: '', columnSize: '', concreteType: 'RMC', singleCastingQty: '', doubleCastingQty: '', runningFeet: '', height: '', cementBags: '', customWorkName: '', quantity: '', unit: 'NOS' }] }],
         description: ''
-      })
-      setPreviewData(null)
+      });
+      setPreviewData(null);
       
       setModal({ 
         isOpen: true, 
-        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been submitted & stock ledger updated successfully.`, 
+        message: `Report for "${reportForm.siteName.toUpperCase()}" site has been ${editingReportId ? 'updated' : 'submitted'} successfully.`, 
         onConfirm: () => setModal({ isOpen: false }) 
       });
 
@@ -488,11 +602,11 @@ const confirmAndSave = async () => {
       setLoading(false)
     }
   }
+// 🌟 ઉપર સિલેક્ટ કરેલી સાઇટ મુજબ જ હિસ્ટ્રી ફિલ્ટર થશે
   const filteredReports = reports.filter(r => {
-    const matchSite = filterSite === 'all' || r.site_name === filterSite
-    const matchDate = !filterDate || r.report_date === filterDate
-    return matchSite && matchDate
-  })
+    if (!reportForm.siteName) return false; // જો સાઇટ સિલેક્ટ ન હોય તો કઈ નહીં બતાવે
+    return r.site_name?.trim().toLowerCase() === reportForm.siteName?.trim().toLowerCase();
+  });
 
   return (
     <div style={{ padding: '0px', fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif', color: '#1e293b', maxWidth: '650px', margin: '0 auto', boxSizing: 'border-box' }}>
@@ -1201,53 +1315,173 @@ if (val === '2. Column Concrete') {
           </div>
           
    <div style={{ display: 'flex', gap: '8px', boxSizing: 'border-box' }}>
-                      <button type="button" disabled={loading} onClick={handleCombinedReportPreview} style={{ backgroundColor: loading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', flex: 1, fontSize: '12px' }}>
-                        {loading ? 'Processing...' : 'Review & Submit Report'}
-                      </button>
+                     
+    <div style={{ display: 'flex', gap: '8px', boxSizing: 'border-box' }}>
+  
+  {/* 🌟 મુખ્ય સબમિટ / અપડેટ બટન */}
+  <button 
+    type="button" 
+    disabled={loading} 
+    onClick={handleCombinedReportPreview} 
+    style={{ 
+      backgroundColor: loading ? '#94a3b8' : (editingReportId ? '#16a34a' : '#2563eb'), 
+      color: '#fff', 
+      border: 'none', 
+      padding: '8px 16px', 
+      borderRadius: '6px', 
+      fontWeight: '600', 
+      cursor: loading ? 'not-allowed' : 'pointer', 
+      flex: 1, 
+      fontSize: '12px' 
+    }}
+  >
+    {loading ? 'Processing...' : (editingReportId ? '📝 Update Report' : 'Review & Submit Report')}
+  </button>
+  
+  {/* 🌟 જ્યારે એડિટ મોડ ચાલુ હોય ત્યારે જ Delete અને Cancel બટન દેખાશે */}
+  {editingReportId && (
+    <>
+      <button 
+        type="button" 
+        onClick={() => handleDeleteReport(editingReportId)} 
+        style={{ 
+          backgroundColor: '#ef4444', 
+          color: '#fff', 
+          border: 'none', 
+          padding: '8px 16px', 
+          borderRadius: '6px', 
+          fontWeight: '600', 
+          cursor: 'pointer', 
+          fontSize: '12px' 
+        }}
+      >
+        🗑️ Delete
+      </button>
+      <button 
+        type="button" 
+        onClick={handleCancelEdit} 
+        style={{ 
+          backgroundColor: '#64748b', 
+          color: '#fff', 
+          border: 'none', 
+          padding: '8px 16px', 
+          borderRadius: '6px', 
+          fontWeight: '600', 
+          cursor: 'pointer', 
+          fontSize: '12px' 
+        }}
+      >
+        ✖ Cancel
+      </button>
+    </>
+  )}
+
+</div>
                      
                     </div>
-               
-          {/* Filter & Submitted DPR section below */}
-          <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', fontSize: '10px', fontWeight: '700', color: '#475569' }}>
-              <Filter size={12} color="#2563eb" /> SUBMITTED DPR (Recent-7 log)
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '8px', fontWeight: '600', color: '#64748b', marginBottom: '2px' }}>SELECT SITE</label>
-                <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '10px', backgroundColor: '#fff', fontWeight: '500', boxSizing: 'border-box' }}>
-                  <option value="all">🌐 All Sites</option>
-                  {sites.map(s => <option key={s.id || s.site_name} value={s.site_name}>{s.site_name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '8px', fontWeight: '600', color: '#64748b', marginBottom: '2px' }}>REPORT DATE</label>
-                <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ width: '100%', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '10px', boxSizing: 'border-box' }} />
-              </div>
-            </div>
-          </div>
+  {/* 📜 Recent DPR History (Selected Site Only) */}
+<div style={{ marginTop: '15px' }}>
+  <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', paddingLeft: '4px' }}>
+    Recent DPR History {reportForm.siteName ? `(${reportForm.siteName})` : ''}
+  </h4>
 
-          {/* Historical Reports */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
-           {filteredReports.slice(0, 7).map(r => (
-              <div key={r.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 10px', boxSizing: 'border-box' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '11px' }}>{r.site_name}</span>
-                  <span style={{ fontSize: '9px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 5px', borderRadius: '4px' }}>
-                    📅 {r.report_date ? r.report_date.split('-').reverse().join('/') : ''}
-                  </span>
-                </div>
-                {r.description && <p style={{ fontSize: '10px', color: '#475569', margin: '2px 0' }}>📝 {r.description}</p>}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px', paddingTop: '3px', borderTop: '1px solid #f1f5f9', fontSize: '8px', color: '#64748b' }}>
-                  <span>👤 {r.user_id || 'N/A'}</span>
-                  <span>🕒 {r.created_at ? new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase() : ''}</span>
-                </div>
+  {!reportForm.siteName ? (
+    <div style={{ padding: '14px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1', fontSize: '11px', color: '#64748b' }}>
+      ℹ️ કૃપા કરીને ઉપરથી સાઇટ સિલેક્ટ કરો જેથી તેની હિસ્ટ્રી જોઈ શકાય.
+    </div>
+  ) : filteredReports.length === 0 ? (
+    <div style={{ padding: '14px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1', fontSize: '11px', color: '#94a3b8' }}>
+      આ સાઇટ માટે હજુ કોઈ રિપોર્ટ સબમિટ થયેલ નથી.
+    </div>
+  ) : (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {filteredReports.slice(0, 7).map((r) => {
+        const isLocked = r.is_locked === true || isOlderThan24Hours(r.created_at);
+
+        // કામની વિગત (Summary)
+        let totalRMC = 0;
+        let totalCement = 0;
+        let summaryParts = [];
+
+        if (r.contractor_details && Array.isArray(r.contractor_details)) {
+          r.contractor_details.forEach(c => {
+            if (c.workItems && Array.isArray(c.workItems)) {
+              c.workItems.forEach(w => {
+                if (w.actualRmcQty) totalRMC += Number(w.actualRmcQty);
+                if (w.actualCementBags) totalCement += Number(w.actualCementBags);
+                if (w.workType === '4. Finishing Work' && w.cementBags) totalCement += Number(w.cementBags);
+                
+                if (w.workType) {
+                  let workName = w.workType.replace(/^\d+\.\s*/, '');
+                  if (w.workType === 'Other') workName = w.customWorkName || 'Other Work';
+                  let workSize = w.columnSize ? ` (${w.columnSize})` : '';
+                  let qty = w.quantity || w.runningFeet || '';
+                  let unit = qty ? (w.unit || 'NOS') : '';
+                  if (qty) summaryParts.push(`${workName}${workSize} - ${qty} ${unit}`);
+                }
+              });
+            }
+          });
+        }
+
+        let itemSummary = summaryParts.length > 0 ? summaryParts.join(' | ') : "Labour / Work Details";
+
+        // તારીખ ફોર્મેટ DD/MM/YYYY
+        let displayDate = r.report_date || '';
+        if (displayDate.includes('-')) {
+          const [year, month, day] = displayDate.split('-');
+          displayDate = `${day}/${month}/${year}`;
+        }
+
+        // Cement / RMC ટેક્સ્ટ
+        let concreteText = '';
+        if (totalRMC > 0 && totalCement > 0) {
+          concreteText = `RMC: ${totalRMC.toFixed(2)} M3 | Cement: ${totalCement} Bags`;
+        } else if (totalRMC > 0) {
+          concreteText = `RMC: ${totalRMC.toFixed(2)} M3`;
+        } else if (totalCement > 0) {
+          concreteText = `Cement: ${totalCement} Bags`;
+        }
+
+        return (
+          <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: editingReportId === r.id ? '2px solid #2563eb' : '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+            <div style={{ flex: 1, paddingRight: '10px' }}>
+              <span style={{ fontWeight: 'bold', color: '#1d4ed8' }}>Site: {r.site_name}</span>
+              
+              <div style={{ fontSize: '11px', fontWeight: '600', color: '#475569', marginTop: '4px' }}>
+                📦 {itemSummary}
               </div>
-            ))}
+              
+              <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
+                📅 {displayDate} {concreteText ? `| 🧱 ${concreteText}` : ''}
+              </div>
+            </div>
+
+            {isLocked ? (
+              <button 
+                type="button"
+                onClick={() => handleRequestEditAfter24Hours(r)}
+                style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
+              >
+                🔒 Request Edit
+              </button>
+            ) : (
+              <button 
+                type="button"
+                onClick={() => handleEditReport(r)}
+                style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
+              >
+                {editingReportId === r.id ? 'Editing...' : '✏️ Edit'}
+              </button>
+            )}
           </div>
+        );
+      })}
+    </div>
+  )}
+</div>
         </div>
       )}
-
       {/* FULL PREVIEW / CONFIRMATION MODAL */}
       {previewData && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box', backdropFilter: 'blur(2px)' }}>
