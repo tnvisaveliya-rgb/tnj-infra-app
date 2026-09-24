@@ -1483,7 +1483,7 @@ if (val === '2. Column Concrete') {
 </div>
         </div>
       )}
-      {/* FULL PREVIEW / CONFIRMATION MODAL */}
+    {/* FULL PREVIEW / CONFIRMATION MODAL */}
       {previewData && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box', backdropFilter: 'blur(2px)' }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '16px', padding: '20px', width: '100%', maxWidth: '500px', maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
@@ -1495,19 +1495,82 @@ if (val === '2. Column Concrete') {
               <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Please verify all details carefully before submitting.</p>
             </div>
             
+            {/* 1. Basic Info */}
             <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '13px' }}>
                 <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Site Name</span><strong style={{ color: '#0f172a' }}>{previewData.site}</strong></div>
                 <div><span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Report Date</span><strong style={{ color: '#0f172a' }}>{previewData.date}</strong></div>
               </div>
-              {previewData.details?.description && (
-                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#334155' }}>
-                  <strong>Remarks:</strong> {previewData.details.description}
-                </div>
-              )}
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+            {/* 2. Paling Work Summary */}
+            {previewData.details?.palingWorkRows?.some(p => p.contractorName || p.qty) && (
+              <div style={{ marginBottom: '16px' }}>
+                <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: '#7e22ce', margin: '0 0 8px 0', borderBottom: '1px solid #e9d5ff', paddingBottom: '4px' }}>1. Paling Work</h4>
+                {previewData.details.palingWorkRows.map((pRow, idx) => {
+                  if (!pRow.contractorName && !pRow.qty) return null;
+                  return (
+                    <div key={idx} style={{ fontSize: '12px', padding: '6px', borderBottom: '1px dashed #e2e8f0' }}>
+                      <strong>{pRow.contractorName || 'Unknown Contractor'}</strong>: {pRow.qty} NOS
+                      {pRow.description && <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>Note: {pRow.description}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 3. Material Installation & Labour Summary */}
+            {previewData.details?.contractorRows?.some(c => c.contractorName || c.workItems.some(w => w.workType)) && (
+              <div style={{ marginBottom: '16px' }}>
+                <h4 style={{ fontSize: '12px', fontWeight: 'bold', color: '#16a34a', margin: '0 0 8px 0', borderBottom: '1px solid #bbf7d0', paddingBottom: '4px' }}>2. Installation & Labour</h4>
+                {previewData.details.contractorRows.map((cRow, cIdx) => {
+                  if (!cRow.contractorName && !cRow.labourCount && !cRow.workItems.some(w => w.workType)) return null;
+                  return (
+                    <div key={cIdx} style={{ backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', marginBottom: '4px' }}>
+                        {cRow.contractorName || 'Unknown Contractor'} (Labour: {cRow.labourCount || '0'})
+                      </div>
+                      
+                      {cRow.workItems.map((wItem, wIdx) => {
+                        if (!wItem.workType) return null;
+                        
+                        let workDetail = '';
+                        if (wItem.workType === '1. Column Installation' || wItem.workType === '3. Panel Erection') {
+                          workDetail = `${wItem.columnSize || 'No Size'} - ${wItem.quantity || 0} NOS`;
+                        } else if (wItem.workType === '2. Column Concrete') {
+                          if (wItem.concreteType === 'RMC') {
+                            workDetail = `RMC - Expected: ${wItem.expectedBomQty || 0} M3 | Actual: ${wItem.actualRmcQty || 0} M3`;
+                          } else {
+                            workDetail = `Manual Mix - Expected: ${wItem.expectedCement || 0} Bags | Actual: ${wItem.actualCementBags || 0} Bags`;
+                          }
+                          workDetail += ` (Single: ${wItem.singleCastingQty || 0}, Double: ${wItem.doubleCastingQty || 0})`;
+                        } else if (wItem.workType === '4. Finishing Work') {
+                          workDetail = `Height: ${wItem.height || 0}, RF: ${wItem.runningFeet || 0}, Cement: ${wItem.cementBags || 0} Bags`;
+                        } else {
+                          workDetail = `${wItem.customWorkName || 'Other'} - ${wItem.quantity || 0} ${wItem.unit || 'NOS'}`;
+                        }
+
+                        return (
+                          <div key={wIdx} style={{ fontSize: '11px', color: '#334155', padding: '4px 0', borderTop: '1px dashed #cbd5e1', marginTop: '4px' }}>
+                            <strong style={{ color: '#0f172a' }}>{wItem.workType}:</strong> {workDetail}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 4. Description/Remarks */}
+            {previewData.details?.description && (
+              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#334155' }}>
+                <strong>Additional Remarks:</strong> {previewData.details.description}
+              </div>
+            )}
+
+            {/* 5. Buttons */}
+            <div style={{ display: 'flex', gap: '10px', paddingTop: '16px', borderTop: '1px solid #e2e8f0', marginTop: '16px' }}>
               <button disabled={loading} onClick={() => { confirmAndSave(); }} style={{ flex: 1, padding: '12px', backgroundColor: loading ? '#94a3b8' : '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
                 {loading ? 'Saving Data...' : '✅ Confirm & Save'}
               </button>

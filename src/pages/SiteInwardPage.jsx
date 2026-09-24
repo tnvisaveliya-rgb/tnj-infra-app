@@ -64,7 +64,7 @@ export default function SiteMaterialInward({ user }) {
     }
   };
 
-  const handleEditClick = (entry) => {
+const handleEditClick = async (entry) => {
     setEditingId(entry.id);
     setDprDate(entry.date || dprDate);
     setSelectedSite(entry.site_name || selectedSite);
@@ -75,40 +75,78 @@ export default function SiteMaterialInward({ user }) {
     }
     setExistingBills(billsArray);
 
-    let fullMatName = entry.material_name || '';
-    let extractedMaterial = fullMatName;
-    let extractedSize = '';
-    let extractedSteelSpec = '';
+    // 🎯 ૧. જો DC નંબર હોય, તો એ જ DC નંબર વાળી બધી જ રો (Rows) ડેટાબેઝમાંથી શોધીને લાવો
+    let allMatchingEntries = [entry]; 
+    
+    if (entry.dc_number && entry.dc_number !== 'EMPTY') {
+      const { data: matchedRows, error } = await supabase
+        .from('site_material_inward')
+        .select('*')
+        .eq('site_name', entry.site_name || selectedSite)
+        .eq('dc_number', entry.dc_number);
 
-    const itemCategory = entry.item_type || 'Raw Material';
-
-    if (itemCategory === 'Finished Product') {
-      if (fullMatName.includes('(') && fullMatName.includes(')')) {
-        const firstOpen = fullMatName.indexOf('(');
-        const lastClose = fullMatName.lastIndexOf(')');
-        
-        extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
-        const nameAndSize = fullMatName.substring(0, firstOpen).trim();
-        
-        const lastSpaceIndex = nameAndSize.lastIndexOf(' ');
-        if (lastSpaceIndex !== -1) {
-          extractedMaterial = nameAndSize.substring(0, lastSpaceIndex).trim(); 
-          extractedSize = nameAndSize.substring(lastSpaceIndex + 1).trim();    
-        } else {
-          extractedMaterial = nameAndSize;
-        }
-      } else {
-        const lastSpaceIndex = fullMatName.lastIndexOf(' ');
-        if (lastSpaceIndex !== -1) {
-          const potentialSize = fullMatName.substring(lastSpaceIndex + 1).trim();
-          if (!isNaN(potentialSize) || potentialSize.includes('*') || potentialSize.length <= 5) {
-            extractedMaterial = fullMatName.substring(0, lastSpaceIndex).trim();
-            extractedSize = potentialSize;
-          }
-        }
+      if (!error && matchedRows && matchedRows.length > 0) {
+        allMatchingEntries = matchedRows;
       }
     }
 
+    // 🎯 ૨. બધી જ મટીરિયલ આઇટમ્સ પર લૂપ ચલાવીને તેનું નામ, સાઈઝ અને કેટેગરી અલગ પાડો
+    const mappedItems = allMatchingEntries.map((row) => {
+      let fullMatName = row.material_name || '';
+      let extractedMaterial = fullMatName;
+      let extractedSize = '';
+      let extractedSteelSpec = '';
+      
+      let rawCategory = (row.item_type || 'Raw Material').trim();
+      let itemCategory = 'Raw Material'; 
+
+      if (rawCategory.toLowerCase().includes('finish')) {
+        itemCategory = 'Finished Product';
+      } else if (rawCategory.toLowerCase().includes('consumable')) {
+        itemCategory = 'Consumable Item';
+      } else if (rawCategory.toLowerCase().includes('tool') || rawCategory.toLowerCase().includes('hardware')) {
+        itemCategory = 'Tools and Hardware';
+      } else if (rawCategory.toLowerCase().includes('asset')) {
+        itemCategory = 'Asset';
+      }
+
+      if (itemCategory === 'Finished Product') {
+        // ૧. સૌથી પહેલા બ્રેકેટ (Bracket) માંથી Steel Spec અલગ કરો
+        if (fullMatName.includes('(') && fullMatName.includes(')')) {
+          const firstOpen = fullMatName.indexOf('(');
+          const lastClose = fullMatName.lastIndexOf(')');
+          
+          extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
+          fullMatName = fullMatName.substring(0, firstOpen).trim(); // બ્રેકેટ કાઢી નાખો
+        }
+
+        // ૨. હવે 'પહેલી' સ્પેસ (First Space) શોધો
+        const firstSpaceIndex = fullMatName.indexOf(' ');
+        
+        if (firstSpaceIndex !== -1) {
+          // પહેલી સ્પેસ પહેલાનો શબ્દ મટીરિયલ બનશે (દા.ત. "Column" કે "U-Drain")
+          extractedMaterial = fullMatName.substring(0, firstSpaceIndex).trim(); 
+          
+          // પહેલી સ્પેસ પછીનું બધું જ સાઈઝ ગણાશે (દા.ત. "8ft * 150mm" કે "300x300")
+          extractedSize = fullMatName.substring(firstSpaceIndex + 1).trim();      
+        } else {
+          // જો નામમાં કોઈ સ્પેસ જ ન હોય
+          extractedMaterial = fullMatName;
+        }
+      }
+
+      return {
+        id: row.id || Date.now() + Math.random(),
+        material: extractedMaterial,
+        size: extractedSize,
+        qty: row.quantity || '',
+        unit: row.unit || 'Nos',
+        category: itemCategory,
+        steelSpec: extractedSteelSpec
+      };
+    });
+
+    // 🎯 ૩. ફોર્મમાં એક જ સોર્સની અંદર આ બધી આઇટમ્સ એકસાથે સેટ કરો
     setInwardSources([
       {
         id: Date.now(),
@@ -116,22 +154,11 @@ export default function SiteMaterialInward({ user }) {
         dcNumber: entry.dc_number === 'EMPTY' ? '' : (entry.dc_number || ''),
         vehicleNumber: entry.vehicle_no === 'EMPTY' ? '' : (entry.vehicle_no || ''),
         description: entry.description || '',
-        items: [
-          {
-            id: Date.now(),
-            material: extractedMaterial,
-            size: extractedSize,
-            qty: entry.quantity || '',
-            unit: entry.unit || 'Nos',
-            category: itemCategory,
-            steelSpec: extractedSteelSpec 
-          }
-        ],
+        items: mappedItems, // 👈 અહીં બધા જ મટીરિયલ્સ એકસાથે આઇટમ્સ તરીકે આવી જશે!
         billFiles: []
       }
     ]);
   };
-
 const handleEditClickWithTimeCheck = (entry) => {
     // 🎯 ૧. સૌથી પહેલાં ડેટાબેઝનું is_locked ચેક કરો
     if (entry.is_locked === true) {
@@ -241,19 +268,21 @@ const fetchMasters = async (siteName) => {
             let parsedName = rawName;
             let parsedSize = '';
             
-            if (itemType === 'Finished Product') {
+        if (itemType === 'Finished Product') {
               // ૧. કૌંસ (...) અને તેમાં લખેલી Steel details કાઢી નાખો
               const noBrackets = rawName.replace(/\s*\(.*?\)\s*/g, '').trim();
               
-              // ૨. સ્પેસથી છૂટું પાડો 
-              const parts = noBrackets.split(' ');
-              const lastPart = parts[parts.length - 1];
+              // ૨. 'પહેલી સ્પેસ' (First Space) શોધો
+              const firstSpaceIndex = noBrackets.indexOf(' ');
               
-              // ૩. જો છેલ્લા ભાગમાં કોઈ નંબર હોય (દા.ત. 7, 2950x150, 3m), તો તેને સાઇઝ માનો
-              if (/\d/.test(lastPart) && parts.length > 1) {
-                parsedSize = lastPart;
-                parsedName = parts.slice(0, -1).join(' '); // સાઇઝ સિવાયનું બધું જ નામ ગણાશે
+              if (firstSpaceIndex !== -1) {
+                // પહેલી સ્પેસ પહેલાનો શબ્દ મટીરિયલ બનશે (દા.ત. "Column")
+                parsedName = noBrackets.substring(0, firstSpaceIndex).trim(); 
+                
+                // પહેલી સ્પેસ પછીનું બધું જ સાઈઝ ગણાશે (દા.ત. "8ft * 150mm")
+                parsedSize = noBrackets.substring(firstSpaceIndex + 1).trim();      
               } else {
+                // જો નામમાં કોઈ સ્પેસ જ ન હોય
                 parsedName = noBrackets;
               }
             }
@@ -1247,44 +1276,72 @@ const handleRequestEditAfter24Hours = async (entry) => {
           </div>
         </div>
       )}
+{/* Recent History */}
+      {recentHistory.length > 0 && (() => {
+        // 🎯 ૧. એક જ DC નંબર વાળા બધા રેકૉર્ડ્સને ભેગા (Group) કરવાનું લોજિક
+        const groupedHistoryMap = {};
+        
+        recentHistory.forEach((item) => {
+          const dcKey = (item.dc_number && item.dc_number !== 'EMPTY') ? item.dc_number : `single-${item.id}`;
+          
+          if (!groupedHistoryMap[dcKey]) {
+            // જો આ DC પહેલીવાર આવતો હોય તો તેને મુખ્ય ઓબ્જેક્ટ તરીકે સાચવો
+            groupedHistoryMap[dcKey] = {
+              ...item,
+              combinedMaterials: [`${item.material_name} (${item.quantity} ${item.unit})`]
+            };
+          } else {
+            // જો આ DC નંબર પહેલેથી જ હોય, તો તેનું મટીરિયલ અને જથ્થો આની અંદર જોડી દો
+            groupedHistoryMap[dcKey].combinedMaterials.push(`${item.material_name} (${item.quantity} ${item.unit})`);
+          }
+        });
 
-      {/* Recent History */}
-      {recentHistory.length > 0 && (
-        <div style={{ marginTop: '15px' }}>
-          <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', paddingLeft: '4px' }}>
-            Recent Inward History (Last 24 Hours Editable)
-          </h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {recentHistory.map((item) => {
-          // 🎯 ૨૪ કલાકનું ટાઈમ લૉજિક કેલ્ક્યુલેટ કરવા માટે
-              const entryTime = new Date(item.created_at || item.date).getTime();
-              const currentTime = new Date().getTime();
-              const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
-              const isLocked = item.is_locked === true || hoursDifference > 24;
+        const groupedHistoryList = Object.values(groupedHistoryMap);
 
-              return (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                  <div>
-                    <span style={{ fontWeight: 'bold', color: '#166534' }}>{item.material_name}</span> ({item.quantity} {item.unit}) - <span style={{ color: '#64748b' }}>{item.supplier_name}</span>
-                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>DC: {item.dc_number || 'EMPTY'} | Date: {item.date}</div>
+        return (
+          <div style={{ marginTop: '15px' }}>
+            <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px', paddingLeft: '4px' }}>
+              Recent Inward History (Last 24 Hours Editable)
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {groupedHistoryList.map((item) => {
+                // 🎯 ૨૪ કલાકનું ટાઈમ લૉજિક કેલ્ક્યુલેટ કરવા માટે
+                const entryTime = new Date(item.created_at || item.date).getTime();
+                const currentTime = new Date().getTime();
+                const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+                const isLocked = item.is_locked === true || hoursDifference > 24;
+
+                return (
+                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                    <div>
+                      {/* 🎯 એક જ DC ના બધા મટીરિયલ્સ અહીં કોમા કરીને ભેગા દેખાશે */}
+                      <span style={{ fontWeight: 'bold', color: '#166534' }}>
+                        {item.combinedMaterials.join(', ')}
+                      </span> - <span style={{ color: '#64748b' }}>{item.supplier_name}</span>
+                      
+                      <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
+                        DC: {item.dc_number || 'EMPTY'} | Date: {item.date}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {isLocked ? (
+                        <button type="button" onClick={() => handleEditClickWithTimeCheck(item)} style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>
+                          🔒 Request Edit
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => handleEditClickWithTimeCheck(item)} style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>
+                          {editingId === item.id ? 'Editing...' : 'Edit'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  {isLocked ? (
-                    <button type="button" onClick={() => handleEditClickWithTimeCheck(item)} style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca' }}>
-                      🔒 Request Edit
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => handleEditClickWithTimeCheck(item)} style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe' }}>
-                      {editingId === item.id ? 'Editing...' : 'Edit'}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
-
+        );
+      })()} 
     </div>
   );
 }

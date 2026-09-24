@@ -453,13 +453,20 @@ const handleDeleteCurrentExpense = async () => {
       }
 
       // ૨. સ્ટોક લેજરમાંથી સેફલી ડિલીટ કરવું (Try-catch સાથે જેથી મેઈન ડિલીટ ન અટકે)
+      // ૨. સ્ટોક લેજર અને ઈનવર્ડ ટેબલમાંથી સેફલી ડિલીટ કરવું
       try {
         await supabase
           .from('material_stock_ledger')
           .delete()
           .eq('reference_id', String(expId));
+          
+        // 🌟 નવો ઉમેરેલો કોડ: inward ટેબલમાંથી પણ કાઢી નાખવા
+        await supabase
+          .from('plant_material_inward')
+          .delete()
+          .eq('reference_id', String(expId));
       } catch (stockErr) {
-        console.warn("Stock ledger delete note:", stockErr);
+        console.warn("Stock/Inward delete note:", stockErr);
       }
 
       // 🌟 ૩. મુખ્ય plant_expenses ટેબલમાંથી એન્ટ્રી ડિલીટ કરવી (ગેરંટી સાથે)
@@ -609,152 +616,199 @@ const handleDeleteCurrentExpense = async () => {
   };
 
 const handleFinalSubmit = async () => {
-    setShowPreviewModal(false);
+  setShowPreviewModal(false);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Admin';
+  const { data: { session } } = await supabase.auth.getSession();
+  const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Admin';
 
-    setLoading(true);
-    try {
-      const expenseInsertRows = [];
+  setLoading(true);
+  try {
+    const expenseInsertRows = [];
 
-      for (const row of expenseRows) {
-        let finalPaidTo = row.paidTo.trim() || 'Self';
-        const isLabourCat = row.expenseCategory.toLowerCase().includes('labour') || row.expenseCategory.toLowerCase().includes('wages');
-        if (isLabourCat && row.selectedLabour) {
-          finalPaidTo = row.selectedLabour;
-        }
-
-        expenseInsertRows.push({
-          plant_name: selectedPlant,
-          expense_date: expenseDate,
-          expense_category: row.expenseCategory,
-          amount: Number(row.amount),
-          paid_to: finalPaidTo,
-          payment_mode: row.paymentMode,
-          bill_no: row.billNo.trim() || '-',
-          remarks: row.remarks.trim() || '',
-          bill_url: row.billFile || null,
-          submitted_by: currentLoggedUser
-        });
+    for (const row of expenseRows) {
+      let finalPaidTo = row.paidTo.trim() || 'Self';
+      const isLabourCat = row.expenseCategory.toLowerCase().includes('labour') || row.expenseCategory.toLowerCase().includes('wages');
+      if (isLabourCat && row.selectedLabour) {
+        finalPaidTo = row.selectedLabour;
       }
 
-      // ૧. અપડેટ મોડ
-      if (editingExpenseId) {
-        const updatePayload = expenseInsertRows[0];
-        const expId = Number(editingExpenseId);
-
-        if (!updatePayload.bill_url) {
-          const existingItem = expensesHistory.find(h => Number(h.id) === expId);
-          if (existingItem && existingItem.bill_url) {
-            updatePayload.bill_url = existingItem.bill_url;
-          }
-        }
-
-        const { error: updateErr } = await supabase
-          .from('plant_expenses')
-          .update(updatePayload)
-          .eq('id', expId);
-
-        if (updateErr) throw updateErr;
-
-        await supabase
-          .from('material_stock_ledger')
-          .delete()
-          .eq('reference_id', String(expId));
-
-        const row = expenseRows[0];
-        if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
-          const newStockLedger = row.stockItems
-            .filter(sub => sub.qty && Number(sub.qty) > 0)
-            .map(sub => ({
-              date: expenseDate,
-              plant_name: selectedPlant,
-              material_name: sub.selectedMaterial === '__OTHER__' ? (sub.manualMaterialName?.trim() || 'General Tool') : sub.selectedMaterial,
-              transaction_type: 'INWARD',
-              qty: Number(sub.qty),
-              unit: sub.unit || 'Nos',
-              reference_id: String(expId)
-            }));
-
-          if (newStockLedger.length > 0) {
-            await supabase.from('material_stock_ledger').insert(newStockLedger);
-          }
-        }
-
-        setEditingExpenseId(null);
-        triggerAlert("✅ ખર્ચ અને સ્ટોક સફળતાપૂર્વક અપડેટ થઈ ગયા છે!");
-
-      } else {
-        // ૨. નવી એન્ટ્રી
-        for (let rIdx = 0; rIdx < expenseRows.length; rIdx++) {
-          const row = expenseRows[rIdx];
-          const payload = expenseInsertRows[rIdx];
-
-          const { data: newExp, error: expErr } = await supabase
-            .from('plant_expenses')
-            .insert([payload])
-            .select('id')
-            .single();
-
-          if (expErr) throw expErr;
-          const savedExpenseId = newExp.id;
-
-          if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
-            const stockRowsForThisExpense = [];
-            for (const subItem of row.stockItems) {
-              if (subItem.qty && Number(subItem.qty) > 0) {
-                const matName = subItem.selectedMaterial === '__OTHER__' 
-                  ? (subItem.manualMaterialName?.trim() || 'General Tool') 
-                  : subItem.selectedMaterial;
-
-                stockRowsForThisExpense.push({
-                  date: expenseDate,
-                  plant_name: selectedPlant,
-                  material_name: matName,
-                  transaction_type: 'INWARD',
-                  qty: Number(subItem.qty),
-                  unit: subItem.unit || 'Nos',
-                  reference_id: String(savedExpenseId)
-                });
-              }
-            }
-
-            if (stockRowsForThisExpense.length > 0) {
-              await supabase.from('material_stock_ledger').insert(stockRowsForThisExpense);
-            }
-          }
-        }
-triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થઈ ગયો છે અને સ્ટોક જમા થઈ ગયો છે!");
-      }
-
-      setExpenseRows([
-        {
-          id: Date.now(),
-          expenseCategory: '',
-          amount: '',
-          paidTo: '',
-          selectedLabour: '',
-          paymentMode: 'Cash',
-          billNo: '',
-          remarks: '',
-          billFile: null,
-          uploading: false,
-          addToStock: false,
-          selectedMaterial: '',
-          manualMaterialName: '',
-          qty: '',
-          stockItems: [{ id: Date.now(), selectedMaterial: '', manualMaterialName: '', qty: '', unit: 'Nos' }]
-        }
-      ]);
-
-      await fetchExpensesHistory();
-    } catch (err) {
-      triggerAlert("Error: " + err.message);
-    } finally {
-      setLoading(false);
+      expenseInsertRows.push({
+        plant_name: selectedPlant,
+        expense_date: expenseDate,
+        expense_category: row.expenseCategory,
+        amount: Number(row.amount),
+        paid_to: finalPaidTo,
+        payment_mode: row.paymentMode,
+        bill_no: row.billNo.trim() || '-',
+        remarks: row.remarks.trim() || '',
+        bill_url: row.billFile || null,
+        submitted_by: currentLoggedUser
+      });
     }
-  };
+
+    // ૧. અપડેટ મોડ (Edit)
+    if (editingExpenseId) {
+      const updatePayload = expenseInsertRows[0];
+      const expId = Number(editingExpenseId);
+
+      if (!updatePayload.bill_url) {
+        const existingItem = expensesHistory.find(h => Number(h.id) === expId);
+        if (existingItem && existingItem.bill_url) {
+          updatePayload.bill_url = existingItem.bill_url;
+        }
+      }
+
+      const { error: updateErr } = await supabase
+        .from('plant_expenses')
+        .update(updatePayload)
+        .eq('id', expId);
+
+      if (updateErr) throw updateErr;
+
+      // 🌟 બંને ટેબલમાંથી જૂનો ડેટા ડિલીટ કરો
+      await supabase.from('material_stock_ledger').delete().eq('reference_id', String(expId));
+      await supabase.from('plant_material_inward').delete().eq('reference_id', String(expId));
+
+      const row = expenseRows[0];
+      if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
+        const newStockLedger = row.stockItems
+          .filter(sub => sub.qty && Number(sub.qty) > 0)
+          .map(sub => ({
+            date: expenseDate,
+            plant_name: selectedPlant,
+            material_name: sub.selectedMaterial === '__OTHER__' ? (sub.manualMaterialName?.trim() || 'General Tool') : sub.selectedMaterial,
+            transaction_type: 'INWARD',
+            qty: Number(sub.qty),
+            unit: sub.unit || 'Nos',
+            reference_id: String(expId)
+          }));
+
+        if (newStockLedger.length > 0) {
+          // 1. લેજરમાં નાખો
+          await supabase.from('material_stock_ledger').insert(newStockLedger);
+          
+          // 2. ઈનવર્ડમાં નાખો
+          const inwardRows = newStockLedger.map(stock => {
+            const matObj = availableMaterials.find(m => m.name === stock.material_name);
+            const iType = matObj?.item_type || 'Hardware / Tool';
+            
+            return {
+              date: stock.date,
+              plant_name: stock.plant_name,
+              material_name: stock.material_name,
+              quantity: stock.qty,
+              unit: stock.unit,
+              supplier_name: updatePayload.paid_to,
+              dc_number: updatePayload.bill_no,
+              vehicle_no: 'Auto Expense',
+              item_type: iType,
+              bill_url: updatePayload.bill_url,
+              description: updatePayload.remarks, // 👈 ઈમેજ મુજબ એડ કર્યું
+              submitted_by: currentLoggedUser,    // 👈 ઈમેજ મુજબ એડ કર્યું
+              reference_id: stock.reference_id
+            };
+          });
+          await supabase.from('plant_material_inward').insert(inwardRows);
+        }
+      }
+
+      setEditingExpenseId(null);
+      triggerAlert("✅ ખર્ચ અને સ્ટોક સફળતાપૂર્વક અપડેટ થઈ ગયા છે!");
+
+    } else {
+      // ૨. નવી એન્ટ્રી (New Insert)
+      for (let rIdx = 0; rIdx < expenseRows.length; rIdx++) {
+        const row = expenseRows[rIdx];
+        const payload = expenseInsertRows[rIdx];
+
+        const { data: newExp, error: expErr } = await supabase
+          .from('plant_expenses')
+          .insert([payload])
+          .select('id')
+          .single();
+
+        if (expErr) throw expErr;
+        const savedExpenseId = newExp.id;
+
+        if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
+          const stockRowsForThisExpense = [];
+          for (const subItem of row.stockItems) {
+            if (subItem.qty && Number(subItem.qty) > 0) {
+              const matName = subItem.selectedMaterial === '__OTHER__' 
+                ? (subItem.manualMaterialName?.trim() || 'General Tool') 
+                : subItem.selectedMaterial;
+
+              stockRowsForThisExpense.push({
+                date: expenseDate,
+                plant_name: selectedPlant,
+                material_name: matName,
+                transaction_type: 'INWARD',
+                qty: Number(subItem.qty),
+                unit: subItem.unit || 'Nos',
+                reference_id: String(savedExpenseId)
+              });
+            }
+          }
+
+          if (stockRowsForThisExpense.length > 0) {
+            // 1. લેજરમાં નાખો
+            await supabase.from('material_stock_ledger').insert(stockRowsForThisExpense);
+
+            // 2. ઈનવર્ડમાં નાખો
+            const inwardRows = stockRowsForThisExpense.map(stock => {
+              const matObj = availableMaterials.find(m => m.name === stock.material_name);
+              const iType = matObj?.item_type || 'Hardware / Tool';
+
+              return {
+                date: stock.date,
+                plant_name: stock.plant_name,
+                material_name: stock.material_name,
+                quantity: stock.qty,
+                unit: stock.unit,
+                supplier_name: payload.paid_to,
+                dc_number: payload.bill_no,
+                vehicle_no: 'Auto Expense',
+                item_type: iType,
+                bill_url: payload.bill_url,
+                description: payload.remarks,       // 👈 ઈમેજ મુજબ એડ કર્યું
+                submitted_by: currentLoggedUser,    // 👈 ઈમેજ મુજબ એડ કર્યું
+                reference_id: stock.reference_id
+              };
+            });
+            await supabase.from('plant_material_inward').insert(inwardRows);
+          }
+        }
+      }
+      triggerAlert("✅ ખર્ચ સફળતાપૂર્વક સેવ થઈ ગયો છે અને સ્ટોક જમા થઈ ગયો છે!");
+    }
+
+    setExpenseRows([
+      {
+        id: Date.now(),
+        expenseCategory: '',
+        amount: '',
+        paidTo: '',
+        selectedLabour: '',
+        paymentMode: 'Cash',
+        billNo: '',
+        remarks: '',
+        billFile: null,
+        uploading: false,
+        addToStock: false,
+        selectedMaterial: '',
+        manualMaterialName: '',
+        qty: '',
+        stockItems: [{ id: Date.now(), selectedMaterial: '', manualMaterialName: '', qty: '', unit: 'Nos' }]
+      }
+    ]);
+
+    await fetchExpensesHistory();
+  } catch (err) {
+    triggerAlert("Error: " + err.message);
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '650px', margin: '0 auto', paddingBottom: '20px', fontFamily: 'Inter, sans-serif' }}>
       

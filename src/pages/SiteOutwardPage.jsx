@@ -178,34 +178,30 @@ export default function PlantOutwardPage({ user }) {
       } else {
         itemCategory = 'Raw Material';
       }
-
-      if (itemCategory === 'Finished Product') {
+if (itemCategory === 'Finished Product') {
+        // ૧. સૌથી પહેલા બ્રેકેટ (Bracket) માંથી Steel Spec અલગ કરો
         if (fullMatName.includes('(') && fullMatName.includes(')')) {
           const firstOpen = fullMatName.indexOf('(');
           const lastClose = fullMatName.lastIndexOf(')');
           
           extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
-          const nameAndSize = fullMatName.substring(0, firstOpen).trim();
+          fullMatName = fullMatName.substring(0, firstOpen).trim(); // બ્રેકેટ કાઢી નાખો
+        }
+
+        // ૨. હવે 'પહેલી' સ્પેસ (First Space) શોધો
+        const firstSpaceIndex = fullMatName.indexOf(' ');
+        
+        if (firstSpaceIndex !== -1) {
+          // પહેલી સ્પેસ પહેલાનો શબ્દ મટીરિયલ બનશે (દા.ત. "Column")
+          extractedMaterial = fullMatName.substring(0, firstSpaceIndex).trim(); 
           
-          const lastSpaceIndex = nameAndSize.lastIndexOf(' ');
-          if (lastSpaceIndex !== -1) {
-            extractedMaterial = nameAndSize.substring(0, lastSpaceIndex).trim(); 
-            extractedSize = nameAndSize.substring(lastSpaceIndex + 1).trim();     
-          } else {
-            extractedMaterial = nameAndSize;
-          }
+          // પહેલી સ્પેસ પછીનું બધું જ સાઈઝ ગણાશે (દા.ત. "8ft * 150mm" અથવા "300x300")
+          extractedSize = fullMatName.substring(firstSpaceIndex + 1).trim();      
         } else {
-          const lastSpaceIndex = fullMatName.lastIndexOf(' ');
-          if (lastSpaceIndex !== -1) {
-            const potentialSize = fullMatName.substring(lastSpaceIndex + 1).trim();
-            if (!isNaN(potentialSize) || potentialSize.includes('*') || potentialSize.length <= 5) {
-              extractedMaterial = fullMatName.substring(0, lastSpaceIndex).trim();
-              extractedSize = potentialSize;
-            }
-          }
+          // જો નામમાં કોઈ સ્પેસ જ ન હોય
+          extractedMaterial = fullMatName;
         }
       }
-
       return {
         id: row.id,
         material: extractedMaterial,
@@ -598,10 +594,40 @@ export default function PlantOutwardPage({ user }) {
       return;
     }
 
-    const itemsTableRows = itemsArray && itemsArray.length > 0 
+const itemsTableRows = itemsArray && itemsArray.length > 0 
       ? itemsArray.map((item, idx) => {
+          // 🎯 સુધારો 1: category ફરજિયાત ડિફાઇન કરવી પડે
+          let category = (item.item_type || item.category || '').toLowerCase();
+          
           let rawMatName = item.material || item.material_name || '';
-          let rawSize = item.size || '-';
+          
+          // 🎯 સુધારો 2: અહીંયા '-' ની જગ્યાએ ખાલી '' (બ્લેન્ક) રાખવું
+          let rawSize = item.size || ''; 
+
+          if (category.includes('finish') || category.includes('product')) {
+            
+            // ૧. સૌથી પહેલા કૌંસ (Steel Spec) હોય તો તેને કાઢી નાખો
+            if (rawMatName.includes('(') && rawMatName.includes(')')) {
+              const firstOpen = rawMatName.indexOf('(');
+              rawMatName = rawMatName.substring(0, firstOpen).trim(); 
+            }
+
+            // ૨. હવે આપણું ફાઇનલ લોજિક: 'પહેલી સ્પેસ' થી છૂટું પાડો
+            if (!rawSize && rawMatName.includes(' ')) {
+              const firstSpaceIndex = rawMatName.indexOf(' ');
+              
+              if (firstSpaceIndex !== -1) {
+                rawSize = rawMatName.substring(firstSpaceIndex + 1).trim(); // પહેલી સ્પેસ પછીનું બધું સાઈઝ
+                rawMatName = rawMatName.substring(0, firstSpaceIndex).trim(); // પહેલી સ્પેસ પહેલાનું મટીરિયલ
+              }
+            }
+
+          }
+          
+          // 🎯 સુધારો 3: જો બધું પત્યા પછી પણ સાઈઝ ખાલી રહે, તો છેલ્લે '-' મૂકી દો
+          if (!rawSize) {
+            rawSize = '-';
+          }
 
           const qVal = item.qty || item.quantity || '';
           const uVal = item.unit || 'Nos';

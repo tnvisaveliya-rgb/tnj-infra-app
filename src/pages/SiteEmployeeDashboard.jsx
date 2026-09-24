@@ -43,45 +43,63 @@ function ProductionReportView({ onBack, siteList = [], user }) {
     }
     return dateStr;
   };
+  // 🌟 આ નવો કોડ તમારા ફંક્શનની ઉપર ઉમેરવાનો છે
+  useEffect(() => {
+    fetchReportData();
+  }, [selectedSite, selectedLabour, fromDate, toDate, siteList, user]);
 
-  // ૧. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું
- useEffect(() => {
-  const fetchContractorsBySite = async () => {
-    try {
-      // 🌟 Jo user ne koi site assigned nathi ane admin pan nathi, to contractor fetch j na karo
-      const isOwner = (user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com';
-      if (!isOwner && (!siteList || siteList.length === 0)) {
-        setLabourList([]);
-        setSelectedLabour('');
-        return;
-      }
-        let query = supabase.from('contractors').select('*');
-        if (selectedSite && selectedSite !== 'All') {
-          query = query.or(`site_name.eq."${selectedSite}",company_name.eq."${selectedSite}"`);
+// ૧. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું (ડુપ્લિકેટ વગર અને 'All Sites' સપોર્ટ સાથે)
+  useEffect(() => {
+    const fetchContractorsBySite = async () => {
+      try {
+        const isOwner = (user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com';
+        
+        // જો યુઝરને કોઈ સાઇટ અસાઇન ન હોય અને એડમિન પણ ન હોય, તો કઈ ન લાવો
+        if (!isOwner && (!siteList || siteList.length === 0)) {
+          setLabourList([]);
+          setSelectedLabour('');
+          return;
         }
-        const { data, error } = await query;
+
+        // ડેટાબેઝમાંથી બધા કોન્ટ્રાક્ટર્સ લાવો
+        const { data, error } = await supabase.from('contractors').select('*');
+
         if (!error && data) {
-          const filteredNames = data.map(d => d.name).filter(Boolean);
-          setLabourList(filteredNames);
-          if (filteredNames.length > 0) {
-            setSelectedLabour(filteredNames[0]);
-          } else {
-            setSelectedLabour('');
+          let filteredData = data;
+
+          if (selectedSite && selectedSite !== 'All') {
+            // 🎯 માત્ર સિલેક્ટ કરેલી સાઇટના લેબર + 'All Sites (General)' વાળા લેબર
+            filteredData = data.filter(d => 
+              d.site_name === selectedSite || 
+              d.company_name === selectedSite ||
+              d.site_name === 'All Sites (General)' || 
+              d.company_name === 'All Sites (General)'
+            );
+          } else if (siteList && siteList.length > 0) {
+            // 🎯 જો 'All Sites' સિલેક્ટ હોય, તો માત્ર સાઇટ લિસ્ટના લેબર + 'All Sites (General)' વાળા લેબર
+            filteredData = data.filter(d => 
+              siteList.includes(d.site_name) || 
+              siteList.includes(d.company_name) ||
+              d.site_name === 'All Sites (General)' || 
+              d.company_name === 'All Sites (General)'
+            );
           }
+
+          // 🎯 ડુપ્લિકેટ નામ કાઢવા માટે Set નો ઉપયોગ
+          const uniqueNames = [...new Set(filteredData.map(d => d.name).filter(Boolean))];
+
+         setLabourList(uniqueNames);
+          setSelectedLabour('All'); // 🌟 બસ આ એક લાઈન બદલવાની છે!
         }
       } catch (err) {
         console.error('Error fetching contractors for site:', err);
       }
     };
-    fetchContractorsBySite();
-  }, [selectedSite]);
 
-  // ૨. ડેટા ફેચ કરવો
-  useEffect(() => {
-    fetchReportData();
-  }, [selectedSite, selectedLabour, fromDate, toDate]);
+    fetchContractorsBySite();
+  }, [selectedSite, siteList, user]);
+
 const fetchReportData = async () => {
-  // 🌟 Jo user ne koi site assigned nathi (siteList khali che) ane admin pan nathi, to data fetch j na karo
   const isOwner = (user && user.email === 'infra.tnj@gmail.com') || localStorage.getItem('userEmail') === 'infra.tnj@gmail.com';
   if (!isOwner && (!siteList || siteList.length === 0)) {
     setReportRows([]);
@@ -93,14 +111,17 @@ const fetchReportData = async () => {
 
   setLoading(true);
   try {
-    // ... tamaro baki no code ahiya aavse ...
       const groupedByDate = {};
       const uniqueColSet = new Set();
+
+      const sLabour = selectedLabour !== 'All' ? (selectedLabour || '').trim().toLowerCase() : 'all';
 
       let reportQuery = supabase.from('daily_reports').select('*');
       if (selectedSite && selectedSite !== 'All') {
         reportQuery = reportQuery.eq('site_name', selectedSite);
       }
+      
+      // 🌟 સુધારો: તારીખ પાછળથી સમય (00:00:00) હટાવી દીધો છે કારણકે DB માં કોલમ ટાઈપ 'date' છે
       if (fromDate) reportQuery = reportQuery.gte('report_date', fromDate);
       if (toDate) reportQuery = reportQuery.lte('report_date', toDate);
 
@@ -108,20 +129,19 @@ const fetchReportData = async () => {
 
       if (!rErr && reportData && reportData.length > 0) {
         reportData.forEach(rep => {
-          const dStr = rep.report_date;
+          const dStr = rep.report_date ? rep.report_date.split(' ')[0].split('T')[0] : '';
           if (!dStr) return;
 
-          // (૧) contractor_details માંથી કામ અને ડેટા વાંચવા
+          // (૧) contractor_details માંથી કામ
           const contractorRows = rep.contractor_details || [];
           contractorRows.forEach(cRow => {
-            if (selectedLabour && selectedLabour !== 'All' && cRow.contractorName !== selectedLabour) return;
+            const cName = (cRow.contractorName || '').trim().toLowerCase();
+            if (sLabour !== 'all' && cName !== sLabour) return; 
 
-            // કામના આઇટમ્સ
             const workItems = cRow.workItems || [];
             workItems.forEach(wItem => {
               let wName = wItem.workType || 'Work';
 
-              // 🎯 Column Concrete માટે Single અને Double અલગ કૉલમ બનાવવી
               if (wName === '2. Column Concrete') {
                 const singleQ = Number(wItem.singleCastingQty || 0);
                 const doubleQ = Number(wItem.doubleCastingQty || 0);
@@ -139,7 +159,6 @@ const fetchReportData = async () => {
                   groupedByDate[dStr][colDouble] = (groupedByDate[dStr][colDouble] || 0) + doubleQ;
                 }
               } else {
-                // બાકીના કામો માટે નોર્મલ લોજિક
                 const qty = Number(wItem.quantity || wItem.actualCementBags || wItem.runningFeet || 0);
                 if (wName && qty > 0) {
                   uniqueColSet.add(wName);
@@ -150,10 +169,12 @@ const fetchReportData = async () => {
             });
           });
 
-          // (૨) paling_work માંથી ડેટા વાંચવો (એરર સોલ્વ કરવા માટે cRow ની જગ્યાએ pRow વાપર્યું છે)
+          // (૨) paling_work માંથી ડેટા
           const palingRows = rep.paling_work || [];
           palingRows.forEach(pRow => {
-            if (selectedLabour && selectedLabour !== 'All' && pRow.contractorName !== selectedLabour) return;
+            const pName = (pRow.contractorName || '').trim().toLowerCase();
+            if (sLabour !== 'all' && pName !== sLabour) return;
+
             const pQty = Number(pRow.qty || 0);
             if (pQty > 0) {
               const pCol = 'Paling Work';
@@ -169,35 +190,31 @@ const fetchReportData = async () => {
         setDynamicColumns([]);
       }
 
-      // 🎯 (૩) ઉપાડ (Upad / Expenses) labour wise પરફેક્ટ લાવવા માટેનું લોજિક
-// 🎯 (૩) ઉપાડ (Upad / Expenses) labour wise પરફેક્ટ લાવવા માટેનું લોજિક
-const upadByDateMap = {};
-let totalUpadSum = 0;
+      // (૩) ઉપાડ (Upad / Expenses)
+      const upadByDateMap = {};
+      let totalUpadSum = 0;
 
-let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to, expense_category, plant_name');
+      let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to, expense_category, plant_name');
+      upadQuery = upadQuery.ilike('expense_category', '%ઉપાડ%');
 
-// 🌟 FAKT "મજૂરી / ઉપાડ" (Labour Advance / Wages) vali category j filter karva mate:
-upadQuery = upadQuery.ilike('expense_category', '%ઉપાડ%');
+      if (selectedSite && selectedSite !== 'All') {
+        upadQuery = upadQuery.eq('plant_name', selectedSite);
+      } else if (siteList && siteList.length > 0) {
+        upadQuery = upadQuery.in('plant_name', siteList);
+      }
 
-// 🌟 Site wise filter logic:
-if (selectedSite && selectedSite !== 'All') {
-  // Jo koi ek khas site select hoy tyare fatk te j site aavse
-  upadQuery = upadQuery.eq('plant_name', selectedSite);
-} else if (siteList && siteList.length > 0) {
-  // Jo 'All Sites' select hoy tyare user ne assigned/available badhi sites na j kharcha aavse
-  upadQuery = upadQuery.in('plant_name', siteList);
-}
+      if (selectedLabour && selectedLabour !== 'All') {
+        upadQuery = upadQuery.ilike('paid_to', `%${selectedLabour.trim()}%`);
+      }
+      
+      // 🌟 સુધારો: અહી પણ તારીખ પાછળથી સમય હટાવી દીધો છે
+      if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
+      if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
 
-if (selectedLabour && selectedLabour !== 'All') {
-  upadQuery = upadQuery.eq('paid_to', selectedLabour);
-}
-if (fromDate) upadQuery = upadQuery.gte('expense_date', fromDate);
-if (toDate) upadQuery = upadQuery.lte('expense_date', toDate);
-
-const { data: upadData } = await upadQuery;
+      const { data: upadData } = await upadQuery;
       if (upadData && upadData.length > 0) {
         upadData.forEach(item => {
-          const expDate = item.expense_date;
+          const expDate = item.expense_date ? item.expense_date.split(' ')[0].split('T')[0] : '';
           const amt = Number(item.amount || 0);
           upadByDateMap[expDate] = (upadByDateMap[expDate] || 0) + amt;
           totalUpadSum += amt;
@@ -221,13 +238,12 @@ const { data: upadData } = await upadQuery;
       );
       setReportRows(sortedRows);
 
-    } catch (err) {
-      console.error('Error fetching daily reports billing:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  } catch (err) {
+    console.error('Error fetching daily reports billing:', err);
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div style={{ padding: '10px 8px', maxWidth: '750px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>

@@ -49,23 +49,38 @@ const formatDateToDMY = (dateStr) => {
   // =========================================================================
   // ૧. સિલેક્ટ થયેલા પ્લાન્ટ મુજબ જ contractors ફેચ કરવા
   // =========================================================================
+ // =========================================================================
+  // ૧. સિલેક્ટ થયેલા પ્લાન્ટ મુજબ જ contractors ફેચ કરવા (ડુપ્લિકેટ વગર)
+  // =========================================================================
   useEffect(() => {
     const fetchContractorsByPlant = async () => {
       try {
-        let query = supabase.from('contractors').select('*');
-
-        if (selectedPlant && selectedPlant !== 'All') {
-          query = query.or(`site_name.eq."${selectedPlant}",company_name.eq."${selectedPlant}"`);
-        }
-
-        const { data, error } = await query;
+        // ડેટાબેઝમાંથી બધા કોન્ટ્રાક્ટર્સ/લેબર લાવો
+        const { data, error } = await supabase.from('contractors').select('*');
 
         if (!error && data) {
-          const filteredNames = data.map(d => d.name).filter(Boolean);
-          setLabourList(filteredNames);
+          let filteredData = data;
+
+          if (selectedPlant && selectedPlant !== 'All') {
+            // 🎯 માત્ર સિલેક્ટ કરેલા પ્લાન્ટના જ લેબર
+            filteredData = data.filter(d => 
+              d.site_name === selectedPlant || d.company_name === selectedPlant
+            );
+          } else if (plantList && plantList.length > 0) {
+            // 🎯 જો 'All' સિલેક્ટ કર્યું હોય, તો માત્ર પ્લાન્ટના જ લેબર (સાઇટના નહીં)
+            filteredData = data.filter(d => 
+              plantList.includes(d.site_name) || plantList.includes(d.company_name)
+            );
+          }
+
+          // 🎯 ડુપ્લિકેટ નામ કાઢવા માટે Set નો ઉપયોગ (એક નામ એક જ વાર આવશે)
+          const uniqueNames = [...new Set(filteredData.map(d => d.name).filter(Boolean))];
+
+          setLabourList(uniqueNames);
           
-          if (filteredNames.length > 0) {
-            setSelectedLabour(filteredNames[0]);
+          // લિસ્ટમાં કોઈ નામ હોય તો પહેલું ઓટો-સિલેક્ટ કરો
+          if (uniqueNames.length > 0) {
+            setSelectedLabour(uniqueNames[0]);
           } else {
             setSelectedLabour('');
           }
@@ -76,7 +91,7 @@ const formatDateToDMY = (dateStr) => {
     };
 
     fetchContractorsByPlant();
-  }, [selectedPlant]);
+  }, [selectedPlant, plantList]);
 
   // =========================================================================
   // ૨. ફિલ્ટર બદલાય ત્યારે લાઈવ ડેટા લોડ કરવો
@@ -540,7 +555,8 @@ const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isExpensePopupOpen, setIsExpensePopupOpen] = useState(false);
   const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense');
   const [incomeInitialTab, setIncomeInitialTab] = useState('supervisiorfundrequest');
-
+const [isAdmin, setIsAdmin] = useState(false); // 👈 એડમિન ચેક કરવા માટે
+  const [finishedGoodsStock, setFinishedGoodsStock] = useState([]); // 👈 ફિનિશ્ડ ગુડ્સના ડેટા માટે
 const [attendanceInfo, setAttendanceInfo] = useState({
     status: 'Not Punched',
     time: '',
@@ -584,9 +600,14 @@ useEffect(() => {
     const fetchPlantList = async () => {
       try {
         const userEmail = (user?.email || '').trim().toLowerCase();
-        const isAdmin = (userEmail === 'infra.tnj@gmail.com');
+        
+        // ૧. અહી adminCheck નામનો નવો વેરીએબલ બનાવો
+        const adminCheck = (userEmail === 'infra.tnj@gmail.com');
+        
+        // ૨. તેને ઉપર બનાવેલા State માં સેવ કરો
+        setIsAdmin(adminCheck);
 
-        if (isAdmin) {
+       if (adminCheck) {
           // Admin mate badha plants fetch karo
           const { data, error } = await supabase
             .from('material_stock_ledger')
@@ -804,6 +825,58 @@ const fetchDashboardData = async () => {
         setRawMaterialsStock(Object.values(stockMap));
       }
 
+/// 👇 અહીથી નવું ઉમેરો (માત્ર એડમિન માટે ડેટા લાવશે)
+      if (userEmail === 'infra.tnj@gmail.com') {
+        try {
+          let fgQuery = supabase.from('stock_ledger').select('*');
+          if (selectedPlant && selectedPlant !== 'All') {
+            fgQuery = fgQuery.eq('plant_name', selectedPlant);
+          }
+          const { data: fgData, error: fgError } = await fgQuery;
+          
+          if (!fgError && fgData) {
+            const fgStockMap = {};
+
+            fgData.forEach(item => {
+              // નામ સરખા કરવા માટે બધું uppercase કરી દઈએ (જેથી 'column' અને 'Column' અલગ ન ગણાય)
+              const pName = (item.product_name || '').trim().toUpperCase(); 
+              
+              // સાઇઝ અને સ્ટીલ ડીટેલ્સ આમાં જ છે
+              const pVariant = (item.size_variant || '').trim(); 
+              
+              // બંનેને જોડીને એક યુનિક કી બનાવો
+              const uniqueKey = `${pName} | ${pVariant}`.trim();
+
+              if (!uniqueKey || uniqueKey === '|') return;
+
+              const type = (item.transaction_type || '').toUpperCase();
+              const qty = Number(item.qty || 0);
+
+              // જો લિસ્ટમાં આ આઇટમ (સાઇઝ અને સ્ટીલ ડીટેલ સાથે) પહેલી વાર આવતી હોય
+              if (!fgStockMap[uniqueKey]) {
+                fgStockMap[uniqueKey] = { 
+                  name: pName, // માત્ર નામ (દા.ત. COLUMN)
+                  variant: pVariant, // સ્ટીલ ડીટેલ (દા.ત. 8ft x 150mm (4 mm wire - 5 wires))
+                  stock: 0, 
+                  unit: 'Nos'
+                };
+              }
+
+              // પ્લસ-માઇનસ લોજીક
+              if (type === 'PRODUCTION' || type === 'INWARD') {
+                fgStockMap[uniqueKey].stock += qty;
+              } else if (type === 'OUTWARD' || type === 'BROKEN') {
+                fgStockMap[uniqueKey].stock -= qty;
+              }
+            });
+
+            // Object માંથી Array બનાવીને State માં સેટ કરો (જો સ્ટોક 0 હોય તો પણ બતાવશે)
+            setFinishedGoodsStock(Object.values(fgStockMap));
+          }
+        } catch (err) {
+          console.error('Error fetching FG stock:', err);
+        }
+      }
 // ૫. ATTENDANCE FETCH
       const { data: attData, error: attError } = await supabase
         .from('site_attendance')
@@ -1026,9 +1099,108 @@ const fetchDashboardData = async () => {
               </span>
             </div>
 
+{/* 👇 અહીથી નવો UI કોડ ચાલુ થાય છે (FINISHED GOODS) */}
+            {isAdmin && (
+              <>
+                <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '14px' }}>📦</span>
+                    <span style={{ fontSize: '11px', fontWeight: '900', color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Finished Goods Stock ({finishedGoodsStock.length})
+                    </span>
+                  </div>
+
+                  {/* 2-Column Grid View - Compact */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                    {finishedGoodsStock.length === 0 ? (
+                      <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: '10px', color: '#64748b', fontSize: '11px', fontStyle: 'italic' }}>
+                        Loading finished goods...
+                      </div>
+                    ) : (
+                      finishedGoodsStock.map((item, idx) => {
+                        // સાઇઝ અને સ્ટીલને અલગ પાડવાનું લોજીક (કૌંસ '(' થી છૂટું પાડશે)
+                        let sizeText = item.variant || '';
+                        let steelText = '';
+                        if (sizeText.includes('(')) {
+                          const splitIndex = sizeText.indexOf('(');
+                          steelText = sizeText.substring(splitIndex).trim(); // દા.ત., "(4 mm wire - 5 wires)"
+                          sizeText = sizeText.substring(0, splitIndex).trim(); // દા.ત., "8ft x 150mm"
+                        }
+
+                        return (
+                          <div key={idx} style={{
+                            backgroundColor: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            padding: '6px 8px', // 👈 બોક્સ વધુ કોમ્પેક્ટ કર્યું
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            minHeight: '55px', // 👈 ઊંચાઈ ઓછી કરી
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                          }}>
+                            
+                            {/* Top Side: Name + Size & Steel Detail */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', marginBottom: '2px' }}>
+                              
+                              {/* નામ અને સાઇઝ બાજુ-બાજુમાં */}
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '10px', fontWeight: '900', color: '#0f172a', textTransform: 'uppercase' }}>
+                                  {item.name}
+                                </span>
+                                {sizeText && (
+                                  <span style={{ fontSize: '10px', fontWeight: '800', color: '#2563eb' }}>
+                                    {sizeText}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {/* સ્ટીલની વિગત એની નીચેની લાઈનમાં */}
+                              {steelText && (
+                                <span style={{ fontSize: '8px', fontWeight: '700', color: '#64748b', letterSpacing: '0.2px' }}>
+                                  {steelText}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Bottom Side: Stock Box (Smaller) */}
+                            <div style={{
+                              backgroundColor: item.stock < 0 ? '#fef2f2' : '#f0fdf4',
+                              border: `1px solid ${item.stock < 0 ? '#fecaca' : '#bbf7d0'}`,
+                              padding: '3px 6px', // 👈 QTY બોક્સ નાનું કર્યું
+                              borderRadius: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginTop: 'auto'
+                            }}>
+                              <span style={{ fontSize: '8px', fontWeight: '800', color: item.stock < 0 ? '#ef4444' : '#16a34a' }}>
+                                QTY:
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                                <span style={{ fontSize: '12px', fontWeight: '900', color: item.stock < 0 ? '#dc2626' : '#15803d' }}>
+                                  {item.stock.toLocaleString('en-IN')}
+                                </span>
+                                <span style={{ fontSize: '7px', fontWeight: '800', color: item.stock < 0 ? '#ef4444' : '#16a34a' }}>
+                                  {item.unit || 'Nos'}
+                                </span>
+                              </div>
+                            </div>
+
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+                
+                <div style={{ borderTop: '1px dashed #cbd5e1', margin: '10px 0' }} />
+              </>
+            )}
+            {/* 👆 નવો UI કોડ પૂરો */}
              {/* STORE & TOOLS (Assets Filtered Out) */}
             <div>
-              <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+              <span style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '4px' }}>
                 🛠️ Store & Daily Tools ({storeItems.length})
               </span>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>

@@ -263,33 +263,31 @@ const { data: matData } = await supabase.from('site_materials_master').select('*
       } else {
         itemCategory = 'Raw Material';
       }
-
-      if (itemCategory === 'Finished Product') {
+if (itemCategory === 'Finished Product') {
+        // ૧. સૌથી પહેલા બ્રેકેટ (Bracket) માંથી Steel Spec અલગ કરો
         if (fullMatName.includes('(') && fullMatName.includes(')')) {
           const firstOpen = fullMatName.indexOf('(');
           const lastClose = fullMatName.lastIndexOf(')');
           
           extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
-          const nameAndSize = fullMatName.substring(0, firstOpen).trim();
+          fullMatName = fullMatName.substring(0, firstOpen).trim(); // હવે "Column 8ft * 150mm" વધશે
+        }
+
+        // ૨. હવે 'પહેલી' સ્પેસ (First Space) શોધો
+        const firstSpaceIndex = fullMatName.indexOf(' ');
+        
+        if (firstSpaceIndex !== -1) {
+          // પહેલી સ્પેસ પહેલાનો શબ્દ મટીરિયલ બનશે (દા.ત. "Column")
+          extractedMaterial = fullMatName.substring(0, firstSpaceIndex).trim(); 
           
-          const lastSpaceIndex = nameAndSize.lastIndexOf(' ');
-          if (lastSpaceIndex !== -1) {
-            extractedMaterial = nameAndSize.substring(0, lastSpaceIndex).trim(); 
-            extractedSize = nameAndSize.substring(lastSpaceIndex + 1).trim();     
-          } else {
-            extractedMaterial = nameAndSize;
-          }
+          // પહેલી સ્પેસ પછીનું બધું જ સાઈઝ ગણાશે (દા.ત. "8ft * 150mm")
+          extractedSize = fullMatName.substring(firstSpaceIndex + 1).trim();      
         } else {
-          const lastSpaceIndex = fullMatName.lastIndexOf(' ');
-          if (lastSpaceIndex !== -1) {
-            const potentialSize = fullMatName.substring(lastSpaceIndex + 1).trim();
-            if (!isNaN(potentialSize) || potentialSize.includes('*') || potentialSize.length <= 5) {
-              extractedMaterial = fullMatName.substring(0, lastSpaceIndex).trim();
-              extractedSize = potentialSize;
-            }
-          }
+          // જો નામમાં કોઈ સ્પેસ જ ન હોય
+          extractedMaterial = fullMatName;
         }
       }
+      
 
       return {
         id: row.id,
@@ -763,22 +761,30 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
           let rawMatName = item.material || item.material_name || '';
           let rawSize = item.size || '';
 
-          if (category.includes('finish') || category.includes('product')) {
+  if (category.includes('finish') || category.includes('product')) {
+            
+            // ૧. સૌથી પહેલા કૌંસ (Steel Spec) હોય તો તેને કાઢી નાખો
             if (rawMatName.includes('(') && rawMatName.includes(')')) {
               const firstOpen = rawMatName.indexOf('(');
-              rawMatName = rawMatName.substring(0, firstOpen).trim();
+              rawMatName = rawMatName.substring(0, firstOpen).trim(); 
             }
 
+            // ૨. હવે આપણું ફાઇનલ લોજિક: 'પહેલી સ્પેસ' થી છૂટું પાડો 
+            // (આ કૌંસવાળા અને કૌંસ વગરના બંને નામમાં કામ કરશે)
             if (!rawSize && rawMatName.includes(' ')) {
-              const lastSpace = rawMatName.lastIndexOf(' ');
-              const potentialSz = rawMatName.substring(lastSpace + 1).trim();
-              if (!isNaN(potentialSz) || potentialSz.includes('*') || potentialSz.length <= 6) {
-                rawSize = potentialSz;
-                rawMatName = rawMatName.substring(0, lastSpace).trim();
+              const firstSpaceIndex = rawMatName.indexOf(' ');
+              
+              if (firstSpaceIndex !== -1) {
+                rawSize = rawMatName.substring(firstSpaceIndex + 1).trim(); // પહેલી સ્પેસ પછીનું બધું સાઈઝ (દા.ત. 300x300)
+                rawMatName = rawMatName.substring(0, firstSpaceIndex).trim(); // પહેલી સ્પેસ પહેલાનું મટીરિયલ (દા.ત. U-Drain)
               }
             }
+
           } else {
-            rawSize = '-';
+            // જો Raw Material હોય અને સાઈઝ ખાલી હોય તો ડેશ (-) મૂકો
+            if (!rawSize) {
+              rawSize = '-';
+            }
           }
 
           const qVal = item.qty || item.quantity || '';
