@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { X, Loader2, UserPlus, Trash2, Shield, Edit3, Phone, Users, MapPin } from 'lucide-react'
-import AdminLeaveRequests from './AdminLeaveRequests'; // 👈 તમારી ફાઇલનું સાચું નામ
+import { X, Loader2, UserPlus, Trash2, Shield, Edit3, Phone, Users, ArrowLeft, Search, MapPin } from 'lucide-react'
+
 
 const AVAILABLE_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -17,7 +17,8 @@ export default function StaffManagement() {
   const [assignedPlants, setAssignedPlants] = useState([]) // 👈 સિલેક્ટ કરેલા પ્લાન્ટ
 
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [showLeaveSection, setShowLeaveSection] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+
   // Edit Modal States
   const [editingStaff, setEditingStaff] = useState(null)
   const [editForm, setEditForm] = useState({
@@ -296,102 +297,126 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
   const filteredEditPlants = plantsList.filter(plant => editPlantStateFilter === 'All' || plant.state === editPlantStateFilter) // 👈 Filter Logic
   const filteredAddPlants = plantsList.filter(plant => addPlantStateFilter === 'All' || plant.state === addPlantStateFilter)     // 👈 Filter Logic
 
-  return (
-    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+// 👇 સર્ચ માટેનું ફિલ્ટર લોજિક
+  const filteredStaff = staffList.filter(staff => 
+    staff.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    staff.mobile?.includes(searchTerm)
+  );
+
+ return (
+    <div style={{ maxWidth: '650px', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      
+      {/* 1. Header & Back Button (Thodu motu karyu ane margin ghataadyu) */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '12px' }}>
+        <button 
+          onClick={() => window.history.back()}
+          style={{
+            padding: '8px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', 
+            background: '#f8fafc', color: '#334155', fontWeight: '500', 
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', 
+            fontSize: '14px', whiteSpace: 'nowrap', marginTop: '2px'
+          }}
+        >
+          ← Back
+        </button>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>Staff Management</h1>
-            <span style={{ backgroundColor: '#e2e8f0', color: '#334155', padding: '2px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Users size={14} /> Total: {staffList.length}
-            </span>
-          </div>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>Manage staff members, page access, and assigned sites.</p>
-        </div>
-
-        {/* બટનોનું ગ્રુપ */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          
-          {/* 📋 Leave & Attendance બટન (જે AdminAttenceLeave ઓપન કરશે) */}
-          <button 
-            onClick={() => setShowLeaveSection(!showLeaveSection)} 
-            style={{ backgroundColor: '#9333ea', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
-          >
-            📋 {showLeaveSection ? 'Hide Leave Requests' : 'Leave & Attendance'}
-          </button>
-
-          {/* Add New Staff બટન */}
-          <button 
-            onClick={() => { setIsModalOpen(true); setAddStateFilter('All'); }}
-            style={{ backgroundColor: '#2563eb', padding: '10px 18px', borderRadius: '10px', border: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#fff' }}
-          >
-
-Add New Staff
-          </button>
-
+          <h1 style={{ margin: 0, fontSize: '22px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0f172a', fontWeight: 'bold' }}>
+            <Users size={22} color="#2563eb" /> Staff Management
+          </h1>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#64748b', lineHeight: '1.4' }}>
+            સ્ટાફ મેમ્બર્સ, પેજ એક્સેસ અને સાઇટ્સ અહીંથી મેનેજ કરો.
+          </p>
         </div>
       </div>
 
-      {/* જો બટન દબાવ્યું હશે તો AdminAttenceLeave પેજ અહીં બતાવશે */}
-      {showLeaveSection && (
-        <div style={{ marginBottom: '25px' }}>
-          <AdminLeaveRequests />
+      {/* 2. Action Bar (Box paatalu karyu ane margin ochu karyu) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '8px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>
+          <Shield size={16} color="#0f172a" /> Staff List 
+          <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: '12px', marginLeft: '4px' }}>
+            Total: {staffList.length}
+          </span>
         </div>
-      )}
+        <button 
+          onClick={() => { setIsModalOpen(true); setAddStateFilter('All'); }}
+          style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}
+        >
+          + Add New Staff
+        </button>
+      </div>
 
-      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', overflowX: 'auto', border: '1px solid #e2e8f0' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '750px' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontSize: '12px', textTransform: 'uppercase' }}>
-              <th style={{ padding: '14px 16px', width: '25%' }}>Name, Login ID & Mobile</th>
-              <th style={{ padding: '14px 16px', width: '15%' }}>Role</th>
-              <th style={{ padding: '14px 16px', width: '25%' }}>Allowed Tabs</th>
-              <th style={{ padding: '14px 16px', width: '20%' }}>Assigned Sites</th>
-              <th style={{ padding: '14px 16px', width: '15%', textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {staffList.length === 0 ? (
-              <tr>
-                <td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
-                  કોઈ સ્ટાફ ડેટા ઉપલબ્ધ નથી.
-                </td>
-              </tr>
-            ) : (
-              staffList.map((s) => (
-                <tr key={s.user_id} style={{ borderBottom: '1px solid #f1f5f9', fontSize: '14px' }}>
-                  <td style={{ padding: '14px 16px' }}>
-                    <div style={{ fontWeight: '600', color: '#1e293b' }}>{s.full_name}</div>
-                    <div style={{ fontSize: '12px', color: '#2563eb', fontWeight: '500' }}>✉️ {s.email || 'N/A'}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>📞 {s.mobile || 'No Mobile'}</div>
-                  </td>
-                  <td style={{ padding: '14px 16px', color: '#475569' }}>
-                    <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>
+      {/* 3. Search Bar (Margin ochu karyu) */}
+      <div style={{ position: 'relative', marginBottom: '10px' }}>
+        <Search size={16} style={{ position: 'absolute', left: '12px', top: '10px', color: '#64748b' }} />
+        <input 
+          type="text" 
+          placeholder="Search staff name or mobile..." 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{ width: '100%', padding: '8px 10px 8px 36px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box', outline: 'none' }}
+        />
+      </div>
+
+      {/* 4. Staff Cards List (Box vacche gap 12px thi ghatadine 8px karyo) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {filteredStaff.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#64748b' }}>
+            કોઈ સ્ટાફ મળ્યો નથી.
+          </div>
+        ) : (
+          filteredStaff.map((s) => {
+            let sites = s.assigned_sites;
+            if (typeof sites === 'string') { try { sites = JSON.parse(sites); } catch(e) { sites = []; } }
+            
+            let plants = s.assigned_plants;
+            if (typeof plants === 'string') { try { plants = JSON.parse(plants); } catch(e) { plants = []; } }
+
+            return (
+              <div key={s.user_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0', gap: '15px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#0f172a', marginBottom: '6px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    {s.full_name} 
+                    <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '12px', fontWeight: '600' }}>
                       {s.role}
                     </span>
-                  </td>
-                  <td style={{ padding: '14px 16px', color: '#64748b', fontSize: '12px' }}>
-                    {s.allowed_tabs ? s.allowed_tabs.join(', ') : 'None'}
-                  </td>
-                  <td style={{ padding: '14px 16px', color: '#0f172a', fontSize: '12px', fontWeight: '500' }}>
-                    {s.assigned_sites && s.assigned_sites.length > 0 ? s.assigned_sites.join(', ') : <span style={{ color: '#94a3b8' }}>No Sites Assigned</span>}
-                  </td>
-                  <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                      <button onClick={() => openEditModal(s)} style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '600', fontSize: '13px', padding: '4px' }}>
-                        <Edit3 size={15} /> Edit
-                      </button>
-                      <button onClick={() => deleteStaff(s.user_id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '600', fontSize: '13px', padding: '4px' }}>
-                        <Trash2 size={15} /> Delete
-                      </button>
+                  </div>
+                  
+                  <div style={{ fontSize: '13px', color: '#475569', marginBottom: '8px' }}>
+                    ✉️ {s.email || 'N/A'} &nbsp;|&nbsp; 
+                    {s.mobile ? (
+                      <a href={`tel:${s.mobile}`} style={{ textDecoration: 'none', color: '#0f172a', fontWeight: '600', cursor: 'pointer' }}>
+                        📞 {s.mobile}
+                      </a>
+                    ) : (
+                      <span>📞 N/A</span>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ color: '#2563eb' }}>
+                      <span style={{ fontWeight: '600' }}>Sites:</span> {Array.isArray(sites) && sites.length > 0 ? sites.join(', ') : 'None'}
                     </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                    <div style={{ color: '#ea580c' }}>
+                      <span style={{ fontWeight: '600' }}>Plants:</span> {Array.isArray(plants) && plants.length > 0 ? plants.join(', ') : 'None'}
+                    </div>
+                    <div style={{ color: '#16a34a' }}>
+                      <span style={{ fontWeight: '600' }}>Allowed Tabs:</span> {s.allowed_tabs && s.allowed_tabs.length > 0 ? s.allowed_tabs.join(', ') : 'None'}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <button onClick={() => openEditModal(s)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '6px 18px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#2563eb', fontSize: '13px', fontWeight: '500', cursor: 'pointer' }}>
+                    <Edit3 size={14} /> Edit
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        )}
       </div>
+
+    
 
       {/* Edit Staff & Permissions Modal */}
       {editingStaff && (
@@ -428,10 +453,7 @@ Add New Staff
                 </select>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>New Password (Optional)</label>
-                <input type="password" name="password" value={editForm.password} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Leave blank to keep old password" />
-              </div>
+            
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#0369a1', margin: 0 }}>Allowed Tabs</h3>
@@ -484,9 +506,17 @@ Add New Staff
                 )} 
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
-                <button type="button" onClick={() => setEditingStaff(null)} style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}>Cancel</button>
-                <button type="submit" style={{ padding: '8px 16px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }} disabled={updating}>{updating ? 'Updating...' : 'Save Changes'}</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '12px', marginTop: '10px' }}>
+                
+                {/* 👇 નવું ઉમેરેલું Delete બટન (Edit Modal ની અંદર) */}
+                <button type="button" onClick={() => { deleteStaff(editingStaff.user_id); setEditingStaff(null); }} style={{ padding: '8px 14px', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px' }}>
+                  <Trash2 size={16} /> Delete
+                </button>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button type="button" onClick={() => setEditingStaff(null)} style={{ padding: '10px 18px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#475569', fontSize: '13px' }}>Cancel</button>
+                  <button type="submit" style={{ padding: '10px 18px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }} disabled={updating}>{updating ? 'Updating...' : 'Save Changes'}</button>
+                </div>
               </div>
             </form>
           </div>
@@ -502,7 +532,10 @@ Add New Staff
               <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}><X size={22} /></button>
             </div>
 
-            <form onSubmit={handleAddStaff} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <form onSubmit={handleAddStaff} autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* 🛑 ANTI-AUTOFILL HACK: બ્રાઉઝરને છેતરવા માટે નકલી છુપાયેલા ફિલ્ડ્સ. Chrome આમાં ડેટા ભરશે. */}
+              <input type="email" name="fake_email" style={{ width: 0, height: 0, position: 'absolute', opacity: 0, overflow: 'hidden' }} tabIndex="-1" autoComplete="username" />
+              <input type="password" name="fake_password" style={{ width: 0, height: 0, position: 'absolute', opacity: 0, overflow: 'hidden' }} tabIndex="-1" autoComplete="current-password" />
               {error && <div style={{ backgroundColor: '#fee2e2', color: '#dc2626', padding: '10px', borderRadius: '8px', fontSize: '13px' }}>{error}</div>}
 
               <div>
@@ -512,7 +545,7 @@ Add New Staff
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Email (Login ID) *</label>
-                <input type="email" name="email" value={formData.email} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter email address" required />
+                <input type="email" name="email" value={formData.email} onChange={handleChange} autoComplete="off" style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter email address" required />
               </div>
 
               <div>
@@ -524,7 +557,7 @@ Add New Staff
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Password *</label>
-                <input type="password" name="password" value={formData.password} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter password (min 6 chars)" required />
+                <input type="password" name="password" value={formData.password} onChange={handleChange} autoComplete="off" spellCheck="false" style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Enter password (min 6 chars)" required />
               </div>
 
               <div>

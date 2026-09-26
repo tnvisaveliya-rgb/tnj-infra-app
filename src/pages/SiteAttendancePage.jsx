@@ -553,9 +553,10 @@ return (
         </div>
       </div>
 
-      {/* --- CARD 4: ACTIONS (Report & Leave Request) --- */}
+     {/* --- CARD 4: ACTIONS (Report & Leave Request) --- */}
       <div style={{ marginTop: '-6px', backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         
+        {/* 1. Generate Attendance Report Button */}
         <button 
           onClick={() => setShowReportBox(!showReportBox)} 
           style={{ width: '100%', padding: '12px 16px', backgroundColor: '#475569', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -563,6 +564,7 @@ return (
           <span>{showReportBox ? '▲' : '▼'}</span>
         </button>
 
+        {/* Generate Report Box (જો ખુલ્લું હોય તો) */}
         {showReportBox && (
           <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
             <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>Select Date Range:</div>
@@ -584,52 +586,103 @@ return (
           </div>
         )}
 
+        {/* 2. Request for Leave Button */}
         <button 
           onClick={() => setShowLeaveBox(!showLeaveBox)} 
           style={{ width: '100%', padding: '12px 16px', backgroundColor: '#9333ea', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>📝 Request for Leave (રજા માટે અરજી)</span>
           <span>{showLeaveBox ? '▲' : '▼'}</span>
         </button>
-{/* --- MY LEAVE REQUESTS STATUS TOGGLE BUTTON --- */}
-      <button 
-        onClick={() => setShowMyLeaveStatusBox(!showMyLeaveStatusBox)} 
-        style={{ width: '100%', padding: '12px 16px', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>📌 My Leave Requests Status (મારી રજાઓની સ્થિતિ)</span>
-        <span>{showMyLeaveStatusBox ? '▲' : '▼'}</span>
-      </button>
 
-      {/* ટૉગલ ખુલે ત્યારે જ આ બોક્સ દેખાશે */}
-      {showMyLeaveStatusBox && (
-        <div style={{ backgroundColor: '#f0f9ff', borderRadius: '16px', padding: '14px', border: '1px solid #bae6fd', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
-          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#0369a1', marginBottom: '4px' }}>Your Leave Applications:</div>
-
-          {myLeaveRequests.length === 0 ? (
-            <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>કોઈ રજાની અરજી કરી નથી.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-              {myLeaveRequests.map((leave) => (
-                <div key={leave.id} style={{ padding: '10px', borderRadius: '8px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', fontSize: '11px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span>📅 <strong>{leave.from_date}</strong> to <strong>{leave.to_date}</strong> ({leave.leave_type})</span>
-                    <span style={{ 
-                      fontWeight: 'bold', 
-                      color: leave.status === 'Approved' ? '#059669' : leave.status === 'Partially Approved' ? '#2563eb' : leave.status === 'Rejected' ? '#dc2626' : '#d97706' 
-                    }}>
-                      {leave.status}
-                    </span>
-                  </div>
-                  <div style={{ color: '#475569' }}>💬 Reason: {leave.reason}</div>
-                  {leave.admin_remark && (
-                    <div style={{ color: '#7c3aed', marginTop: '3px', fontWeight: '500' }}>
-                      👑 Admin Remark: {leave.admin_remark} {leave.approved_from_date ? `(${leave.approved_from_date} to ${leave.approved_to_date})` : ''}
-                    </div>
-                  )}
-                </div>
-              ))}
+        {/* 👇 Request for Leave Box (આ બોક્સને ઉપર લીધું છે, બરાબર તેના બટન નીચે) */}
+        {showLeaveBox && (
+          <div style={{ backgroundColor: '#faf5ff', padding: '12px', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#581c87', marginBottom: '8px' }}>Apply for Leave:</div>
+            
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ flex: 1, minWidth: '110px' }}>
+                <span style={{ fontSize: '10px', color: '#6b21a8' }}>From Date:</span>
+                <input type="date" value={leaveFromDate} onChange={(e) => setLeaveFromDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: '110px' }}>
+                <span style={{ fontSize: '10px', color: '#6b21a8' }}>To Date:</span>
+                <input type="date" value={leaveToDate} onChange={(e) => setLeaveToDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px' }} />
+              </div>
             </div>
-          )}
-        </div>
-      )}
+
+            <div style={{ marginBottom: '10px' }}>
+              <span style={{ fontSize: '10px', color: '#6b21a8', display: 'block', marginBottom: '4px' }}>Leave Type:</span>
+              <div style={{ display: 'flex', gap: '15px', fontSize: '11px', color: '#4c1d95', fontWeight: 'bold' }}>
+                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input type="radio" name="leaveType" value="Personal" checked={leaveType === 'Personal'} onChange={(e) => setLeaveType(e.target.value)} /> Personal
+                </label>
+                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input type="radio" name="leaveType" value="Medical" checked={leaveType === 'Medical'} onChange={(e) => setLeaveType(e.target.value)} /> Medical
+                </label>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '10px' }}>
+              <textarea 
+                value={leaveReason} 
+                onChange={(e) => setLeaveReason(e.target.value)} 
+                placeholder="રજાનું કારણ લખો..." 
+                rows="2"
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ textAlign: 'right' }}>
+              <button 
+                onClick={handleLeaveSubmit} 
+                disabled={loading}
+                style={{ padding: '8px 16px', backgroundColor: '#9333ea', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
+                {loading ? 'Submitting...' : 'Submit Leave'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 3. My Leave Requests Status Button */}
+        <button 
+          onClick={() => setShowMyLeaveStatusBox(!showMyLeaveStatusBox)} 
+          style={{ width: '100%', padding: '12px 16px', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>📌 My Leave Requests Status (મારી રજાઓની સ્થિતિ)</span>
+          <span>{showMyLeaveStatusBox ? '▲' : '▼'}</span>
+        </button>
+
+        {/* My Leave Requests Box (જો ખુલ્લું હોય તો) */}
+        {showMyLeaveStatusBox && (
+          <div style={{ backgroundColor: '#f0f9ff', borderRadius: '16px', padding: '14px', border: '1px solid #bae6fd', display: 'flex', flexDirection: 'column', gap: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#0369a1', marginBottom: '4px' }}>Your Leave Applications:</div>
+
+            {myLeaveRequests.length === 0 ? (
+              <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>કોઈ રજાની અરજી કરી નથી.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+                {myLeaveRequests.map((leave) => (
+                  <div key={leave.id} style={{ padding: '10px', borderRadius: '8px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', fontSize: '11px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span>📅 <strong>{leave.from_date}</strong> to <strong>{leave.to_date}</strong> ({leave.leave_type})</span>
+                      <span style={{ 
+                        fontWeight: 'bold', 
+                        color: leave.status === 'Approved' ? '#059669' : leave.status === 'Partially Approved' ? '#2563eb' : leave.status === 'Rejected' ? '#dc2626' : '#d97706' 
+                      }}>
+                        {leave.status}
+                      </span>
+                    </div>
+                    <div style={{ color: '#475569' }}>💬 Reason: {leave.reason}</div>
+                    {leave.admin_remark && (
+                      <div style={{ color: '#7c3aed', marginTop: '3px', fontWeight: '500' }}>
+                        👑 Admin Remark: {leave.admin_remark} {leave.approved_from_date ? `(${leave.approved_from_date} to ${leave.approved_to_date})` : ''}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {showLeaveBox && (
           <div style={{ backgroundColor: '#faf5ff', padding: '12px', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
             <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#581c87', marginBottom: '8px' }}>Apply for Leave:</div>
