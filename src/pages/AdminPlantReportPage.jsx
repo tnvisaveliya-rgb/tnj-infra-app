@@ -71,17 +71,40 @@ const AdminPlantReportPage = () => {
   
   const [loadingReports, setLoadingReports] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
     const fetchPlantsData = async () => {
       try {
         setLoadingPlants(true);
-        const { data } = await supabase.from('plants').select('*');
+        
+        // 🌟 ૧. Current user no session ane company_id melovo
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user;
+        
+        if (!currentUser) return;
+
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id, role')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        const userCompanyId = permData?.company_id;
+
+        // 🌟 ૨. Companies table mathi plants fetch karta vakte company_id filter lagavo
+        let plantQuery = supabase.from('plants').select('*');
+        
+        if (userCompanyId) {
+          plantQuery = plantQuery.eq('company_id', userCompanyId);
+        }
+
+        const { data, error } = await plantQuery;
+        
         if (data) {
           setAllPlantsDb(data);
           setStateList([...new Set(data.map(p => p.state).filter(Boolean))]);
         }
       } catch (err) {
-        console.error("Error:", err);
+        console.error("Error fetching plants:", err);
       } finally {
         setLoadingPlants(false);
       }
@@ -104,29 +127,68 @@ const AdminPlantReportPage = () => {
   };
 
 useEffect(() => {
-    const fetchReportData = async () => {
+const fetchReportData = async () => {
       setLoadingReports(true);
       try {
+        // 🌟 ૧. Current user no company_id ane teni company na badha plants na nam melovo
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user;
+        
+        let userCompanyId = null;
+        let companyPlantNames = [];
+
+        if (currentUser) {
+          const { data: permData } = await supabase
+            .from('user_permissions')
+            .select('company_id')
+            .eq('user_id', currentUser.id)
+            .maybeSingle();
+            
+          userCompanyId = permData?.company_id;
+
+          if (userCompanyId) {
+            // Fhakat aa company na plants na nam j fetch karo
+            const { data: plantData } = await supabase
+              .from('plants')
+              .select('plant_name')
+              .eq('company_id', userCompanyId);
+              
+            if (plantData) {
+              companyPlantNames = plantData.map(p => p.plant_name).filter(Boolean);
+            }
+          }
+        }
+
+        // 🌟 ૨. Badhi queries ma company na plants no j filter lagavo (Jethe All select hoy tyare pan biji company no data na aave)
         let fgQuery = supabase.from('stock_ledger').select('*');
+        if (companyPlantNames.length > 0) fgQuery = fgQuery.in('plant_name', companyPlantNames);
+        if (userCompanyId) fgQuery = fgQuery.eq('company_id', userCompanyId);
         if (!isAllDates) fgQuery = fgQuery.lte('date', toDate);
         if (selectedPlant !== 'All') fgQuery = fgQuery.eq('plant_name', selectedPlant);
         else if (selectedState !== 'All' && availablePlants.length > 0) fgQuery = fgQuery.in('plant_name', availablePlants);
 
         let rmQuery = supabase.from('plant_material_inward').select('*'); 
+        if (companyPlantNames.length > 0) rmQuery = rmQuery.in('plant_name', companyPlantNames);
+        if (userCompanyId) rmQuery = rmQuery.eq('company_id', userCompanyId);
         if (!isAllDates) rmQuery = rmQuery.lte('date', toDate);
         if (selectedPlant !== 'All') rmQuery = rmQuery.eq('plant_name', selectedPlant);
         else if (selectedState !== 'All' && availablePlants.length > 0) rmQuery = rmQuery.in('plant_name', availablePlants);
 
         let outQuery = supabase.from('plant_material_outward').select('*');
+        if (companyPlantNames.length > 0) outQuery = outQuery.in('plant_name', companyPlantNames);
+        if (userCompanyId) outQuery = outQuery.eq('company_id', userCompanyId);
         if (!isAllDates) outQuery = outQuery.lte('date', toDate);
         if (selectedPlant !== 'All') outQuery = outQuery.eq('plant_name', selectedPlant);
         else if (selectedState !== 'All' && availablePlants.length > 0) outQuery = outQuery.in('plant_name', availablePlants);
 
         let rmConsumptionQuery = supabase.from('material_stock_ledger').select('*');
+        if (companyPlantNames.length > 0) rmConsumptionQuery = rmConsumptionQuery.in('plant_name', companyPlantNames);
+        if (userCompanyId) rmConsumptionQuery = rmConsumptionQuery.eq('company_id', userCompanyId);
         if (!isAllDates) rmConsumptionQuery = rmConsumptionQuery.lte('date', toDate);
         if (selectedPlant !== 'All') rmConsumptionQuery = rmConsumptionQuery.eq('plant_name', selectedPlant);
         else if (selectedState !== 'All' && availablePlants.length > 0) rmConsumptionQuery = rmConsumptionQuery.in('plant_name', availablePlants);
 
+        // ... (Baki no aakho code same j rehse)
        
 
        const [fgResponse, rmResponse, outResponse, rmConsumptionResponse] = await Promise.all([fgQuery, rmQuery, outQuery, rmConsumptionQuery]);

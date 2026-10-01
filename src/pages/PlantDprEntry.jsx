@@ -58,21 +58,12 @@ const triggerAlert = (msg) => {
   });
 };
   
-// 🛡️ એડમિન ચેક કરો અને નોટિફિકેશન લાવો (જ્યારે plants નો ડેટા લોડ થાય ત્યારે)
+// 🛡️ એડમિન/સુપરવાઈઝર ચેક કરો અને પેન્ડિંગ એડિટ રિક્વેસ્ટ લાવો (SaaS Dynamic)
   useEffect(() => {
-    const checkAdminAndFetchRequests = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const adminStatus = userEmail === 'infra.tnj@gmail.com';
-      setIsAdmin(adminStatus);
-      
-      // જો એડમિન હોય અથવા સુપરવાઈઝરના પ્લાન્ટ્સ લોડ થઈ ગયા હોય તો જ નોટિફિકેશન લાવો
-      if (adminStatus || plants.length > 0) {
-        fetchPendingRequests(adminStatus);
-      }
-    };
-    checkAdminAndFetchRequests();
-  }, [plants]); // 👈 plants લોડ થાય એટલે આ ઓટોમેટિક ચાલશે
+    if (plants.length > 0 || isAdmin) {
+      fetchPendingRequests(isAdmin);
+    }
+  }, [plants, isAdmin]);
 
   const fetchPendingRequests = async (adminStatus) => {
     let query = supabase
@@ -132,44 +123,49 @@ const triggerAlert = (msg) => {
     }
   }, [selectedPlant]);
 
- const fetchPlants = async () => {
+const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
+      // ૧. ડેટાબેઝમાંથી કરન્ટ યુઝરનો રોલ અને પરમિશન લાવો
+      const { data: permData, error: permErr } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_plants')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      // ૨. ડાયનેમિક એડમિન ચેક 
+      const adminCheck = !permData || ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData?.role);
+      
+      // આ સ્ટેટ આખા પેજમાં એડમિન નક્કી કરશે
+      setIsAdmin(adminCheck); 
+
+      if (adminCheck) {
+        // 🎯 ADMIN માટે (માત્ર એની જ કંપનીના Plants RLS દ્વારા ઓટોમેટિક આવશે)
         const { data } = await supabase.from('plants').select('*');
         setPlants(data || []);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
       } else {
-        permQuery = permQuery.eq('user_id', userEmail);
+        // 🎯 SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
+        let assignedPlantNames = permData?.assigned_plants || [];
+        
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+        
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+        
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+          
+        setPlants(allowedPlantsData || []);
       }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
-        setPlants([]); 
-        return;
-      }
-
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
-
-      setPlants(allowedPlantsData || []);
-
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
@@ -756,6 +752,22 @@ let productVariant = item.sizeVariant || 'Standard';
 
     setLoading(true);
     try {
+      // --- નવો ઉમેરેલો કોડ: લોગ-ઇન થયેલા યુઝરનો company_id મેળવવા માટે ---
+      let currentCompanyId = null;
+      try {
+        const { data: profileData, error: profileErr } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
+
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
+      // -------------------------------------------------------------
       let stockLedgerRows = [];
       let materialLedgerRows = [];
 
@@ -772,6 +784,7 @@ let productVariant = item.sizeVariant || 'Standard';
           const res = await supabase
             .from('production_header')
             .update({
+              company_id: currentCompanyId,
               production_date: dprDate,
               plant_name: selectedPlant,
               team_name: source.labour || selectedPlant,
@@ -789,6 +802,7 @@ let productVariant = item.sizeVariant || 'Standard';
           const res = await supabase
             .from('production_header')
             .insert([{
+              company_id: currentCompanyId,
               production_date: dprDate,
               plant_name: selectedPlant,
               team_name: source.labour || selectedPlant,
@@ -829,6 +843,7 @@ let productVariant = item.sizeVariant || 'Standard';
         }
 if (source.workType === 'Other Work') {
           await supabase.from('production_items').insert([{
+            company_id: currentCompanyId,
             header_id: headerId,
             product_name: source.otherWorkName || 'Other Department Work',
             size_variant: 'Day Work',
@@ -840,6 +855,7 @@ if (source.workType === 'Other Work') {
         }
         if (source.concreteSource === 'Site Mix' && totalCement > 0) {
           materialLedgerRows.push({
+            company_id: currentCompanyId,
             date: dprDate,
             plant_name: selectedPlant,
             material_name: 'Cement',
@@ -851,6 +867,7 @@ if (source.workType === 'Other Work') {
         }
         if (source.concreteSource === 'RMC' && totalRmc > 0) {
           materialLedgerRows.push({
+            company_id: currentCompanyId,
             date: dprDate,
             plant_name: selectedPlant,
             material_name: 'RMC',
@@ -904,6 +921,7 @@ if (source.workType === 'Other Work') {
               const { data: itemData, error: itemErr } = await supabase
                 .from('production_items')
                 .insert([{
+                  company_id: currentCompanyId,
                   header_id: headerId,
                   product_name: item.product,
                   size_variant: productVariant,
@@ -950,6 +968,7 @@ let totalProducedQty = 0;
                       
                       const rowVariant = `${rowBaseSize} (${rowSteelDesc})`;
                       stockLedgerRows.push({
+                        company_id: currentCompanyId,
                         date: dprDate,
                         plant_name: selectedPlant,
                         product_name: item.product,
@@ -963,6 +982,7 @@ let totalProducedQty = 0;
                 } else {
                   if (totalProducedQty > 0) {
                     stockLedgerRows.push({
+                      company_id: currentCompanyId,
                       date: dprDate,
                       plant_name: selectedPlant,
                       product_name: item.product,
@@ -977,6 +997,7 @@ let totalProducedQty = 0;
                 // પેનલ કે કૉલમ સિવાયની આઇટમ માટે
                 if (totalProducedQty > 0) {
                   stockLedgerRows.push({
+                    company_id: currentCompanyId,
                     date: dprDate,
                     plant_name: selectedPlant,
                     product_name: item.product,
@@ -990,6 +1011,7 @@ let totalProducedQty = 0;
 
               if (brokenCount > 0) {
                 stockLedgerRows.push({
+                  company_id: currentCompanyId,
                   date: dprDate,
                   plant_name: selectedPlant,
                   product_name: item.product,
@@ -1068,6 +1090,7 @@ if (item.steelRows && item.steelRows.length > 0) {
     const { error: steelErr } = await supabase
       .from('production_steel_details')
       .insert([{
+        company_id: currentCompanyId,
         item_id: itemId,
         steel_size: steelSizeStr,
         wires_or_bars: wireBarText,
@@ -1097,6 +1120,7 @@ if (item.steelRows && item.steelRows.length > 0) {
     // 📦 Stock Ledger માં એન્ટ્રી: માત્ર યુઝરે નાખેલ વજન જ જશે
     if (totalSteelWeight > 0) {
       materialLedgerRows.push({
+        company_id: currentCompanyId,
         date: dprDate,
         plant_name: selectedPlant,
         material_name: steelSizeStr,
@@ -1806,77 +1830,134 @@ if (item.steelRows && item.steelRows.length > 0) {
               <button 
                 type="button" 
                 title="Delete this entry"
-                onClick={async () => {
-                  const confirmDelete = window.confirm("શું તમે ખરેખર આ આખી એન્ટ્રી ડિલીટ કરવા માંગો છો? આની સાથે સ્ટોક લેજર અને મટીરીયલ લેજરનો ડેટા પણ ડિલીટ થઈ જશે.");
-                  
-                  if (confirmDelete) {
-                   try {
-                      // 1️⃣ આ એન્ટ્રીની તારીખ શોધો (Safety માટે)
-                      const dprDateObj = recentHistory.find(h => h.id === editingId);
-                      const entryDate = dprDateObj ? (dprDateObj.production_date || dprDateObj.created_at) : null;
+               onClick={async () => {
+  const confirmDelete = window.confirm("શું તમે ખરેખર આ આખી એન્ટ્રી ડિલીટ કરવા માંગો છો? આની સાથે સ્ટોક લેજર અને મટીરીયલ લેજરનો ડેટા પણ ડિલીટ થઈ જશે.");
+  
+  if (confirmDelete) {
+    try {
+      // 🌟 ૧. કરન્ટ યુઝરનો company_id મેળવો
+      let currentCompanyId = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
 
-                      // 2️⃣ આઇટમ્સના ID શોધો
-                      const { data: itemsData, error: itemsFetchErr } = await supabase
-                        .from('production_items')
-                        .select('id')
-                        .eq('header_id', editingId);
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
 
-                      if (itemsFetchErr) throw itemsFetchErr;
+      // 2️⃣ આ એન્ટ્રીની તારીખ શોધો (Safety માટે)
+      const dprDateObj = recentHistory.find(h => h.id === editingId);
+      const entryDate = dprDateObj ? (dprDateObj.production_date || dprDateObj.created_at) : null;
 
-                      if (itemsData && itemsData.length > 0) {
-                        const itemIds = itemsData.map(item => item.id);
+      // 3️⃣ આઇટમ્સના ID શોધો
+      let itemQuery = supabase
+        .from('production_items')
+        .select('id')
+        .eq('header_id', editingId);
 
-                        // સ્ટીલ વગેરે લેજરમાંથી કાઢવા (જે Item ID થી સેવ થયા હતા)
-                        await supabase.from('material_stock_ledger').delete().in('reference_id', itemIds);
-                        
-                        await supabase.from('stock_ledger').delete().in('reference_id', itemIds);
-                        await supabase.from('production_steel_details').delete().in('item_id', itemIds);
-                        await supabase.from('production_items').delete().in('id', itemIds);
-                      }
+      if (currentCompanyId) {
+        itemQuery = itemQuery.eq('company_id', currentCompanyId);
+      }
 
-                      // 🎯 નવો સુધારો: RMC અને Cement (જે Header ID થી સેવ થયા હતા) તેને કાઢવા
-                      let materialDeleteQuery = supabase.from('material_stock_ledger')
-                        .delete()
-                        .eq('reference_id', editingId)
-                        .in('material_name', ['RMC', 'Cement', 'cement', 'rmc']); // માત્ર RMC અને સિમેન્ટ જ ઉડાવશે
+      const { data: itemsData, error: itemsFetchErr } = await itemQuery;
+      if (itemsFetchErr) throw itemsFetchErr;
 
-                      // જો તારીખ મળે તો તારીખ પણ મેચ કરાવો (જેથી ભૂલથી બીજા દિવસનો ડેટા ના ઉડે)
-                      if (entryDate) {
-                        materialDeleteQuery = materialDeleteQuery.eq('date', entryDate);
-                      }
-                      
-                      await materialDeleteQuery;
+      if (itemsData && itemsData.length > 0) {
+        const itemIds = itemsData.map(item => item.id);
 
-                      // 3️⃣ છેલ્લે મેઈન હેડર ડિલીટ કરો
-                      const { error: headerErr } = await supabase
-                        .from('production_header') 
-                        .delete()
-                        .eq('id', editingId);
+        // 4️⃣ મટીરિયલ લેજરમાંથી કાઢવા (ફક્ત CONSUMPTION અને સાચા itemIds સાથે)
+        let matLedgerQuery = supabase.from('material_stock_ledger')
+          .delete()
+          .in('reference_id', itemIds);
 
-                      if (headerErr) throw new Error("Header ડિલીટ નથી થતું: " + headerErr.message);
+        if (currentCompanyId) {
+          matLedgerQuery = matLedgerQuery.eq('company_id', currentCompanyId);
+        }
+        if (selectedPlant) {
+          matLedgerQuery = matLedgerQuery.eq('plant_name', selectedPlant);
+        }
+        await matLedgerQuery;
 
-                      triggerAlert("✅ આખી એન્ટ્રી (RMC/Cement સાથે) સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
-                      
-                      // 🔄 ફોર્મ રીસેટ કરો
-                      setEditingId(null);
-                      setProductionSources([{
-                        id: Date.now(),
-                        labour: '',
-                        concreteSource: 'Site Mix',
-                        actualCementUsed: '',
-                        bomSuggestedCement: 0,
-                        bomSuggestedM3: 0,
-                        items: [{ id: Date.now(), product: '', sizeVariant: '', lineOfCasting: '', steelRows: [{ productSize: '', wireSize: '3mm', wireCount: '4', totalLines: '', qty: '' }], brokenQty: 0, qty: '' }],
-                        remarks: ''
-                      }]);
-                      fetchRecentHistory(); 
+        // 5️⃣ સ્ટોક લેજરમાંથી માત્ર PRODUCTION અને BROKEN જ ડિલીટ કરવા (Strict Filter સાથે)
+        let stockLedgerQuery = supabase.from('stock_ledger')
+          .delete()
+          .in('transaction_type', ['PRODUCTION', 'BROKEN'])
+          .in('reference_id', itemIds);
 
-                    } catch (err) {
-                      triggerAlert("❌ એરર: " + err.message);
-                      console.error("Delete Error: ", err);
-                    }
-                  }
-                }}
+        if (currentCompanyId) {
+          stockLedgerQuery = stockLedgerQuery.eq('company_id', currentCompanyId);
+        }
+        if (selectedPlant) {
+          stockLedgerQuery = stockLedgerQuery.eq('plant_name', selectedPlant);
+        }
+        await stockLedgerQuery;
+
+        // 6️⃣ સ્ટીલ ડિટેલ્સ અને આઇટમ્સ ડીલીટ કરો
+        await supabase.from('production_steel_details').delete().in('item_id', itemIds);
+        await supabase.from('production_items').delete().in('id', itemIds);
+      }
+
+      // 7️⃣ RMC અને Cement (જે Header ID થી સેવ થયા હતા) તેને કાઢવા
+      let materialDeleteQuery = supabase.from('material_stock_ledger')
+        .delete()
+        .eq('reference_id', editingId)
+        .eq('transaction_type', 'CONSUMPTION')
+        .in('material_name', ['RMC', 'Cement', 'cement', 'rmc']); 
+
+      if (currentCompanyId) {
+        materialDeleteQuery = materialDeleteQuery.eq('company_id', currentCompanyId);
+      }
+      if (selectedPlant) {
+        materialDeleteQuery = materialDeleteQuery.eq('plant_name', selectedPlant);
+      }
+      if (entryDate) {
+        materialDeleteQuery = materialDeleteQuery.eq('date', entryDate);
+      }
+      
+      await materialDeleteQuery;
+
+      // 8️⃣ છેલ્લે મેઈન હેડર ડિલીટ કરો
+      let headerDeleteQuery = supabase
+        .from('production_header') 
+        .delete()
+        .eq('id', editingId);
+
+      if (currentCompanyId) {
+        headerDeleteQuery = headerDeleteQuery.eq('company_id', currentCompanyId);
+      }
+
+      const { error: headerErr } = await headerDeleteQuery;
+      if (headerErr) throw new Error("Header ડિલીટ નથી થતું: " + headerErr.message);
+
+      triggerAlert("✅ આખી એન્ટ્રી (Stock/Material લેજર સાથે) સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+      
+      // 🔄 ફોર્મ રીસેટ કરો
+      setEditingId(null);
+      setProductionSources([{
+        id: Date.now(),
+        labour: '',
+        concreteSource: 'Site Mix',
+        actualCementUsed: '',
+        bomSuggestedCement: 0,
+        bomSuggestedM3: 0,
+        items: [{ id: Date.now(), product: '', sizeVariant: '', lineOfCasting: '', steelRows: [{ productSize: '', wireSize: '3mm', wireCount: '4', totalLines: '', qty: '' }], brokenQty: 0, qty: '' }],
+        remarks: ''
+      }]);
+      fetchRecentHistory(); 
+
+    } catch (err) {
+      triggerAlert("❌ એરર: " + err.message);
+      console.error("Delete Error: ", err);
+    }
+  }
+}}
                 style={{ 
                   backgroundColor: '#fef2f2', 
                   color: '#dc2626', 

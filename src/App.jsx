@@ -124,8 +124,14 @@ function AuthListenerWrapper({ children, setNotifications }) {
 const fetchNotifications = async () => {
     try {
       const list = [];
-      const userEmail = (user?.email || '').trim().toLowerCase();
-      const isOwner = (userEmail === 'infra.tnj@gmail.com');
+     const { data: permData } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_sites, company_id')
+        .eq('user_id', user?.id)
+        .maybeSingle();
+
+      const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+      const currentCompanyId = permData?.company_id;
 
       let allowedPlants = [];
       if (!isOwner && user?.id) {
@@ -150,6 +156,10 @@ const fetchNotifications = async () => {
         .from('plant_fund_transfers')
         .select('id, plant_name, purpose, requested_amount, approved_amount, status, supervisor_name, received_by');
 
+        // 🎯 SaaS માટે કંપની આઈડી ફિલ્ટર
+      if (currentCompanyId) {
+        fundQuery = fundQuery.eq('company_id', currentCompanyId);
+      }
       fundQuery = fundQuery
         .in('status', ['PENDING', 'SENT', 'pending', 'se  nt'])
         .order('id', { ascending: false })
@@ -276,7 +286,7 @@ const fetchNotifications = async () => {
 
     saveFcmToken();
 
-    return () => {
+    return () => {  
       authListener.subscription.unsubscribe();
     };
   }, [navigate]);

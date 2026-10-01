@@ -20,9 +20,27 @@ function Layout({ children, notifications = [] }) {
   const [expenseRequests, setExpenseRequests] = useState([]);
   const [siteInwardRequests, setSiteInwardRequests] = useState([]);
 const [siteDprRequests, setSiteDprRequests] = useState([]);
-  const isAdmin = userEmail === 'infra.tnj@gmail.com';
+const [isAdmin, setIsAdmin] = useState(false);
   // 🔔 સુપરવાઈઝરના નોટિફિકેશન માટેનું સ્ટેટ
   const [supervisorNotifs, setSupervisorNotifs] = useState([]);
+  // 🌟 ડેટાબેઝમાંથી રોલ ચેક કરવા માટે useEffect ઉમેરો
+  useEffect(() => {
+    const checkAdminRole = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from('user_permissions')
+        .select('role')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (data && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(data.role)) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+      }
+    };
+    checkAdminRole();
+  }, [user]);
 
   useEffect(() => {
     fetchDprRequests();
@@ -361,11 +379,12 @@ const handlesignout = async () => {
     const fetchPermissions = async () => {
       if (!user) return;
       
-      // એડમિન માટે બધા ટેબ્સ ફિક્સ
-      if (userEmail === 'infra.tnj@gmail.com') {
-        setAllowedTabs(['dashboard', 'crm', 'site_progress', 'plant_report', 'employee_dashboard']);
-        return;
-      }
+     const getFilteredNavItems = () => {
+    if (isAdmin) {
+      return allNavItems;
+    }
+    return allNavItems.filter(item => allowedTabs.includes(item.id));
+  };
 
       // બાકીના સ્ટાફ માટે user_permissions ટેબલમાંથી ડેટા લાવવો
       const { data, error } = await supabase
@@ -393,11 +412,11 @@ const handlesignout = async () => {
   ]
 
   const getFilteredNavItems = () => {
-    if (userEmail === 'infra.tnj@gmail.com') {
-      return allNavItems
+    if (isAdmin) {
+      return allNavItems;
     }
-    return allNavItems.filter(item => allowedTabs.includes(item.id))
-  }
+    return allNavItems.filter(item => allowedTabs.includes(item.id));
+  };
 
   const navItems = getFilteredNavItems()
 

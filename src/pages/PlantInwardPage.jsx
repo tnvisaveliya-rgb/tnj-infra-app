@@ -20,117 +20,146 @@ const [editingId, setEditingId] = useState(null);
 const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
-      
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
+
+      // ૧. કરન્ટ યુઝરનો રોલ, અસાઈન પ્લાન્ટ્સ અને company_id મેળવો
+      const { data: permData, error: permErr } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_plants, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      const adminCheck = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+      if (adminCheck && permData.company_id) {
+        // 🎯 એડમિન માટે: માત્ર તેની કંપનીના જ પ્લાન્ટ્સ
+        const { data } = await supabase
+          .from('plants')
+          .select('*')
+          .eq('company_id', permData.company_id);
         setPlants(data || []);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
       } else {
-        permQuery = permQuery.eq('user_id', userEmail);
+        // 🎯 સુપરવાઈઝર માટે: માત્ર અસાઇન કરેલા પ્લાન્ટ્સ
+        let assignedPlantNames = permData?.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
       }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
-        setPlants([]); 
-        return;
-      }
-
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
-
-      setPlants(allowedPlantsData || []);
-
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
     }
   };
- const handleEditClick = (entry) => {
+const handleEditClick = async (entry) => {
     setEditingId(entry.id);
     setDprDate(entry.date || dprDate);
     setSelectedPlant(entry.plant_name || selectedPlant);
     
-    let billsArray = [];
-    if (entry.bill_url && entry.bill_url.trim() !== '' && entry.bill_url !== 'EMPTY') {
-      billsArray = entry.bill_url.split(',').map(b => b.trim()).filter(b => b !== '');
+    try {
+      // 🎯 1. જો આ એન્ટ્રીનો DC નંબર હોય, તો એ જ DC નંબર, પ્લાન્ટ અને તારીખ વાળી બધી જ આઇટમ્સ શોધો
+      let matchingEntries = [entry];
+      const cleanDc = (entry.dc_number || '').trim();
+
+      if (cleanDc !== '' && cleanDc.toLowerCase() !== 'empty') {
+        const { data: sameDcData } = await supabase
+          .from('plant_material_inward')
+          .select('*')
+          .eq('plant_name', entry.plant_name)
+          .eq('dc_number', cleanDc)
+          .eq('date', entry.date);
+
+        if (sameDcData && sameDcData.length > 0) {
+          matchingEntries = sameDcData;
+        }
+      }
+
+      let billsArray = [];
+      matchingEntries.forEach(ent => {
+        if (ent.bill_url && ent.bill_url.trim() !== '' && ent.bill_url !== 'EMPTY') {
+          const splitBills = ent.bill_url.split(',').map(b => b.trim()).filter(b => b !== '');
+          billsArray = [...billsArray, ...splitBills];
+        }
+      });
+      setExistingBills([...new Set(billsArray)]);
+
+      // 🎯 2. બધી જ આઇટમ્સ માટે સ્માર્ટ લોજીક લગાવીને ફોર્મેટ કરો
+      const formattedItems = matchingEntries.map(ent => {
+        let fullMatName = ent.material_name || '';
+        let extractedMaterial = fullMatName;
+        let extractedSize = '';
+        let extractedSteelSpec = '';
+        const itemCategory = ent.item_type || 'Raw Material';
+
+        if (itemCategory === 'Finished Product') {
+          if (fullMatName.includes('(') && fullMatName.includes(')')) {
+            const firstOpen = fullMatName.indexOf('(');
+            const lastClose = fullMatName.lastIndexOf(')');
+            
+            extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
+            const nameAndSize = fullMatName.substring(0, firstOpen).trim();
+            
+            const lastSpaceIndex = nameAndSize.lastIndexOf(' ');
+            if (lastSpaceIndex !== -1) {
+              extractedMaterial = nameAndSize.substring(0, lastSpaceIndex).trim(); 
+              extractedSize = nameAndSize.substring(lastSpaceIndex + 1).trim();    
+            } else {
+              extractedMaterial = nameAndSize;
+            }
+          } else {
+            const lastSpaceIndex = fullMatName.lastIndexOf(' ');
+            if (lastSpaceIndex !== -1) {
+              const potentialSize = fullMatName.substring(lastSpaceIndex + 1).trim();
+              if (!isNaN(potentialSize) || potentialSize.includes('*') || potentialSize.length <= 5) {
+                extractedMaterial = fullMatName.substring(0, lastSpaceIndex).trim();
+                extractedSize = potentialSize;
+              }
+            }
+          }
+        }
+
+        return {
+          id: ent.id,
+          material: extractedMaterial,
+          size: extractedSize,
+          qty: ent.quantity || '',
+          unit: ent.unit || 'Nos',
+          category: itemCategory,
+          steelSpec: extractedSteelSpec 
+        };
+      });
+
+      // 🎯 3. સોર્સ લિસ્ટમાં બધી આઇટમ્સ એકસાથે ભરી દો
+      setInwardSources([
+        {
+          id: Date.now(),
+          supplier: entry.supplier_name || '',
+          dcNumber: cleanDc === 'EMPTY' ? '' : cleanDc,
+          vehicleNumber: entry.vehicle_no === 'EMPTY' ? '' : (entry.vehicle_no || ''),
+          description: entry.description || '',
+          items: formattedItems,
+          billFiles: []
+        }
+      ]);
+
+      triggerAlert("✏️ એડિટ મોડ ચાલુ થઈ ગયો છે!");
+
+    } catch (err) {
+      console.error("Error in handleEditClick:", err);
+      triggerAlert("એરર: એડિટ માટે ડેટા લોડ કરવામાં સમસ્યા થઈ છે.");
     }
-    setExistingBills(billsArray);
-
-    // 🎯 મટીરિયલના નામમાંથી Product Name, Size અને Steel Spec અલગ કરવાનું સ્માર્ટ લોજિક
-    let fullMatName = entry.material_name || '';
-    let extractedMaterial = fullMatName;
-    let extractedSize = '';
-    let extractedSteelSpec = '';
-
-    // 🎯 અહી નવી લાઈન ઉમેરો: પહેલા કેટેગરી નક્કી કરો
-    const itemCategory = entry.item_type || 'Raw Material';
-
-    // 🎯 અહીં IF કન્ડીશન લગાવો કે આ લોજિક ફક્ત Finished Product હોય તો જ ચાલે
-    if (itemCategory === 'Finished Product') {
-      // ઉદાહરણ તરીકે જો નામ "Panel 6 (3mm - 4 wires)" હોય તો:
-      if (fullMatName.includes('(') && fullMatName.includes(')')) {
-        const firstOpen = fullMatName.indexOf('(');
-        const lastClose = fullMatName.lastIndexOf(')');
-        
-        extractedSteelSpec = fullMatName.substring(firstOpen + 1, lastClose).trim();
-        const nameAndSize = fullMatName.substring(0, firstOpen).trim();
-        
-        const lastSpaceIndex = nameAndSize.lastIndexOf(' ');
-        if (lastSpaceIndex !== -1) {
-          extractedMaterial = nameAndSize.substring(0, lastSpaceIndex).trim(); 
-          extractedSize = nameAndSize.substring(lastSpaceIndex + 1).trim();     
-        } else {
-          extractedMaterial = nameAndSize;
-        }
-      } else {
-        // જો કૌંસ ન હોય પણ ફક્ત સાઈઝ હોય (દા.ત. "Panel 6")
-        const lastSpaceIndex = fullMatName.lastIndexOf(' ');
-        if (lastSpaceIndex !== -1) {
-          const potentialSize = fullMatName.substring(lastSpaceIndex + 1).trim();
-          if (!isNaN(potentialSize) || potentialSize.includes('*') || potentialSize.length <= 5) {
-            extractedMaterial = fullMatName.substring(0, lastSpaceIndex).trim();
-            extractedSize = potentialSize;
-          }
-        }
-      }
-    } // 👈 અહીં IF કન્ડીશન પૂરી થાય છે
-
-    setInwardSources([
-      {
-        id: Date.now(),
-        supplier: entry.supplier_name || '',
-        dcNumber: entry.dc_number === 'EMPTY' ? '' : (entry.dc_number || ''),
-        vehicleNumber: entry.vehicle_no === 'EMPTY' ? '' : (entry.vehicle_no || ''),
-        description: entry.description || '',
-        items: [
-          {
-            id: Date.now(),
-            material: extractedMaterial,
-            size: extractedSize,
-            qty: entry.quantity || '',
-            unit: entry.unit || 'Nos',
-            category: itemCategory, // 👈 સીધી કેટેગરી અહી વાપરી લો
-            steelSpec: extractedSteelSpec 
-          }
-        ],
-        billFiles: []
-      }
-    ]);
   };
 // ⏰ ૨૪ કલાક પછી એડિટ માટે વ્હોટ્સએપ પર પરવાનગી માંગવાનું ફંક્શન
   const handleEditClickWithTimeCheck = (entry) => {
@@ -342,6 +371,21 @@ const handleSubmitInward = async () => {
 
     setLoading(true);
     try {
+
+      let currentCompanyId = null;
+      try {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
+
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
       let stockLedgerRows = [];
       let materialLedgerRows = [];
 
@@ -431,6 +475,7 @@ const handleSubmitInward = async () => {
               const { data: updatedData, error: updateErr } = await supabase
                 .from('plant_material_inward')
                 .update({
+                  company_id: currentCompanyId,
                   date: dprDate,
                   plant_name: selectedPlant,
                   supplier_name: source.supplier,
@@ -454,6 +499,7 @@ const handleSubmitInward = async () => {
               const { data: insertedData, error: inErr } = await supabase
                 .from('plant_material_inward')
                 .insert([{
+                  company_id: currentCompanyId,
                   date: dprDate,
                   plant_name: selectedPlant,
                   supplier_name: source.supplier,
@@ -476,6 +522,7 @@ const handleSubmitInward = async () => {
 
             if (categoryStr.toLowerCase() === 'finished product') {
               stockLedgerRows.push({
+                company_id: currentCompanyId,
                 date: dprDate,
                 plant_name: selectedPlant,
                 product_name: exactProductName,
@@ -486,6 +533,7 @@ const handleSubmitInward = async () => {
               });
             } else {
               materialLedgerRows.push({
+                company_id: currentCompanyId,
                 date: dprDate,
                 plant_name: selectedPlant,
                 material_name: item.material,
@@ -1199,32 +1247,100 @@ const supplierMaterials = selectedSupplierData?.materials_supplied || [];
               type="button" 
               title="Delete this entry"
               onClick={async () => {
-                const confirmDelete = window.confirm("શું તમે ખરેખર આ આખી ઇનવર્ડ એન્ટ્રી ડિલીટ કરવા માંગો છો? આની સાથે લેજરનો ડેટા પણ ડિલીટ થઈ જશે.");
-                
-                if (confirmDelete) {
-                  try {
-                    // 1. લેજરમાંથી ડેટા કાઢો
-                    await supabase.from('material_stock_ledger').delete().eq('reference_id', editingId);
-                    await supabase.from('stock_ledger').delete().eq('reference_id', editingId);
+  const confirmDelete = window.confirm("શું તમે ખરેખર આ આખી ઇનવર્ડ એન્ટ્રી ડિલીટ કરવા માંગો છો? આની સાથે લેજરનો ડેટા પણ ડિલીટ થઈ જશે.");
+  
+  if (confirmDelete) {
+    try {
+      // 🌟 ૧. કરન્ટ યુઝરનો company_id મેળવો
+      let currentCompanyId = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
 
-                    // 2. મેઈન ઇનવર્ડ એન્ટ્રી કાઢો
-                    const { error: delErr } = await supabase
-                      .from('plant_material_inward')
-                      .delete()
-                      .eq('id', editingId);
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
 
-                    if (delErr) throw delErr;
+      // 🎯 જો એક જ DC ની બધી એન્ટ્રીઝ (દા.ત. cement અને 20mm) એકસાથે ડિલીટ કરવી હોય:
+      const currentDc = inwardSources[0]?.dcNumber; // inwardSources માંથી dc નંબર લેવાનો
+      let idsToDelete = [editingId]; // ડિફોલ્ટ સિંગલ આઇડી
 
-                    triggerAlert("✅ ઇનવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
-                    
-                    handleCancelEdit();
-                    fetchRecentHistory();
+      if (currentDc && currentDc !== 'EMPTY') {
+         let query = supabase
+          .from('plant_material_inward')
+          .select('id')
+          .eq('plant_name', selectedPlant)
+          .eq('dc_number', currentDc);
+          
+         if (currentCompanyId) {
+            query = query.eq('company_id', currentCompanyId);
+         }
+         
+         const { data: matchedRows } = await query;
+         if (matchedRows && matchedRows.length > 0) {
+            idsToDelete = matchedRows.map(r => r.id);
+         }
+      }
 
-                  } catch (err) {
-                    triggerAlert("એરર: એન્ટ્રી ડિલીટ કરવામાં સમસ્યા આવી રહી છે - " + err.message);
-                  }
-                }
-              }}
+      // 🌟 ૨. મટીરિયલ લેજરમાંથી ડેટા કાઢો (INWARD ટાઇપ અને કંપની ફિલ્ટર સાથે)
+      let matDelQuery = supabase.from('material_stock_ledger')
+        .delete()
+        .in('reference_id', idsToDelete)
+        .eq('transaction_type', 'INWARD'); // 👈 આનાથી બીજો કોઈ ડેટા નહીં ઉડે
+        
+      if (currentCompanyId) {
+        matDelQuery = matDelQuery.eq('company_id', currentCompanyId);
+      }
+      if (selectedPlant) {
+        matDelQuery = matDelQuery.eq('plant_name', selectedPlant);
+      }
+      await matDelQuery;
+
+      // 🌟 ૩. સ્ટોક લેજરમાંથી ડેટા કાઢો (INWARD ટાઇપ અને કંપની ફિલ્ટર સાથે)
+      let stockDelQuery = supabase.from('stock_ledger')
+        .delete()
+        .in('reference_id', idsToDelete)
+        .eq('transaction_type', 'INWARD');
+        
+      if (currentCompanyId) {
+        stockDelQuery = stockDelQuery.eq('company_id', currentCompanyId);
+      }
+      if (selectedPlant) {
+        stockDelQuery = stockDelQuery.eq('plant_name', selectedPlant);
+      }
+      await stockDelQuery;
+
+      // 🌟 ૪. મેઈન ઇનવર્ડ એન્ટ્રી કાઢો
+      let inwardDelQuery = supabase
+        .from('plant_material_inward')
+        .delete()
+        .in('id', idsToDelete);
+        
+      if (currentCompanyId) {
+        inwardDelQuery = inwardDelQuery.eq('company_id', currentCompanyId);
+      }
+
+      const { error: delErr } = await inwardDelQuery;
+      if (delErr) throw delErr;
+
+      triggerAlert("✅ ઇનવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+      
+      handleCancelEdit();
+      fetchRecentHistory();
+
+    } catch (err) {
+      triggerAlert("એરર: એન્ટ્રી ડિલીટ કરવામાં સમસ્યા આવી રહી છે - " + err.message);
+      console.error("Delete Error:", err);
+    }
+  }
+}}
               style={{ 
                 backgroundColor: '#fef2f2', 
                 color: '#dc2626', 
@@ -1389,41 +1505,68 @@ const supplierMaterials = selectedSupplierData?.materials_supplied || [];
       Recent Inward History (Last 24 Hours Editable)
     </h4>
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      {recentHistory.map((item) => {
+      {(() => {
+        const groupedHistory = {};
         
-        const entryTime = new Date(item.created_at || item.date).getTime();
-        const currentTime = new Date().getTime();
-        const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
-        
-        const isLocked = item.is_locked === true || hoursDifference > 24;
+        recentHistory.forEach(item => {
+          // Jo DC number hoy to te no use karo, baki item ni id use karo
+          const dcClean = (item.dc_number || '').trim();
+          const key = (dcClean !== '' && dcClean.toLowerCase() !== 'empty') 
+            ? `${item.plant_name}_${item.supplier_name}_${dcClean}_${item.date}` 
+            : `id_${item.id}`;
 
-        return (
-          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-            <div>
-              <span style={{ fontWeight: 'bold', color: '#166534' }}>{item.material_name}</span> ({item.quantity} {item.unit}) - <span style={{ color: '#64748b' }}>{item.supplier_name}</span>
-              <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>DC: {item.dc_number || 'EMPTY'} | Date: {item.date}</div>
+          if (!groupedHistory[key]) {
+            groupedHistory[key] = {
+              ...item,
+              itemsList: [{ material: item.material_name, qty: item.quantity, unit: item.unit }]
+            };
+          } else {
+            // Check karo ke same material pehla thi list ma nathi ne
+            const exists = groupedHistory[key].itemsList.some(i => i.material === item.material_name);
+            if (!exists) {
+              groupedHistory[key].itemsList.push({ material: item.material_name, qty: item.quantity, unit: item.unit });
+            }
+          }
+        });
+
+        return Object.values(groupedHistory).map((item) => {
+          const entryTime = new Date(item.created_at || item.date).getTime();
+          const currentTime = new Date().getTime();
+          const hoursDifference = (currentTime - entryTime) / (1000 * 60 * 60);
+          const isLocked = item.is_locked === true || hoursDifference > 24;
+
+          const itemsSummary = item.itemsList 
+            ? item.itemsList.map(i => `${i.material} (${i.qty} ${i.unit})`).join(' | ')
+            : `${item.material_name} (${item.quantity} ${item.unit})`;
+
+          return (
+            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+              <div>
+                <span style={{ fontWeight: 'bold', color: '#166534' }}>{itemsSummary}</span> - <span style={{ color: '#64748b' }}>{item.supplier_name}</span>
+                <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>DC: {item.dc_number || 'EMPTY'} | Date: {item.date}</div>
+              </div>
+
+              {isLocked ? (
+                <button 
+                  type="button"
+                  onClick={() => handleEditClickWithTimeCheck(item)}
+                  style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
+                >
+                  🔒 Request Edit
+                </button>
+              ) : (
+                <button 
+                  type="button"
+                  onClick={() => handleEditClickWithTimeCheck(item)}
+                  style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
+                >
+                  {editingId === item.id ? 'Editing...' : 'Edit'}
+                </button>
+              )}
             </div>
-
-            {isLocked ? (
-              <button 
-                type="button"
-                onClick={() => handleEditClickWithTimeCheck(item)}
-                style={{ fontSize: '11px', fontWeight: 'bold', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}
-              >
-                🔒 Request Edit
-              </button>
-            ) : (
-              <button 
-                type="button"
-                onClick={() => handleEditClickWithTimeCheck(item)}
-                style={{ fontSize: '11px', fontWeight: 'bold', color: '#1d4ed8', backgroundColor: '#eff6ff', padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}
-              >
-                {editingId === item.id ? 'Editing...' : 'Edit'}
-              </button>
-            )}
-          </div>
-        );
-      })}
+          );
+        });
+      })()}
     </div>
   </div>
 )}

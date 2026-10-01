@@ -7,7 +7,7 @@ export default function SupervisorFundRequest({ user }) {
   const [plants, setPlants] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('');
   const [requestDate, setRequestDate] = useState(new Date().toISOString().split('T')[0]);
-
+const [currentCompanyId, setCurrentCompanyId] = useState(null);
   // 🎯 ૧. આવકનો પ્રકાર નક્કી કરવા માટે (HO Request vs Direct Income)
   const [incomeType, setIncomeType] = useState('HO_REQUEST'); // 'HO_REQUEST' અથવા 'DIRECT_INCOME'
 
@@ -72,41 +72,51 @@ const totalInwardAmount = filteredInwardReport.reduce(
 const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
-        setPlants(data || []);
-        return;
-      }
+      // ૧. કરન્ટ યુઝરનો રોલ, અસાઈન પ્લાન્ટ્સ અને company_id મેળવો
+      const { data: permData, error: permError } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_plants, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
 
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
+      if (permError || !permData) {
         setPlants([]); 
         return;
       }
 
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
+      // 🌟 સ્ટેટમાં સેવ કરો
+      if (permData.company_id) {
+        setCurrentCompanyId(permData.company_id);
+      }
 
-      setPlants(allowedPlantsData || []);
+      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
 
+      if (adminCheck && permData.company_id) {
+        // 🎯 ADMIN: માત્ર પોતાની કંપનીના જ પ્લાન્ટ્સ
+        const { data } = await supabase.from('plants').select('*').eq('company_id', permData.company_id);
+        setPlants(data || []);
+      } else {
+        // 🎯 SUPERVISOR: માત્ર અસાઇન કરેલા Plants
+        let assignedPlantNames = permData.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
+      }
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
@@ -115,15 +125,33 @@ const fetchPlants = async () => {
 const fetchMyRequests = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = (user?.email || session?.user?.email || '').toLowerCase().trim();
-      const isAdmin = (userEmail === 'infra.tnj@gmail.com');
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
+      
+      const userEmail = (currentUser.email || '').toLowerCase().trim();
+
+      // ૧. ડેટાબેઝમાંથી યુઝરનો રોલ અને કંપની ID લાવો
+      const { data: permData } = await supabase
+        .from('user_permissions')
+        .select('role, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      // ૨. ડાયનેમિક એડમિન ચેક (હાર્ડકોડ ઈમેલની જગ્યાએ રોલથી ચેક થશે)
+      const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+      const currentCompanyId = permData?.company_id;
 
       let query = supabase
         .from('plant_fund_transfers')
         .select('*')
         .eq('plant_name', selectedPlant);
 
-      // 🌟 જો એડમિન ન હોય, તો સુપરવાઇઝર માટે તેમની રિક્વેસ્ટ્સ અને રિસીવ્ડ ડેટા બંને લાવવા
+      // 🎯 ૩. SaaS ફિલ્ટર: માત્ર પોતાની જ કંપનીનો ડેટા લાવો
+      if (currentCompanyId) {
+        query = query.eq('company_id', currentCompanyId);
+      }
+
+      // 🌟 ૪. જો એડમિન ન હોય (એટલે કે સુપરવાઇઝર હોય), તો માત્ર તેમની પોતાની રિક્વેસ્ટ્સ લાવો
       if (!isAdmin && userEmail) {
         const shortName = userEmail.split('@')[0].trim();
         query = query.or(`received_by.ilike.${userEmail},supervisor_name.ilike.${shortName}`);
@@ -170,7 +198,7 @@ const fetchMyRequests = async () => {
     }
   };
 
-  // 📤 સબમિટ હેન્ડલર (બંને પ્રકારની આવક માટે)
+ // 📤 સબમિટ હેન્ડલર (બંને પ્રકારની આવક માટે)
   const handleSendRequest = async (e) => {
     e.preventDefault();
     if (!selectedPlant) return triggerAlert("⚠️ કૃપા કરીને પહેલા પ્લાન્ટ સિલેક્ટ કરો!");
@@ -180,29 +208,30 @@ const fetchMyRequests = async () => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || '';
+      const currentUser = user || session?.user;
+      const currentLoggedUser = currentUser?.email || currentUser?.id || '';
 
       const isDirect = incomeType === 'DIRECT_INCOME';
-// ઉદાહરણ તરીકે: user?.email = "infra.tnj@gmail.com" હોય તો માત્ર "infra.tnj" મળશે
-const supervisorShortName = (user?.email || currentLoggedUser || '')
-  .split('@')[0]
-  .trim();
+      const supervisorShortName = (currentLoggedUser || '').split('@')[0].trim();
 
-// ઇન્સર્ટ / અપડેટ કરતી વખતે:
-const payload = {
-  // ... બાકીના ફિલ્ડ્સ
+      // 🎯 ખાતરી કરો કે currentCompanyId પરફેક્ટ જાય છે
+      if (!currentCompanyId) {
+        triggerAlert("⚠️ એરર: કંપની આઈડી મળ્યું નથી. કૃપા કરીને પેજ રિફ્રેશ કરો.");
+        setLoading(false);
+        return;
+      }
 
-};
       const { error } = await supabase.from('plant_fund_transfers').insert([{
+        company_id: currentCompanyId, // 👈 આનાથી ફંડ રિક્વેસ્ટ માત્ર તે જ કંપનીના એડમિનને જશે!
         plant_name: selectedPlant,
         request_date: requestDate,
         requested_amount: Number(amount),
-        approved_amount: isDirect ? Number(amount) : null, // ડાયરેક્ટ હોય તો સીધા અપ્રૂવ્ડ
+        approved_amount: isDirect ? Number(amount) : null,
         purpose: purpose,
         admin_remarks: isDirect ? `ખરીદનાર: ${buyerName || 'Local Cash'} | ${remarks}` : remarks,
-       supervisor_name: supervisorShortName,
+        supervisor_name: supervisorShortName,
         payment_mode: isDirect ? 'Cash (Direct)' : null,
-        status: isDirect ? 'RECEIVED' : 'PENDING', // 🎯 ડાયરેક્ટ સેલ હોય તો સીધું જમા (RECEIVED)
+        status: isDirect ? 'RECEIVED' : 'PENDING',
         received_by: isDirect ? currentLoggedUser : null,
         received_date: isDirect ? new Date().toISOString() : null
       }]);

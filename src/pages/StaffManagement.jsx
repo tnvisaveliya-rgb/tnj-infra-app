@@ -57,9 +57,13 @@ export default function StaffManagement() {
     loadPlants()
   }, [])
 
-  const fetchStaff = async () => {
+ const fetchStaff = async () => {
     const { data, error } = await supabase.from('user_permissions').select('*')
-    if (!error && data) setStaffList(data)
+    if (error) {
+      console.error("Error fetching staff:", error.message);
+    } else {
+      setStaffList(data || []);
+    }
   }
 
   const fetchSites = async () => {
@@ -78,13 +82,19 @@ const loadPlants = async () => {
 const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolean))]
   const uniquePlantStates = ['All', ...new Set(plantsList.map(p => p.state).filter(Boolean))] // 👈 Plant માટે રાજ્યોનું લિસ્ટ
 
-  const deleteStaff = async (id) => {
-    if (confirm("શું તમે આ સ્ટાફને ડિલીટ કરવા માંગો છો?")) {
-      const { error } = await supabase.from('user_permissions').delete().eq('user_id', id)
-      if (!error) {
-        fetchStaff()
+ const deleteStaff = async (id) => {
+    if (confirm("Shu tame aa staff ne delete karva mango cho?")) {
+      // 1. user_permissions mathi delete
+      const { error: permError } = await supabase.from('user_permissions').delete().eq('user_id', id);
+      
+      // 2. user_profiles mathi pan delete karo
+      const { error: profError } = await supabase.from('user_profiles').delete().eq('id', id);
+
+      if (!permError) {
+        fetchStaff();
+        alert("Staff database mathi delete thai gayo che!\n\n(Note: Ene login karto rokva mate Supabase Dashboard ma Auth > Users mathi manual delete karvo padse)");
       } else {
-        alert("ડિલિટ કરવામાં એરર આવી: " + error.message)
+        alert("Delete karvama error aavi: " + permError.message);
       }
     }
   }
@@ -225,7 +235,7 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
     }
     setFormData({ ...formData, assigned_plants: updatedPlants })
   }
-  const handleAddStaff = async (e) => {
+const handleAddStaff = async (e) => {
     e.preventDefault()
     setError('')
 
@@ -237,6 +247,26 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
     setLoading(true)
 
     try {
+      // 1. Admin no company_id melvo
+      const { data: { user }, error: authUserErr } = await supabase.auth.getUser();
+      if (authUserErr || !user) throw new Error("User session expired. Please relogin.");
+
+      const { data: profileData, error: profileErr } = await supabase
+        .from('user_profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profileErr || !profileData?.company_id) {
+        throw new Error("Company ID malyo nathi.");
+      }
+
+      const userCompanyId = profileData.company_id;
+
+      // 2. Admin session save karo
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+
+      // 3. Auth ma navo user banavo
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -249,14 +279,24 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
       })
 
       if (authError) throw authError;
-      const userId = authData.user?.id;
-      if (!userId) throw new Error("યુઝર આઈડી જનરેટ થવામાં ભૂલ થઈ છે.");
+      const newUserId = authData.user?.id;
+      if (!newUserId) throw new Error("યુઝર આઈડી જનરેટ થવામાં ભૂલ થઈ છે.");
 
+      // 4. Admin session restore karo
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token
+        });
+      }
+
+      // 5. user_permissions table ma entry karo
       const { error: permError } = await supabase
         .from('user_permissions')
         .insert([
           {
-            user_id: userId,
+            user_id: newUserId,
+            company_id: userCompanyId,
             full_name: formData.full_name,
             email: formData.email, 
             mobile: formData.mobile,
@@ -268,6 +308,16 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
         ]);
 
       if (permError) throw permError;
+
+      // 6. 🌟 નવો ઉમેરેલો કોડ: ઓટોમેટિક બનેલા પ્રોફાઇલમાં company_id અપડેટ કરો
+      const { error: profUpdateErr } = await supabase
+        .from('user_profiles')
+        .update({ company_id: userCompanyId })
+        .eq('id', newUserId);
+        
+      if (profUpdateErr) {
+        console.error("Profile update error:", profUpdateErr.message);
+      }
 
       alert('નવો સ્ટાફ અને સાઇટ પરમિશન સફળતાપૂર્વક ઉમેરાઈ ગઈ!');
       setIsModalOpen(false);
@@ -281,9 +331,8 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
         assigned_sites: [],
         assigned_plants: []
       });
-      setAssignedPlants([]);
       fetchStaff();
-
+      
     } catch (err) {
       console.error('Error adding staff:', err)
       setError(err.message || 'સ્ટાફ ઉમેરવામાં નિષ્ફળતા મળી.')

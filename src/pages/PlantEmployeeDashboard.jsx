@@ -139,6 +139,10 @@ const formatDateToDMY = (dateStr) => {
 
       if (selectedPlant && selectedPlant !== 'All') {
         headerQuery = headerQuery.eq('plant_name', selectedPlant);
+        } else if (plantList && plantList.length > 0) {
+        // 🎯 Jo "All" select karyu hoy, to matra aplaya list na (potani company na) plants no j data lavo
+        headerQuery = headerQuery.in('plant_name', plantList);
+      
       }
       if (selectedLabour) {
         headerQuery = headerQuery.eq('team_name', selectedLabour);
@@ -168,6 +172,7 @@ const formatDateToDMY = (dateStr) => {
           const { data: stockEntries } = await supabase
             .from('stock_ledger')
             .select('reference_id, qty')
+            .eq('transaction_type', 'PRODUCTION')
             .in('reference_id', itemIds);
 
           const stockMap = {};
@@ -599,41 +604,38 @@ const [attendanceInfo, setAttendanceInfo] = useState({
 useEffect(() => {
     const fetchPlantList = async () => {
       try {
-        const userEmail = (user?.email || '').trim().toLowerCase();
-        
-        // ૧. અહી adminCheck નામનો નવો વેરીએબલ બનાવો
-        const adminCheck = (userEmail === 'infra.tnj@gmail.com');
-        
-        // ૨. તેને ઉપર બનાવેલા State માં સેવ કરો
+        if (!user) return;
+
+        const { data: permData, error: permErr } = await supabase
+          .from('user_permissions')
+          .select('role, assigned_plants, company_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        const adminCheck = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
         setIsAdmin(adminCheck);
 
-       if (adminCheck) {
-          // Admin mate badha plants fetch karo
+        if (adminCheck && permData.company_id) {
+          // 🎯 એડમિન માટે: કંપનીના બધા પ્લાન્ટ્સ તરત જ ફેચ કરો
           const { data, error } = await supabase
-            .from('material_stock_ledger')
-            .select('plant_name');
+            .from('plants')
+            .select('plant_name')
+            .eq('company_id', permData.company_id);
 
           if (!error && data) {
             const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
             setPlantList(unique);
-            if (unique.length > 0 && selectedPlant === 'All') {
-              setSelectedPlant(unique[0]);
-            }
+            // 🌟 મહત્ત્વનું: જો પ્લાન્ટ લિસ્ટ આવી જાય તો તરત જ ડેશબોર્ડ ડેટા પણ કોલ કરી દો
+            fetchDashboardData(unique); 
           }
         } else {
-          // Baki na supervisors mate user_permissions table mathi fkt teo na assigned_plants fetch karo
-          const { data: permData, error: permErr } = await supabase
-            .from('user_permissions')
-            .select('assigned_plants')
-            .or(`user_id.eq.${user.id},email.eq.${userEmail}`)
-            .single();
-
-          if (!permErr && permData?.assigned_plants) {
-            const assigned = permData.assigned_plants;
-            setPlantList(assigned);
-            if (assigned.length > 0) {
-              setSelectedPlant(assigned[0]); // First assigned plant select rakhse
-            }
+          let assigned = permData?.assigned_plants || [];
+          if (typeof assigned === 'string') {
+              try { assigned = JSON.parse(assigned); } catch(e) { assigned = []; }
+          }
+          setPlantList(assigned);
+          if (assigned.length > 0) {
+            setSelectedPlant(assigned[0]); 
           }
         }
       } catch (err) {
@@ -641,9 +643,7 @@ useEffect(() => {
       }
     };
 
-    if (user) {
-      fetchPlantList();
-    }
+    fetchPlantList();
   }, [user]);
 const fetchDashboardData = async () => {
     try {
@@ -742,12 +742,27 @@ const fetchDashboardData = async () => {
       setWorkingBalance(totalIncome - totalExpense);
       setTodayExpense(todayExpSum);
 
-      // (ઇન્વેન્ટરી અને એટેન્ડન્સનો આગળનો કોડ એમ જ રહેશે...)
-      // ૪. RAW MATERIAL, STORE & ASSETS STOCK
+   
+  // ૪. RAW MATERIAL, STORE & ASSETS STOCK
       let matQuery = supabase.from('material_stock_ledger').select('*');
+      
       if (selectedPlant && selectedPlant !== 'All') {
         matQuery = matQuery.eq('plant_name', selectedPlant);
+      } else {
+        // 🎯 Fix: Jo plantList huju load na thayu hoy, to direct plants table mathi naamo lai lo
+        let activePlants = plantList;
+        if (!activePlants || activePlants.length === 0) {
+          const { data: allPlantsData } = await supabase.from('plants').select('plant_name');
+          if (allPlantsData && allPlantsData.length > 0) {
+            activePlants = allPlantsData.map(p => p.plant_name).filter(Boolean);
+          }
+        }
+        
+        if (activePlants.length > 0) {
+          matQuery = matQuery.in('plant_name', activePlants);
+        }
       }
+
       const { data: matLedger, error: matErr } = await matQuery;
 
       if (!matErr && matLedger) {
@@ -825,57 +840,61 @@ const fetchDashboardData = async () => {
         setRawMaterialsStock(Object.values(stockMap));
       }
 
-/// 👇 અહીથી નવું ઉમેરો (માત્ર એડમિન માટે ડેટા લાવશે)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        try {
-          let fgQuery = supabase.from('stock_ledger').select('*');
-          if (selectedPlant && selectedPlant !== 'All') {
-            fgQuery = fgQuery.eq('plant_name', selectedPlant);
-          }
-          const { data: fgData, error: fgError } = await fgQuery;
-          
-          if (!fgError && fgData) {
-            const fgStockMap = {};
 
-            fgData.forEach(item => {
-              // નામ સરખા કરવા માટે બધું uppercase કરી દઈએ (જેથી 'column' અને 'Column' અલગ ન ગણાય)
-              const pName = (item.product_name || '').trim().toUpperCase(); 
-              
-              // સાઇઝ અને સ્ટીલ ડીટેલ્સ આમાં જ છે
-              const pVariant = (item.size_variant || '').trim(); 
-              
-              // બંનેને જોડીને એક યુનિક કી બનાવો
-              const uniqueKey = `${pName} | ${pVariant}`.trim();
-
-              if (!uniqueKey || uniqueKey === '|') return;
-
-              const type = (item.transaction_type || '').toUpperCase();
-              const qty = Number(item.qty || 0);
-
-              // જો લિસ્ટમાં આ આઇટમ (સાઇઝ અને સ્ટીલ ડીટેલ સાથે) પહેલી વાર આવતી હોય
-              if (!fgStockMap[uniqueKey]) {
-                fgStockMap[uniqueKey] = { 
-                  name: pName, // માત્ર નામ (દા.ત. COLUMN)
-                  variant: pVariant, // સ્ટીલ ડીટેલ (દા.ત. 8ft x 150mm (4 mm wire - 5 wires))
-                  stock: 0, 
-                  unit: 'Nos'
-                };
-              }
-
-              // પ્લસ-માઇનસ લોજીક
-              if (type === 'PRODUCTION' || type === 'INWARD') {
-                fgStockMap[uniqueKey].stock += qty;
-              } else if (type === 'OUTWARD' || type === 'BROKEN') {
-                fgStockMap[uniqueKey].stock -= qty;
-              }
-            });
-
-            // Object માંથી Array બનાવીને State માં સેટ કરો (જો સ્ટોક 0 હોય તો પણ બતાવશે)
-            setFinishedGoodsStock(Object.values(fgStockMap));
-          }
-        } catch (err) {
-          console.error('Error fetching FG stock:', err);
+       // 🌟 Finished Goods stock lavva mate (isAdmin check vagar direct query)
+      try {
+        let fgQuery = supabase.from('stock_ledger').select('*');
+        
+        let activePlants = plantList;
+        if (!activePlants || activePlants.length === 0) {
+          const { data: dbPlants } = await supabase.from('plants').select('plant_name');
+          if (dbPlants) activePlants = dbPlants.map(p => p.plant_name).filter(Boolean);
         }
+
+        if (selectedPlant && selectedPlant !== 'All') {
+          fgQuery = fgQuery.eq('plant_name', selectedPlant);
+        } else if (activePlants.length > 0) {
+          fgQuery = fgQuery.in('plant_name', activePlants);
+        }
+
+        const { data: fgData, error: fgError } = await fgQuery;
+        
+        if (!fgError && fgData) {
+          const fgStockMap = {};
+
+          fgData.forEach(item => {
+            const pName = (item.product_name || item.name || '').trim().toUpperCase(); 
+            const pVariant = (item.size_variant || item.variant || '').trim(); 
+            const uniqueKey = `${pName} | ${pVariant}`.trim();
+
+            if (!uniqueKey || uniqueKey === '|') return;
+
+            const type = (item.transaction_type || '').toUpperCase();
+            const qty = Number(item.qty || item.quantity || 0);
+
+            if (!fgStockMap[uniqueKey]) {
+              fgStockMap[uniqueKey] = { 
+                name: pName, 
+                variant: pVariant, 
+                stock: 0, 
+                unit: 'Nos'
+              };
+            }
+
+            if (type === 'PRODUCTION' || type === 'INWARD' || type === 'IN') {
+              fgStockMap[uniqueKey].stock += qty;
+            } else if (type === 'OUTWARD' || type === 'BROKEN' || type === 'OUT') {
+              fgStockMap[uniqueKey].stock -= qty;
+            }
+          });
+
+          setFinishedGoodsStock(Object.values(fgStockMap));
+        } else {
+          setFinishedGoodsStock([]); 
+        }
+      } catch (err) {
+        console.error('Error fetching FG stock:', err);
+        setFinishedGoodsStock([]); 
       }
 // ૫. ATTENDANCE FETCH
       const { data: attData, error: attError } = await supabase

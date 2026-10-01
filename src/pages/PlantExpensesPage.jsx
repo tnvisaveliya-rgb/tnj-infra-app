@@ -13,7 +13,7 @@ export default function PlantExpensesPage({ user }) {
   // ✏️ Edit & 24 Hours Lock States for Expenses
   const [isLocked, setIsLocked] = useState(false);
   const [editRequested, setEditRequested] = useState(false);
-
+const [currentCompanyId, setCurrentCompanyId] = useState(null);
   // 🌟 રિપોર્ટના તમામ સ્ટેટ્સ અહીં ઉપર જ ડીકલેર કરો
   const [reportPlantFilter, setReportPlantFilter] = useState('All');
   const [showReportModal, setShowReportModal] = useState(false);
@@ -146,50 +146,58 @@ const [expenseRows, setExpenseRows] = useState([
     }
   }, [selectedPlant]);
 
- const fetchPlants = async () => {
+const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
-        setPlants(data || []);
-        return;
-      }
+      const { data: permData, error: permError } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_plants, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
 
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
+      if (permError || !permData) {
         setPlants([]); 
         return;
       }
 
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
+      // 🌟 ૧. કંપની આઈડી સ્ટેટમાં સેવ કરો
+      if (permData.company_id) {
+        setCurrentCompanyId(permData.company_id);
+      }
 
-      setPlants(allowedPlantsData || []);
+      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
 
+      if (adminCheck && permData.company_id) {
+        // 🎯 ADMIN: માત્ર પોતાની કંપનીના જ પ્લાન્ટ્સ
+        const { data } = await supabase.from('plants').select('*').eq('company_id', permData.company_id);
+        setPlants(data || []);
+      } else {
+        // 🎯 SUPERVISOR: માત્ર અસાઇન કરેલા Plants
+        let assignedPlantNames = permData.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
+      }
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
     }
   };
-
 
   // 🔓 એડમિન દ્વારા મંજૂર થયેલી એન્ટ્રી અનલોક કરવા માટે
   const handleAutoUnlockExpense = async (entryId) => {
@@ -372,6 +380,7 @@ const handleEditExpense = async (item) => {
           .from('material_stock_ledger')
           .select('*')
           .eq('reference_id', rawRefId)
+          .eq('plant_name', item.plant_name)
           .eq('transaction_type', 'INWARD');
 
         // ૨. જો reference_id માં NULL હોય તો બેકઅપ તરીકે Date + Plant થી શોધો (જૂની એન્ટ્રીઓ માટે)
@@ -458,7 +467,8 @@ const handleDeleteCurrentExpense = async () => {
         await supabase
           .from('material_stock_ledger')
           .delete()
-          .eq('reference_id', String(expId));
+          .eq('reference_id', String(expId))
+          .eq('transaction_type', 'INWARD');
           
         // 🌟 નવો ઉમેરેલો કોડ: inward ટેબલમાંથી પણ કાઢી નાખવા
         await supabase
@@ -511,15 +521,33 @@ const handleDeleteCurrentExpense = async () => {
     }
   };
 // 🌟 માત્ર plant_expenses ટેબલમાંથી જ ડેટા ફેચ થશે (Admin માટે બધા, Supervisor માટે પોતાના)
-  const fetchExpensesHistory = async () => {
+const fetchExpensesHistory = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = (user?.email || session?.user?.email || localStorage.getItem('userEmail') || '').toLowerCase().trim();
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
+
+      const userEmail = (currentUser.email || '').toLowerCase().trim();
+
+      // 🌟 ૧. યૂઝરની પરમિશન અને company_id મેળવો
+      const { data: permData } = await supabase
+        .from('user_permissions')
+        .select('role, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+      const currentCompanyId = permData?.company_id;
 
       let query = supabase.from('plant_expenses').select('*');
 
+      // 🎯 ૨. SaaS કંપની ફિલ્ટર
+      if (currentCompanyId) {
+        query = query.eq('company_id', currentCompanyId);
+      }
+
       // જો એડમિન ન હોય, તો માત્ર આ સુપરવાઇઝરે કરેલા ખર્ચા જ લાવો
-      if (userEmail !== 'infra.tnj@gmail.com') {
+      if (!isAdmin && userEmail) {
         query = query.ilike('submitted_by', userEmail);
       }
 
@@ -633,6 +661,7 @@ const handleFinalSubmit = async () => {
       }
 
       expenseInsertRows.push({
+        company_id: currentCompanyId,
         plant_name: selectedPlant,
         expense_date: expenseDate,
         expense_category: row.expenseCategory,
@@ -674,6 +703,7 @@ const handleFinalSubmit = async () => {
         const newStockLedger = row.stockItems
           .filter(sub => sub.qty && Number(sub.qty) > 0)
           .map(sub => ({
+            company_id: currentCompanyId,
             date: expenseDate,
             plant_name: selectedPlant,
             material_name: sub.selectedMaterial === '__OTHER__' ? (sub.manualMaterialName?.trim() || 'General Tool') : sub.selectedMaterial,
@@ -693,6 +723,7 @@ const handleFinalSubmit = async () => {
             const iType = matObj?.item_type || 'Hardware / Tool';
             
             return {
+              company_id: currentCompanyId,
               date: stock.date,
               plant_name: stock.plant_name,
               material_name: stock.material_name,
@@ -739,6 +770,7 @@ const handleFinalSubmit = async () => {
                 : subItem.selectedMaterial;
 
               stockRowsForThisExpense.push({
+                company_id: currentCompanyId,
                 date: expenseDate,
                 plant_name: selectedPlant,
                 material_name: matName,
@@ -760,6 +792,7 @@ const handleFinalSubmit = async () => {
               const iType = matObj?.item_type || 'Hardware / Tool';
 
               return {
+                company_id: currentCompanyId,
                 date: stock.date,
                 plant_name: stock.plant_name,
                 material_name: stock.material_name,

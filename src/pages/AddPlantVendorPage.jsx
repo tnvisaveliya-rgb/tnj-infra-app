@@ -171,27 +171,48 @@ setTransporters(tData || []);
   }
   
 
- const handleSavePlant = async () => {
+// 1. 🏭 નવો પ્લાન્ટ સેવ કરવા માટે
+  const handleSavePlant = async () => {
     if (!plantName.trim()) { showAlert("Please enter plant name!"); return; }
     if (!plantState) { showAlert("કૃપા કરીને રાજ્ય (State) સિલેક્ટ કરો!"); return; } // 👈 ફરજિયાત ચેક
     
-    const payload = { 
-      plant_name: plantName.trim(), 
-      location: plantLocation.trim() || '', 
-      manager_name: plantManager.trim() || '',
-      state: plantState // 👈 ડેટાબેઝમાં સ્ટેટ સેવ થશે
-    }
+    try {
+      // Login karela user no data get karo
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) throw new Error("User session expired. Please login again.");
 
-    const { error } = await supabase.from('plants').insert([payload])
-    if (error) showAlert("Error: " + error.message)
-    else { 
-      showAlert("Plant Added Successfully!"); 
-      setPlantName(''); setPlantLocation(''); setPlantManager(''); setPlantState(''); 
-      setActiveModal(null); 
-      await loadAllData(); 
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('company_id')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profileData) throw new Error("Company ID fetching failed.");
+
+      const payload = { 
+        plant_name: plantName.trim(), 
+        location: plantLocation.trim() || '', 
+        manager_name: plantManager.trim() || '',
+        state: plantState, 
+        company_id: profileData.company_id // 👈 Ahiya error hati te dynamic ID thi solve kari
+      }
+
+      const { error } = await supabase.from('plants').insert([payload]);
+      
+      if (error) {
+        showAlert("Error: " + error.message);
+      } else { 
+        showAlert("✅ Plant Added Successfully!"); 
+        setPlantName(''); setPlantLocation(''); setPlantManager(''); setPlantState(''); 
+        setActiveModal(null); 
+        await loadAllData(); 
+      }
+    } catch (err) {
+      showAlert("System Error: " + err.message);
     }
-  }
-  // 🏭 નવું ઉમેરેલું ફંક્શન: પ્લાન્ટ લિસ્ટમાંથી અપડેટ કરવા માટે
+  };
+
+  // 2. 📝 પ્લાન્ટ અપડેટ કરવા માટે
   const handleUpdatePlant = async (id) => {
     if (!editPlantForm.plant_name.trim()) { showAlert("Please enter plant name!"); return; }
     
@@ -206,7 +227,7 @@ setTransporters(tData || []);
       showAlert("Error updating plant: " + error.message);
     } else {
       showAlert("✅ Plant Successfully Updated!");
-      setEditingPlantId(null);
+      setEditingPlantId(null); // Edit mode mathi bahar aavva mate
       loadAllData();
     }
   };
@@ -267,80 +288,95 @@ const handleSaveSite = async () => {
     if (!siteName.trim()) { showAlert("Please enter site name!"); return; }
     if (!siteState) { showAlert("Please select state!"); return; }
     
-    // 🌟 જો Work Name કે Work Size ભરેલી હોય તો તેનું પણ વેલિડેશન કરી શકાય
     if (!WorkName.trim()) { showAlert("Please enter Work Name!"); return; }
     if (!WorkSize.trim()) { showAlert("Please enter Work Size!"); return; }
 
-    const exists = sites.some(s => s.site_name.trim().toLowerCase() === siteName.trim().toLowerCase())
-    if (exists) { showAlert("This site is already existing!"); return; }
+    try {
+      // 1. Current user/company id laavo
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) throw new Error("User login issue.");
 
-    // ૧. પહેલો પેલોડ: મેઈન સાઇટ 'sites' ટેબલ માટે
-    const sitePayload = { 
-      plant_id: selectedPlantId, 
-      party_name: sitePartyName.trim(), 
-      site_name: siteName.trim(), 
-      address: siteAddress.trim() || '', 
-      state: siteState.trim(), 
-      phone: sitePhone.trim() || ''
-    }
+      const { data: profileData } = await supabase
+        .from('user_profiles')
+        .select('company_id')
+        .eq('id', authData.user.id)
+        .single();
+        
+      const userCompanyId = profileData?.company_id;
 
-    const { error: siteError } = await supabase.from('sites').insert([sitePayload])
-    
-    if (siteError) {
-      showAlert("Error saving site: " + siteError.message);
-      return;
-    } 
+      // 2. Duplicate Check ONLY For Same Company
+      const { data: existingSite } = await supabase
+        .from('sites')
+        .select('id')
+        .ilike('site_name', siteName.trim())
+        .eq('company_id', userCompanyId); // અહીયા company_id ફિલ્ટર એડ કર્યું છે
 
-    // ૨. બીજો પેલોડ: BOM અને Work ની વિગતો 'site_bom' ટેબલ માટે
-    if (WorkName.trim() && WorkSize.trim()) {
-      const bomPayload = {
-        site_name: siteName.trim(),
-        work_name: WorkName.trim(),
-        work_size: WorkSize.trim(),
-        work_category: WorkCategory ? WorkCategory.trim() : '',
-        expected_m3: expectedM3 ? parseFloat(expectedM3) : null,
-        effective_date: effectiveDate || new Date().toISOString().split('T')[0],
-        bom_items: bomItems || [] // 🌟 મટીરિયલનું આખું લિસ્ટ JSON ફોર્મેટમાં સેવ થશે
+      if (existingSite && existingSite.length > 0) { 
+        showAlert("This site is already existing in your company!"); 
+        return; 
       }
 
-      const { error: bomError } = await supabase.from('site_bom').insert([bomPayload]);
+      // 3. પેલોડ: મેઈન સાઇટ 'sites' ટેબલ માટે
+      const sitePayload = { 
+        plant_id: selectedPlantId, 
+        party_name: sitePartyName.trim(), 
+        site_name: siteName.trim(), 
+        address: siteAddress.trim() || '', 
+        state: siteState.trim(), 
+        phone: sitePhone.trim() || '',
+        company_id: userCompanyId // 👈 Company Id સેવ થશે
+      }
+
+      const { error: siteError } = await supabase.from('sites').insert([sitePayload])
       
-      if (bomError) {
-        console.error("Error saving site BOM:", bomError);
-        showAlert("સાઇટ સેવ થઈ ગઈ, પણ BOM ડેટા સેવ કરવામાં એરર આવી: " + bomError.message);
+      if (siteError) {
+        showAlert("Error saving site: " + siteError.message);
         return;
-      }
-    }
+      } 
 
-    // ૩. સફળતાપૂર્વક બધું સેવ થયા પછી ફોર્મ રિસેટ કરવું
-    showAlert("Site & BOM Added Successfully!"); 
-    setSelectedPlantId(''); 
-    setSitePartyName(''); 
-    setSiteName(''); 
-    setSiteAddress(''); 
-    setSiteState(''); 
-    setSitePhone(''); 
-    setWorkName('');
-    setWorkSize('');
-    setWorkCategory('');
-    setExpectedM3('');
-    setEffectiveDate(new Date().toISOString().split('T')[0]);
-    setBomItems([{ material: '', consumption: '', unit: 'Nos' }]);
-    setActiveModal(null); 
-    await loadAllData(); 
+      // 4. પેલોડ: BOM અને Work ની વિગતો 'site_bom' ટેબલ માટે
+      if (WorkName.trim() && WorkSize.trim()) {
+        const bomPayload = {
+          site_name: siteName.trim(),
+          work_name: WorkName.trim(),
+          work_size: WorkSize.trim(),
+          work_category: WorkCategory ? WorkCategory.trim() : '',
+          expected_m3: expectedM3 ? parseFloat(expectedM3) : null,
+          effective_date: effectiveDate || new Date().toISOString().split('T')[0],
+          bom_items: bomItems || [],
+          company_id: userCompanyId // 👈 Company Id સેવ થશે
+        }
+
+        const { error: bomError } = await supabase.from('site_bom').insert([bomPayload]);
+        
+        if (bomError) {
+          showAlert("સાઇટ સેવ થઈ ગઈ, પણ BOM ડેટા સેવ કરવામાં એરર આવી: " + bomError.message);
+          return;
+        }
+      }
+
+      showAlert("✅ Site & BOM Added Successfully!"); 
+      setSelectedPlantId(''); setSitePartyName(''); setSiteName(''); setSiteAddress(''); setSiteState(''); setSitePhone(''); 
+      setWorkName(''); setWorkSize(''); setWorkCategory(''); setExpectedM3(''); 
+      setEffectiveDate(new Date().toISOString().split('T')[0]);
+      setBomItems([{ material: '', consumption: '', unit: 'Nos' }]);
+      setActiveModal(null); 
+      await loadAllData();
+    } catch (err) {
+      showAlert("System Error: " + err.message);
+    }
   }
 
-
 const handleSaveModalData = async () => {
-    // 🎯 Use formCompanyName instead of formCompany_name
-    if (!formCompanyName || !formCompanyName.trim()) { 
-      showAlert("Please enter company name!"); 
-      return; 
+   // 🎯 FIX: Material ane Description mate Company Name compulsory nathi
+    if (activeModal !== 'material' && activeModal !== 'description') {
+      if (!formCompanyName || !formCompanyName.trim()) { 
+        showAlert("Please enter company name!"); 
+        return; 
+      }
     }
     
-    // 🎯 અહીંથી 'all' વાળી શરત હટાવી દીધી છે, જેથી All Plants સિલેક્ટ કરવા પર એરર ન આવે
-  if (activeModal !== 'party') {
-      // 🎯 જો assignTarget 'plant' હોય, અને પ્લાન્ટ સિલેક્ટ ન કર્યો હોય (અને 'all' પણ ન હોય તો જ અટકવું)
+    if (activeModal !== 'party') {
       if (assignTarget === 'plant' && (!formPlantFilter || formPlantFilter === '')) { showAlert("Please select plant!"); return; }
       if (assignTarget === 'site' && !formSite) { showAlert("Please select site!"); return; }
       if (assignTarget === 'both' && ((!formPlantFilter || formPlantFilter === '') || !formSite)) { showAlert("Please select both plant and site!"); return; }
@@ -353,496 +389,464 @@ const handleSaveModalData = async () => {
     else if (activeModal === 'material') tableName = 'site_materials_master';
     else if (activeModal === 'description') tableName = 'site_work_descriptions';
 
-    // 🎯 1. ડુપ્લિકેટ નામ ચેક કરવાનું લોજિક (લેબર અને પાર્ટી બંને માટે)
-    if (activeModal === 'labour' || activeModal === 'party') {
-      const { data: existingData, error: searchErr } = await supabase
-        .from(tableName)
-        .select('name')
-        .ilike('name', formName.trim());
+    try {
+      // 1. Company ID મેળવો
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', authData.user.id).single();
+      const userCompanyId = profileData?.company_id;
 
-      if (searchErr) {
-        showAlert("Error checking duplicate: " + searchErr.message);
-        return;
+      // 2. ડુપ્લિકેટ નામ ચેક કરવાનું લોજિક (માત્ર પોતાની કંપની માટે)
+      if (activeModal === 'labour' || activeModal === 'party') {
+        const { data: existingData, error: searchErr } = await supabase
+          .from(tableName)
+          .select('name')
+          .ilike('name', formName.trim())
+          .eq('company_id', userCompanyId); // 👈 માત્ર આ જ કંપનીમાં ચેક કરશે
+
+        if (searchErr) return showAlert("Error checking duplicate: " + searchErr.message);
+
+        if (existingData && existingData.length > 0) {
+          return showAlert("❌ આ નામની એન્ટ્રી પહેલેથી જ અવેલેબલ છે! ડુપ્લિકેટ એન્ટ્રી બંધ છે.");
+        }
       }
 
-      if (existingData && existingData.length > 0) {
-        showAlert("❌ આ નામની એન્ટ્રી પહેલેથી જ અવેલેબલ છે! ડુપ્લિકેટ એન્ટ્રી બંધ છે.");
-        return;
+      // 3. પ્લાન્ટ અને સાઈટનું નામ નક્કી કરવું
+      let targetPlantId = (!formPlantFilter || formPlantFilter === 'all') ? null : formPlantFilter;
+      
+      let targetSiteName = 'General';
+      if (activeModal === 'party') {
+        targetSiteName = 'Plant Level (General)';
+      } else if (assignTarget === 'plant') {
+        if (formPlantFilter && formPlantFilter !== 'all') {
+          const plantObj = (plants || []).find(p => p.id === formPlantFilter);
+          targetSiteName = plantObj ? plantObj.plant_name : 'Plant Level';
+        } else {
+          targetSiteName = 'All Plants (General)';
+        }
+      } else if (assignTarget === 'site' || assignTarget === 'both') {
+        targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
       }
-    }
 
-    // 2. પ્લાન્ટ અને સાઈટનું નામ નક્કી કરવું
-    let targetPlantId = (!formPlantFilter || formPlantFilter === 'all') ? null : formPlantFilter;
-    
-    let targetSiteName = 'General';
-    if (activeModal === 'party') {
-      targetSiteName = 'Plant Level (General)';
-    } else if (assignTarget === 'plant') {
-      if (formPlantFilter && formPlantFilter !== 'all') {
-        const plantObj = (plants || []).find(p => p.id === formPlantFilter);
-        targetSiteName = plantObj ? plantObj.plant_name : 'Plant Level';
-      } else {
-        targetSiteName = 'All Plants (General)';
-      }
-    } else if (assignTarget === 'site' || assignTarget === 'both') {
-      targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
-    }
+      // 4. ડેટાબેઝમાં સેવ કરવા માટેનો પ્લેલોડ
+      const payload = { 
+        plant_id: targetPlantId, 
+        name: formName.trim(), 
+        state: formStateFilter || '', 
+        company_id: userCompanyId, // 👈 Company ID સેવ થશે
 
-  // 3. ડેટાબેઝમાં સેવ કરવા માટેનો પ્લેલોડ
-    const payload = { 
-      plant_id: targetPlantId, 
-      name: formName.trim(), 
-      state: formStateFilter || '', 
+        ...(activeModal !== 'material' && { 
+          company_name: formCompanyName.trim() || '', 
+          mobile: formMobile.trim() || '' 
+        }),
+        ...(activeModal !== 'party' && { site_name: targetSiteName }),
+        ...(activeModal === 'material' && { item_type: materialItemType }), 
+        ...(activeModal === 'supplier' && { 
+          materials_supplied: supplierMaterialsList.map(m => m.materialName).filter(Boolean) 
+        })
+      };
+
+      const { error: saveErr } = await supabase.from(tableName).insert([payload]);
+      if (saveErr) return showAlert("Save Error: " + saveErr.message);
       
-      // 🎯 જો મટીરિયલ ન હોય તો જ company_name અને mobile સેવ થશે
-      ...(activeModal !== 'material' && { 
-        company_name: formCompanyName.trim() || '', 
-        mobile: formMobile.trim() || '' 
-      }),
-      
-      // 🎯 activeModal === 'party' હોય ત્યારે site_name ડેટાબેઝમાં જશે નહીં
-      ...(activeModal !== 'party' && { site_name: targetSiteName }),
-      
-      // 🎯 જો મટીરિયલ હોય તો item_type સેવ થશે
-      ...(activeModal === 'material' && { item_type: materialItemType }), 
-      
-      // 🎯 જો સપ્લાયર હોય તો મટીરિયલ્સની લિસ્ટ JSON એરે તરીકે સેવ થશે
-      ...(activeModal === 'supplier' && { 
-        materials_supplied: supplierMaterialsList.map(m => m.materialName).filter(Boolean) 
-      })
-    };
+      // 5. જો લેબર હોય તો તેના મલ્ટીપલ રેટ્સ સેવ કરવા
+      if (activeModal === 'labour') {
+        const plantObj = plants.find(p => p.id === formPlantFilter);
+        const plantNameStr = plantObj ? plantObj.plant_name : 'General';
 
-    const { error: saveErr } = await supabase.from(tableName).insert([payload]);
-
-    if (saveErr) {
-     showAlert("Save Error: " + saveErr.message);
-      return;
-    }
-    
-    // 4. જો લેબર હોય તો તેના મલ્ટીપલ રેટ્સ સેવ કરવા
-    if (activeModal === 'labour') {
-      const plantObj = plants.find(p => p.id === formPlantFilter);
-      const plantNameStr = plantObj ? plantObj.plant_name : 'General';
-
-      for (let item of labourRatesList) {
-        if (item.rate) {
-          const { error: rateErr } = await supabase.from('labour_product_rates').insert([{
-            plant_name: plantNameStr,
-            team_name: formName.trim(),
-            work_type: item.workType,
-            product_name: item.workType === 'Product Rate' ? item.product : 'Other Department Work',
-            product_size: item.workType === 'Product Rate' ? item.size : '-',
-            uom: item.uom,
-            rate: Number(item.rate),
-            effective_from: item.effectiveDate
-          }]);
-
-          if (rateErr) {
-           showAlert("Rate Save Error: " + rateErr.message);
-            return;
+        for (let item of labourRatesList) {
+          if (item.rate) {
+            await supabase.from('labour_product_rates').insert([{
+              plant_name: plantNameStr,
+              team_name: formName.trim(),
+              work_type: item.workType,
+              product_name: item.workType === 'Product Rate' ? item.product : 'Other Department Work',
+              product_size: item.workType === 'Product Rate' ? item.size : '-',
+              uom: item.uom,
+              rate: Number(item.rate),
+              effective_from: item.effectiveDate,
+              company_id: userCompanyId // 👈 Rates માં પણ Company ID સેવ થશે
+            }]);
           }
         }
       }
-    }
 
-   showAlert("✅ Successfully Added!"); 
-    setActiveModal(null); 
-    setAssignTarget('site'); 
-    setFormSite('all'); 
-    setFormPlantFilter('all'); 
-    setFormStateFilter('');
-    setFormName(''); 
-    setFormCompanyName(''); 
-    setFormMobile(''); 
-    setMaterialItemType('Raw Material'); 
-    setSupplierMaterialsList([{ materialName: '' }]); 
-    setLabourRatesList([{ workType: 'Product Rate', product: '', size: '', uom: 'Nos', rate: '', effectiveDate: new Date().toISOString().split('T')[0] }]);
-    loadAllData(); 
+      showAlert("✅ Successfully Added!"); 
+      setActiveModal(null); setAssignTarget('site'); setFormSite('all'); setFormPlantFilter('all'); 
+      setFormStateFilter(''); setFormName(''); setFormCompanyName(''); setFormMobile(''); 
+      setMaterialItemType('Raw Material'); setSupplierMaterialsList([{ materialName: '' }]); 
+      setLabourRatesList([{ workType: 'Product Rate', product: '', size: '', uom: 'Nos', rate: '', effectiveDate: new Date().toISOString().split('T')[0] }]);
+      loadAllData(); 
+    } catch (err) {
+      showAlert("System Error: " + err.message);
+    }
   }
 const handleSaveProduct = async () => {
     if (!productName.trim()) { showAlert("Please enter product name!"); return; }
     
-    let targetPlantId = !formPlantFilter || formPlantFilter === 'all' ? null : formPlantFilter;
-    let selectedStateVal = formStateFilter || '';
+    try {
+      // 1. Login karela user no company_id get karvo
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) throw new Error("User session expired.");
 
-    let targetSiteName = 'General';
-    if (assignTarget === 'plant') {
-      if (formPlantFilter && formPlantFilter !== 'all') {
-        const plantObj = (plants || []).find(p => p.id === formPlantFilter);
-        targetSiteName = plantObj ? plantObj.plant_name : 'Plant Level';
-      } else {
-        targetSiteName = 'All Plants (General)';
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('company_id')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profileData) throw new Error("Company ID fetching failed.");
+
+      let targetPlantId = !formPlantFilter || formPlantFilter === 'all' ? null : formPlantFilter;
+      let selectedStateVal = formStateFilter || '';
+
+      let targetSiteName = 'General';
+      if (assignTarget === 'plant') {
+        if (formPlantFilter && formPlantFilter !== 'all') {
+          const plantObj = (plants || []).find(p => p.id === formPlantFilter);
+          targetSiteName = plantObj ? plantObj.plant_name : 'Plant Level';
+        } else {
+          targetSiteName = 'All Plants (General)';
+        }
+      } else if (assignTarget === 'site' || assignTarget === 'both') {
+        targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
       }
-    } else if (assignTarget === 'site' || assignTarget === 'both') {
-      targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
-    }
 
-    const payload = {
-      site_name: targetSiteName,
-      plant_id: targetPlantId,
-      state: selectedStateVal,
-      name: productName.trim(),
-      product_size: productSize.trim(),
-      product_category: productCategory.trim(),
-      expected_m3: expectedM3 ? Number(expectedM3) : 0,
-      effective_date: effectiveDate || new Date().toISOString().split('T')[0], // 👈 Effective Date સેટ થઈ ગઈ
-      bom_items: bomItems,
-      qty_per_line: (productName.toLowerCase().includes('panel') || productName.toLowerCase().includes('pa')) && qtyPerLine ? Number(qtyPerLine) : 30 // 👈 ડેટાબેઝમાં સેવ થશે
-    };
+      // 2. Payload ma company_id sathe jodi didhu che
+      const payload = {
+        site_name: targetSiteName,
+        plant_id: targetPlantId,
+        state: selectedStateVal,
+        name: productName.trim(),
+        product_size: productSize.trim(),
+        product_category: productCategory.trim(),
+        expected_m3: expectedM3 ? Number(expectedM3) : 0,
+        effective_date: effectiveDate || new Date().toISOString().split('T')[0],
+        bom_items: bomItems,
+        qty_per_line: (productName.toLowerCase().includes('panel') || productName.toLowerCase().includes('pa')) && qtyPerLine ? Number(qtyPerLine) : 30,
+        company_id: profileData.company_id // 👈 Company ID add thai gayo
+      };
 
-    let error;
-    if (editId) {
-      const res = await supabase.from('plant_work_descriptions').update(payload).eq('id', editId);
-      error = res.error;
-    } else {
-      const res = await supabase.from('plant_work_descriptions').insert([payload]);
-      error = res.error;
-    }
+      let error;
+      if (editId) {
+        const res = await supabase.from('plant_work_descriptions').update(payload).eq('id', editId);
+        error = res.error;
+      } else {
+        const res = await supabase.from('plant_work_descriptions').insert([payload]);
+        error = res.error;
+      }
 
-    if (error) {
-      showAlert("Error: " + error.message);
-    } else {
-      showAlert(editId ? "✅ Product Successfully Updated!" : "✅ Product & BOM Successfully Added!");
-      setActiveModal(null); 
-      setEditId(null); 
-      setAssignTarget('site'); 
-      setFormSite('all'); 
-      setFormPlantFilter('all'); 
-      setProductName(''); 
-      setProductSize(''); 
-      setProductCategory(''); 
-      setExpectedM3('');
-      setEffectiveDate('');
-      setQtyPerLine('');
-      setBomItems([{ material: '', consumption: '', unit: 'Nos' }]); 
-      loadAllData();
+      if (error) {
+        showAlert("Error: " + error.message);
+      } else {
+        showAlert(editId ? "✅ Product Successfully Updated!" : "✅ Product & BOM Successfully Added!");
+        setActiveModal(null); 
+        setEditId(null); 
+        setAssignTarget('site'); 
+        setFormSite('all'); 
+        setFormPlantFilter('all'); 
+        setProductName(''); 
+        setProductSize(''); 
+        setProductCategory(''); 
+        setExpectedM3('');
+        setEffectiveDate('');
+        setQtyPerLine('');
+        setBomItems([{ material: '', consumption: '', unit: 'Nos' }]); 
+        loadAllData();
+      }
+    } catch (err) {
+      showAlert("System Error: " + err.message);
     }
   };
- const handleSaveTransporter = async () => {
+const handleSaveTransporter = async () => {
     if (!transporterName.trim()) { showAlert("Please enter transporter name!"); return; }
     
-   // 🎯 અહીં પણ 'all' ને વેલિડ એન્ટ્રી ગણવી, માત્ર એકદમ ખાલી હોય તો જ અટકવું
     if (assignTarget === 'plant' && (!formPlantFilter || formPlantFilter === '')) { showAlert("Please select plant!"); return; }
     if (assignTarget === 'site' && !formSite) { showAlert("Please select site!"); return; }
     if (assignTarget === 'both' && ((!formPlantFilter || formPlantFilter === '') || !formSite)) { showAlert("Please select both plant and site!"); return; }
 
-    // 🎯 ૧. ડુપ્લિકેટ ટ્રાન્સપોર્ટર ચેક કરવાનું લોજિક
-    const { data: existingTrans, error: searchErr } = await supabase
-      .from('site_transporters')
-      .select('transporter_name')
-      .ilike('transporter_name', transporterName.trim());
+    try {
+      // 1. Company ID મેળવો
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', authData.user.id).single();
+      const userCompanyId = profileData?.company_id;
 
-    if (searchErr) {
-      showAlert("Error checking duplicate: " + searchErr.message);
-      return;
-    }
+      // 2. ડુપ્લિકેટ ચેક (માત્ર પોતાની કંપની માટે)
+      const { data: existingTrans, error: searchErr } = await supabase
+        .from('site_transporters')
+        .select('transporter_name')
+        .ilike('transporter_name', transporterName.trim())
+        .eq('company_id', userCompanyId); // 👈 Company filter
 
-    if (existingTrans && existingTrans.length > 0) {
-      showAlert("❌ આ નામનું ટ્રાન્સપોર્ટ પહેલેથી જ અવેલેબલ છે! ડુપ્લિકેટ એન્ટ્રી બંધ છે.");
-      return;
-    }
+      if (searchErr) return showAlert("Error checking duplicate: " + searchErr.message);
+      if (existingTrans && existingTrans.length > 0) return showAlert("❌ આ નામનું ટ્રાન્સપોર્ટ પહેલેથી જ અવેલેબલ છે!");
 
-    // 🎯 ૨. પ્લાન્ટ અને સાઈટનું નામ નક્કી કરવું (Both માટે કમ્બાઈન્ડ નામ)
-    let targetPlantId = (!formPlantFilter || formPlantFilter === 'all') ? null : formPlantFilter;
-    
-    let targetSiteName = 'General';
-    if (assignTarget === 'plant') {
-      if (formPlantFilter && formPlantFilter !== 'all') {
+      let targetPlantId = (!formPlantFilter || formPlantFilter === 'all') ? null : formPlantFilter;
+      let targetSiteName = 'General';
+      
+      if (assignTarget === 'plant') {
+        if (formPlantFilter && formPlantFilter !== 'all') {
+          const plantObj = (plants || []).find(p => p.id === formPlantFilter);
+          targetSiteName = plantObj ? `Plant: ${plantObj.plant_name}` : 'Plant Level';
+        } else {
+          targetSiteName = 'All Plants (General)';
+        }
+      } else if (assignTarget === 'site') {
+        targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
+      } else if (assignTarget === 'both') {
         const plantObj = (plants || []).find(p => p.id === formPlantFilter);
-        targetSiteName = plantObj ? `Plant: ${plantObj.plant_name}` : 'Plant Level';
-      } else {
-        targetSiteName = 'All Plants (General)';
+        const plantStr = plantObj ? plantObj.plant_name : 'Plant';
+        const siteStr = formSite === 'all' ? 'All Sites' : formSite;
+        targetSiteName = `${plantStr} + ${siteStr}`;
       }
-    } else if (assignTarget === 'site') {
-      targetSiteName = (formSite === 'all' ? 'All Sites (General)' : formSite);
-    } else if (assignTarget === 'both') {
-      const plantObj = (plants || []).find(p => p.id === formPlantFilter);
-      const plantStr = plantObj ? plantObj.plant_name : 'Plant';
-      const siteStr = formSite === 'all' ? 'All Sites' : formSite;
-      targetSiteName = `${plantStr} + ${siteStr}`; // 👈 હવે પ્લાન્ટ અને સાઈટ બંને દેખાશે
-    }
 
-    const payload = {
-      plant_id: targetPlantId,
-      site_name: targetSiteName,
-      state: formStateFilter || '',
-      transporter_name: transporterName.trim(),
-      company_name: formCompanyName.trim() || '',
-      mobile: formMobile.trim() || '',
-      vehicles_list: transporterVehicles.filter(v => v.vehicleNo.trim() !== '')
-    };
+      const payload = {
+        plant_id: targetPlantId,
+        site_name: targetSiteName,
+        state: formStateFilter || '',
+        transporter_name: transporterName.trim(),
+        company_name: formCompanyName.trim() || '',
+        mobile: formMobile.trim() || '',
+        vehicles_list: transporterVehicles.filter(v => v.vehicleNo.trim() !== ''),
+        company_id: userCompanyId // 👈 Company ID સેવ થશે
+      };
 
-    const { error } = await supabase.from('site_transporters').insert([payload]);
+      const { error } = await supabase.from('site_transporters').insert([payload]);
 
-    if (error) {
-      showAlert("Error saving transporter: " + error.message);
-    } else {
-      showAlert("✅ Transporter & Vehicles Successfully Added!");
-      setActiveModal(null);
-      setTransporterName('');
-      setFormCompanyName('');
-      setFormMobile('');
-      setTransporterVehicles([{ vehicleNo: '', driverName: '', phone: '' }]);
-      setAssignTarget('site');
-      setFormSite('all');
-      setFormPlantFilter('all');
-      setFormStateFilter('');
-      loadAllData();
+      if (error) showAlert("Error saving transporter: " + error.message);
+      else {
+        showAlert("✅ Transporter & Vehicles Successfully Added!");
+        setActiveModal(null); setTransporterName(''); setFormCompanyName(''); setFormMobile('');
+        setTransporterVehicles([{ vehicleNo: '', driverName: '', phone: '' }]);
+        setAssignTarget('site'); setFormSite('all'); setFormPlantFilter('all'); setFormStateFilter('');
+        loadAllData();
+      }
+    } catch (err) {
+      showAlert("System Error: " + err.message);
     }
   };
 const handleUpdateSite = async (id) => {
-    if (!editSiteForm.site_name.trim()) { 
-      showAlert("Please enter site name!"); 
-      return; 
-    }
+    if (!editSiteForm.site_name.trim()) { showAlert("Please enter site name!"); return; }
 
-    // 🎯 ૧. ડુપ્લિકેટ નામ ચેક કરવું (પોતાની આઈડી છોડીને)
-    const { data: duplicateCheck, error: checkErr } = await supabase
-      .from('sites')
-      .select('id, site_name')
-      .ilike('site_name', editSiteForm.site_name.trim())
-      .neq('id', id);
+    try {
+      // Company ID મેળવો
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', authData.user.id).single();
+      const userCompanyId = profileData?.company_id;
 
-    if (checkErr) {
-      showAlert("Error checking duplicate: " + checkErr.message);
-      return;
-    }
+      // ડુપ્લિકેટ નામ ચેક કરવું (માત્ર પોતાની કંપનીમાં)
+      const { data: duplicateCheck, error: checkErr } = await supabase
+        .from('sites')
+        .select('id, site_name')
+        .ilike('site_name', editSiteForm.site_name.trim())
+        .eq('company_id', userCompanyId) // 👈
+        .neq('id', id);
 
-    if (duplicateCheck && duplicateCheck.length > 0) {
-      showAlert("❌ આ નામની સાઈટ પહેલેથી જ અવેલેબલ છે! ડુપ્લિકેટ એન્ટ્રી બંધ છે.");
-      return;
-    }
+      if (checkErr) return showAlert("Error checking duplicate: " + checkErr.message);
+      if (duplicateCheck && duplicateCheck.length > 0) return showAlert("❌ આ નામની સાઈટ પહેલેથી જ અવેલેબલ છે!");
 
-    // 🎯 ૨. 'sites' ટેબલ અપડેટ કરવું
-    const { error: siteErr } = await supabase
-      .from('sites')
-      .update({
+      // સાઇટ અપડેટ
+      const { error: siteErr } = await supabase.from('sites').update({
         site_name: editSiteForm.site_name.trim(),
         address: editSiteForm.address ? editSiteForm.address.trim() : '',
         state: editSiteForm.state,
         phone: editSiteForm.phone ? editSiteForm.phone.trim() : ''
-      })
-      .eq('id', id);
+      }).eq('id', id);
 
-    if (siteErr) {
-      showAlert("Error updating site: " + siteErr.message);
-      return;
+      if (siteErr) return showAlert("Error updating site: " + siteErr.message);
+
+      // જૂના રેકોર્ડ ડીલીટ કરી નવા વર્ક (BOM) ઇન્સર્ટ કરવા
+      const oldSiteName = sites.find(s => s.id === id)?.site_name;
+      if (oldSiteName) {
+        await supabase.from('site_bom').delete().eq('site_name', oldSiteName).eq('company_id', userCompanyId);
+      }
+
+      if (Array.isArray(editSiteForm.works_list) && editSiteForm.works_list.length > 0) {
+        const rowsToInsert = editSiteForm.works_list.map(w => ({
+          site_name: editSiteForm.site_name.trim(),
+          work_name: w.work_name ? w.work_name.trim() : 'General Work',
+          work_size: w.work_size ? w.work_size.trim() : '-',
+          work_category: w.work_category ? w.work_category.trim() : '-',
+          expected_m3: w.expected_m3 ? parseFloat(w.expected_m3) : null,
+          effective_date: w.effective_date || new Date().toISOString().split('T')[0],
+          bom_items: w.bom_items || [],
+          company_id: userCompanyId // 👈 નવું BOM એડ કરતી વખતે Company ID
+        }));
+
+        const { error: bomErr } = await supabase.from('site_bom').insert(rowsToInsert);
+        if (bomErr) console.error("Error inserting BOM works:", bomErr);
+      }
+
+      showAlert("✅ Site & All Works BOM Successfully Updated!");
+      setEditingSiteId(null);
+      loadAllData();
+    } catch(err) {
+      showAlert("System Error: " + err.message);
     }
+  };
+const handleGenericUpdate = async (tableName, id, formData) => {
+  if (tableName === 'site_vendors') {
+    if (!formData.company_name || !formData.company_name.trim()) return showAlert("Please enter company name!"); 
+  } else {
+    if (!formData.name || !formData.name.trim()) return showAlert("Please enter name!"); 
+  }
+  
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', authData.user.id).single();
+    const userCompanyId = profileData?.company_id;
 
-    // 🎯 ૩. 'site_bom' ટેબલ માટે જૂના રેકોર્ડ ડિલીટ કરી નવા બધા જ વર્ક ઇન્સર્ટ કરવા
-    const oldSiteName = sites.find(s => s.id === id)?.site_name;
-    if (oldSiteName) {
-      await supabase.from('site_bom').delete().eq('site_name', oldSiteName);
-    }
+    // જો ટેબલ પ્લેન્ટ વર્ક ડિસ્ક્રિપ્શન હોય તો નામ + સાઇઝ બંને ચેક કરવા અથવા ડુપ્લિકેટ ચેકને ટેબલ મુજબ સેફ કરવો
+    if (tableName === 'plant_work_descriptions') {
+      const { data: duplicateCheck, error: checkErr } = await supabase
+        .from(tableName)
+        .select('id, name, product_size')
+        .ilike('name', formData.name.trim())
+        .eq('product_size', formData.product_size || '')
+        .eq('company_id', userCompanyId) // 👈 માત્ર આ જ કંપનીમાં ડુપ્લિકેટ ચેક કરશે
+        .neq('id', id);
 
-    if (Array.isArray(editSiteForm.works_list) && editSiteForm.works_list.length > 0) {
-      const rowsToInsert = editSiteForm.works_list.map(w => ({
-        site_name: editSiteForm.site_name.trim(),
-        work_name: w.work_name ? w.work_name.trim() : 'General Work',
-        work_size: w.work_size ? w.work_size.trim() : '-',
-        work_category: w.work_category ? w.work_category.trim() : '-',
-        expected_m3: w.expected_m3 ? parseFloat(w.expected_m3) : null,
-        effective_date: new Date().toISOString().split('T')[0],
-        bom_items: w.bom_items || []
-      }));
+      if (checkErr) return showAlert("Error checking duplicate: " + checkErr.message);
 
-      const { error: bomErr } = await supabase.from('site_bom').insert(rowsToInsert);
-      if (bomErr) {
-        console.error("Error inserting BOM works:", bomErr);
+      if (duplicateCheck && duplicateCheck.length > 0) {
+        return showAlert("❌ આ નામ અને સાઇઝની એન્ટ્રી પહેલેથી જ તમારી કંપનીમાં અવેલેબલ છે!");
       }
     }
 
-    showAlert("✅ Site & All Works BOM Successfully Updated!");
-    setEditingSiteId(null);
-    loadAllData();
-  };
-const handleGenericUpdate = async (tableName, id, formData) => {
-  // 🎯 જો ટેબલ 'site_vendors' હોય તો name ના બદલે company_name ચેક કરો
-  if (tableName === 'site_vendors') {
-    if (!formData.company_name || !formData.company_name.trim()) { 
-      showAlert("Please enter company name!"); 
-      return; 
-    }
-  } else {
-    // બાકીના બધા ટેબલ માટે જૂનું નામ ચેક કરવાનું ચાલુ રહેશે
-    if (!formData.name || !formData.name.trim()) { 
-      showAlert("Please enter name!"); 
-      return; 
-    }
-  }
-  
-  // બાકીનો અપડેટ કરવાનો કોડ...
-  // 🎯 જો ટેબલ પ્લેન્ટ વર્ક ડિસ્ક્રિપ્શન હોય તો નામ + સાઇઝ બંને ચેક કરવા અથવા ડુપ્લિકેટ ચેકને ટેબલ મુજબ સેફ કરવો
-  if (tableName === 'plant_work_descriptions') {
-    const { data: duplicateCheck, error: checkErr } = await supabase
+    // ડેટાબેઝ અપડેટ કરો
+    const { error } = await supabase
       .from(tableName)
-      .select('id, name, product_size')
-      .ilike('name', formData.name.trim())
-      .eq('product_size', formData.product_size || '')
-      .neq('id', id); // 👈 પોતાની આઈડી છોડીને જ ચેક કરશે
+      .update(formData)
+      .eq('id', id);
 
-    if (checkErr) {
-      showAlert("Error checking duplicate: " + checkErr.message);
-      return;
+    if (error) {
+      showAlert("Error updating: " + error.message);
+    } else {
+      showAlert("✅ Successfully Updated!");
+      setEditingListId(null);
+      loadAllData();
     }
-
-    if (duplicateCheck && duplicateCheck.length > 0) {
-      showAlert("❌ આ નામ અને સાઇઝની એન્ટ્રી પહેલેથી જ અવેલેબલ છે!");
-      return;
-    }
-  }
-
-  // ડેટાબેઝ અપડેટ કરો
-  const { error } = await supabase
-    .from(tableName)
-    .update(formData)
-    .eq('id', id);
-
-  if (error) {
-    showAlert("Error updating: " + error.message);
-  } else {
-    showAlert("✅ Successfully Updated!");
-    setEditingListId(null);
-    loadAllData();
+  } catch(err) {
+      showAlert("System Error: " + err.message);
   }
 };
-  const handleTransporterUpdate = async (id, formData) => {
+ const handleTransporterUpdate = async (id, formData) => {
     if (!formData.transporter_name || !formData.transporter_name.trim()) {
       showAlert("Please enter transporter name!");
       return;
     }
 
-    const payload = {
-      transporter_name: formData.transporter_name.trim(),
-      company_name: formData.company_name ? formData.company_name.trim() : '',
-      mobile: formData.mobile ? formData.mobile.trim() : '',
-      vehicles_list: Array.isArray(formData.vehicles_list) ? formData.vehicles_list.filter(v => v.vehicleNo && v.vehicleNo.trim() !== '') : []
-    };
+    try {
+      const payload = {
+        transporter_name: formData.transporter_name.trim(),
+        company_name: formData.company_name ? formData.company_name.trim() : '',
+        mobile: formData.mobile ? formData.mobile.trim() : '',
+        vehicles_list: Array.isArray(formData.vehicles_list) ? formData.vehicles_list.filter(v => v.vehicleNo && v.vehicleNo.trim() !== '') : []
+      };
 
-    const { error } = await supabase
-      .from('site_transporters')
-      .update(payload)
-      .eq('id', id);
+      const { error } = await supabase
+        .from('site_transporters')
+        .update(payload)
+        .eq('id', id);
 
-    if (error) {
-      showAlert("Error updating transporter: " + error.message);
-    } else {
-      showAlert("✅ Transporter Successfully Updated!");
-      setEditingListId(null);
-      loadAllData();
+      if (error) {
+        showAlert("Error updating transporter: " + error.message);
+      } else {
+        showAlert("✅ Transporter Successfully Updated!");
+        setEditingListId(null);
+        loadAllData();
+      }
+    } catch (err) {
+      showAlert("System Error: " + err.message);
     }
   };
 const handleLabourUpdate = async (contractorId, formData) => {
-    if (!formData.name || !formData.name.trim()) { 
-      showAlert("Please enter Labour/Team name!"); 
-      return; 
-    }
+    if (!formData.name || !formData.name.trim()) { showAlert("Please enter Labour/Team name!"); return; }
 
-    // 1. ડેટાબેઝમાંથી જૂનો રેકોર્ડ શોધો
-    const { data: oldData, error: fetchError } = await supabase
-      .from('contractors')
-      .select('*')
-      .eq('id', contractorId)
-      .single();
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', authData.user.id).single();
+      const userCompanyId = profileData?.company_id;
 
-    if (fetchError) {
-      showAlert("Error fetching record: " + fetchError.message);
-      return;
-    }
+      const { data: oldData, error: fetchError } = await supabase.from('contractors').select('*').eq('id', contractorId).single();
+      if (fetchError) return showAlert("Error fetching record: " + fetchError.message);
 
-    // 2. ચેક કરો કે પ્લાન્ટ અથવા સાઇટ બદલાયા છે કે નહીં
-    const oldPlantId = oldData.plant_id ? oldData.plant_id.toString() : '';
-    const newPlantId = formData.plant_id ? formData.plant_id.toString() : '';
-    
-    const isPlantChanged = oldPlantId !== newPlantId;
-    const isSiteChanged = oldData.site_name && formData.site_name && (oldData.site_name !== formData.site_name);
-
-    let targetContractorId = contractorId;
-
-    if (isPlantChanged || isSiteChanged) {
-      // 🎯 3. જો લોકેશન બદલાયું હોય (Transfer):
-      // A. જૂના રેકોર્ડને ઇનએક્ટિવ કરો (જેથી હિસ્ટ્રી અને રિપોર્ટ સેફ રહે, પણ લિસ્ટમાં ન દેખાય)
-      await supabase
-        .from('contractors')
-        .update({ is_active: false })
-        .eq('id', contractorId);
-
-      // B. નવા લોકેશન માટે નવો એક્ટિવ રેકોર્ડ INSERT કરો
-      const insertPayload = {
-        name: formData.name.trim(),
-        company_name: formData.company_name ? formData.company_name.trim() : '',
-        mobile: formData.mobile ? formData.mobile.trim() : '',
-        plant_id: formData.plant_id && formData.plant_id !== 'All Plant (General)' ? formData.plant_id : null,
-        site_name: formData.site_name || 'All Sites (General)',
-        state: formData.state || '',
-        is_active: true
-      };
-
-      const { data: newRec, error: insertErr } = await supabase
-        .from('contractors')
-        .insert([insertPayload])
-        .select()
-        .single();
+      const oldPlantId = oldData.plant_id ? oldData.plant_id.toString() : '';
+      const newPlantId = formData.plant_id ? formData.plant_id.toString() : '';
       
-      if (insertErr) {
-        showAlert("Error transferring labour: " + insertErr.message);
-        return;
-      }
+      const isPlantChanged = oldPlantId !== newPlantId;
+      const isSiteChanged = oldData.site_name && formData.site_name && (oldData.site_name !== formData.site_name);
 
-      targetContractorId = newRec.id;
-      showAlert("✅ સફળતાપૂર્વક નવા લોકેશન પર ટ્રાન્સફર થઈ ગયું (જૂની હિસ્ટ્રી રિપોર્ટ માટે સુરક્ષિત છે)!");
-    } else {
-      // 🎯 4. જો લોકેશન એનું એ જ હોય, તો સાદી રીતે UPDATE કરો
-      const updatePayload = {
-        name: formData.name.trim(),
-        company_name: formData.company_name ? formData.company_name.trim() : '',
-        mobile: formData.mobile ? formData.mobile.trim() : '',
-        plant_id: formData.plant_id && formData.plant_id !== 'All Plant (General)' ? formData.plant_id : null,
-        site_name: formData.site_name || 'All Sites (General)'
-      };
+      let targetContractorId = contractorId;
 
-      const { error: updateErr } = await supabase
-        .from('contractors')
-        .update(updatePayload)
-        .eq('id', contractorId);
+      if (isPlantChanged || isSiteChanged) {
+        // ટ્રાન્સફર કિસ્સામાં જૂનો રેકોર્ડ ઇનએક્ટિવ કરો
+        await supabase.from('contractors').update({ is_active: false }).eq('id', contractorId);
 
-      if (updateErr) {
-        showAlert("Error updating labour: " + updateErr.message);
-        return;
-      }
-      showAlert("✅ સફળતાપૂર્વક અપડેટ થઈ ગયું!");
-    }
-
-   // 5. રેટ્સ મેપિંગ અપડેટ કે ઇન્સર્ટ કરો
-    if (Array.isArray(formData.rates_mapping)) {
-      for (let rateRow of formData.rates_mapping) {
-        if (!rateRow.rate) continue;
-
-        // 🎯 અહીં plant_id પરથી સાચું પ્લાન્ટ નામ શોધો
-        const matchedPlant = (plants || []).find(p => p.id.toString() === (formData.plant_id ? formData.plant_id.toString() : ''));
-        const plantNameStr = matchedPlant ? matchedPlant.plant_name : (formData.plant_name || 'T&J INFRA');
-
-        const ratePayload = {
-          plant_name: plantNameStr, // 👈 હવે નવું પ્લાન્ટ નામ પરફેક્ટ સેવ થશે
-          team_name: formData.name.trim(),
-          work_type: rateRow.work_type || 'Product Rate',
-          product_name: rateRow.work_type === 'Product Rate' ? (rateRow.product_name || '') : 'Other Department Work',
-          product_size: rateRow.work_type === 'Product Rate' ? (rateRow.product_size || rateRow.size || '') : '-',
-          uom: rateRow.uom || 'Nos',
-          rate: Number(rateRow.rate),
-          effective_from: rateRow.effective_from || new Date().toISOString().split('T')[0]
+        // નવો એક્ટિવ રેકોર્ડ INSERT કરો
+        const insertPayload = {
+          name: formData.name.trim(),
+          company_name: formData.company_name ? formData.company_name.trim() : '',
+          mobile: formData.mobile ? formData.mobile.trim() : '',
+          plant_id: formData.plant_id && formData.plant_id !== 'All Plant (General)' ? formData.plant_id : null,
+          site_name: formData.site_name || 'All Sites (General)',
+          state: formData.state || '',
+          is_active: true,
+          company_id: userCompanyId // 👈 Company ID 
         };
 
-        if (rateRow.id) {
-          await supabase.from('labour_product_rates').update(ratePayload).eq('id', rateRow.id);
-        } else {
-          await supabase.from('labour_product_rates').insert([ratePayload]);
+        const { data: newRec, error: insertErr } = await supabase.from('contractors').insert([insertPayload]).select().single();
+        if (insertErr) return showAlert("Error transferring labour: " + insertErr.message);
+
+        targetContractorId = newRec.id;
+        showAlert("✅ સફળતાપૂર્વક નવા લોકેશન પર ટ્રાન્સફર થઈ ગયું (જૂની હિસ્ટ્રી રિપોર્ટ માટે સુરક્ષિત છે)!");
+      } else {
+        // સાદી રીતે UPDATE
+        const updatePayload = {
+          name: formData.name.trim(),
+          company_name: formData.company_name ? formData.company_name.trim() : '',
+          mobile: formData.mobile ? formData.mobile.trim() : '',
+          plant_id: formData.plant_id && formData.plant_id !== 'All Plant (General)' ? formData.plant_id : null,
+          site_name: formData.site_name || 'All Sites (General)'
+        };
+
+        const { error: updateErr } = await supabase.from('contractors').update(updatePayload).eq('id', contractorId);
+        if (updateErr) return showAlert("Error updating labour: " + updateErr.message);
+        showAlert("✅ સફળતાપૂર્વક અપડેટ થઈ ગયું!");
+      }
+
+      // રેટ્સ મેપિંગ અપડેટ કે ઇન્સર્ટ કરો
+      if (Array.isArray(formData.rates_mapping)) {
+        for (let rateRow of formData.rates_mapping) {
+          if (!rateRow.rate) continue;
+
+          const matchedPlant = (plants || []).find(p => p.id.toString() === (formData.plant_id ? formData.plant_id.toString() : ''));
+          const plantNameStr = matchedPlant ? matchedPlant.plant_name : (formData.plant_name || 'T&J INFRA');
+
+          const ratePayload = {
+            plant_name: plantNameStr,
+            team_name: formData.name.trim(),
+            work_type: rateRow.work_type || 'Product Rate',
+            product_name: rateRow.work_type === 'Product Rate' ? (rateRow.product_name || '') : 'Other Department Work',
+            product_size: rateRow.work_type === 'Product Rate' ? (rateRow.product_size || rateRow.size || '') : '-',
+            uom: rateRow.uom || 'Nos',
+            rate: Number(rateRow.rate),
+            effective_from: rateRow.effective_from || new Date().toISOString().split('T')[0],
+            company_id: userCompanyId // 👈 નવો રેટ એડ કરતી વખતે Company ID
+          };
+
+          if (rateRow.id) {
+            await supabase.from('labour_product_rates').update(ratePayload).eq('id', rateRow.id);
+          } else {
+            await supabase.from('labour_product_rates').insert([ratePayload]);
+          }
         }
       }
-    }
 
-    setEditingListId(null);
-    if (typeof loadAllData === 'function') loadAllData();
+      setEditingListId(null);
+      if (typeof loadAllData === 'function') loadAllData();
+    } catch (err) {
+      showAlert("System Error: " + err.message);
+    }
   };
  const handleDelete = async (table, id) => {
     if (!window.confirm("Are you sure you want to delete this?")) return

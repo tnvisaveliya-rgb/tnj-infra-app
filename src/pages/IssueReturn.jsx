@@ -46,44 +46,51 @@ export default function IssueReturnPage({ user }) {
 
   // 1. Fetch Plants
   useEffect(() => {
- const fetchPlants = async () => {
+const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
-        setPlants(data || []);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
+      let permQuery = supabase.from('user_permissions').select('role, assigned_plants, company_id');
       if (userId) {
         permQuery = permQuery.eq('user_id', userId);
       } else {
         permQuery = permQuery.eq('user_id', userEmail);
       }
 
-      const { data: permData, error: permError } = await permQuery.single();
+      const { data: permData, error: permError } = await permQuery.maybeSingle();
 
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
+      if (permError || !permData) {
         setPlants([]); 
         return;
       }
 
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
+      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role) || userEmail === 'infra.tnj@gmail.com';
 
-      setPlants(allowedPlantsData || []);
+      if (adminCheck && permData.company_id) {
+        // 🎯 ADMIN: માત્ર પોતાની કંપનીના જ પ્લાન્ટ્સ બતાવો
+        const { data } = await supabase.from('plants').select('*').eq('company_id', permData.company_id);
+        setPlants(data || []);
+      } else {
+        // 🎯 SUPERVISOR: માત્ર અસાઇન કરેલા Plants
+        let assignedPlantNames = permData.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
 
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
+      }
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
@@ -316,6 +323,19 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
+
+      let currentCompanyId = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {}
       const allTxToInsert = [];
       const stockLedgerRows = [];
 
@@ -351,6 +371,7 @@ export default function IssueReturnPage({ user }) {
             const { error: updateErr } = await supabase
               .from('plant_tool_transactions')
               .update({
+                company_id: currentCompanyId,
                 quantity: updatedQty,
                 issue_date: issueDate,
                 remarks: (existingToolTx.remarks || '') + appendRemark
@@ -361,6 +382,7 @@ export default function IssueReturnPage({ user }) {
 
             // 🎯 લેજરમાં reference_id અને description પાસ કરો
             stockLedgerRows.push({
+              company_id: currentCompanyId,
               date: issueDate,
               plant_name: selectedPlant,
               material_name: mat,
@@ -374,6 +396,7 @@ export default function IssueReturnPage({ user }) {
           } else {
             // નવી એન્ટ્રી માટે લિસ્ટમાં ઉમેરો
             allTxToInsert.push({
+              company_id: currentCompanyId,
               plant_name: selectedPlant,
               material_name: mat,
               category: itm.category || 'Tools and Hardware',
@@ -400,6 +423,7 @@ export default function IssueReturnPage({ user }) {
 
         insertedTxs.forEach((row) => {
           stockLedgerRows.push({
+            company_id: currentCompanyId,
             date: issueDate,
             plant_name: selectedPlant,
             material_name: row.material_name,
@@ -468,6 +492,14 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
+      // 🌟 કરન્ટ યુઝરનો company_id મેળવો
+      let currentCompanyId = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', session?.user?.id || user?.id).maybeSingle();
+        if (profileData && profileData.company_id) currentCompanyId = profileData.company_id;
+      } catch (err) {}
+
       const today = new Date().toISOString().split('T')[0];
 
       // કન્ડિશન સમરી (દા.ત. "1 Good, 2 Needs Repair")
@@ -497,6 +529,7 @@ export default function IssueReturnPage({ user }) {
         await supabase
           .from('plant_tool_transactions')
           .insert([{
+            company_id: currentCompanyId,
             plant_name: selectedReturnTx.plant_name,
             material_name: selectedReturnTx.material_name,
             category: selectedReturnTx.category,
@@ -586,6 +619,11 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
+    let currentCompanyId = null;
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: profileData } = await supabase.from('user_profiles').select('company_id').eq('id', session?.user?.id || user?.id).maybeSingle();
+      if (profileData && profileData.company_id) currentCompanyId = profileData.company_id;
+
       const today = new Date().toISOString().split('T')[0];
 
       // ૧. Transaction સ્ટેટસ અપડેટ કરો
@@ -604,6 +642,7 @@ export default function IssueReturnPage({ user }) {
       const { error: ledgerErr } = await supabase
         .from('material_stock_ledger')
         .insert([{
+          company_id: currentCompanyId,
           date: today,
           plant_name: repairTx.plant_name,
           material_name: repairTx.material_name,

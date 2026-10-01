@@ -3,12 +3,13 @@ import { supabase } from '../lib/supabase';
 import { RotateCcw, Send, Plus, Trash2 } from 'lucide-react';
 import { COMPANY_LOGO_BASE64 } from '../services/logoConfig';
 
+
 export default function SiteMaterialReturnPage({ user }) {
   const [plants, setPlants] = useState([]);
   const [selectedPlant, setSelectedPlant] = useState('');
   const [selectedPlantId, setSelectedPlantId] = useState('');
   const [returnDate, setReturnDate] = useState(new Date().toISOString().split('T')[0]);
-  
+  const [companyDetails, setCompanyDetails] = useState(null);
   const [parties, setParties] = useState([]);
   const [sites, setSites] = useState([]);
   const [products, setProducts] = useState([]);
@@ -55,41 +56,61 @@ export default function SiteMaterialReturnPage({ user }) {
 const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
+
+      // ૧. કરન્ટ યુઝરનો રોલ, અસાઈન પ્લાન્ટ્સ અને company_id મેળવો
+      let permQuery = supabase.from('user_permissions').select('role, assigned_plants, company_id').eq('user_id', currentUser.id);
+      const { data: permData, error: permError } = await permQuery.maybeSingle();
+
+      if (permError || !permData) {
+        setPlants([]);
+        return;
+      }
+// 🌟 નવો ઉમેરેલો કોડ: કંપનીની ડિટેલ્સ ફેચ કરવા માટે
+      if (permData.company_id) {
+       const { data: compData, error: compErr } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', permData.company_id)
+          .maybeSingle();
+          // 👇 Aa 2 line add karo check karva mate
+        console.log("Supabase Company Error:", compErr); 
+        console.log("Fetched Company Data:", compData);
+        
+        if (compData) {
+          setCompanyDetails(compData);
+        }
+        } else {
+        // 👇 Jo user pase company_id nahi hoy to aa error aavse
+        console.warn("⚠️ Aa User na 'user_permissions' ma company_id nathi malyo!"); 
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
+      }
+      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+      if (adminCheck && permData.company_id) {
+        // 🎯 ADMIN: માત્ર પોતાની કંપનીના જ પ્લાન્ટ્સ બતાવો
+        const { data } = await supabase.from('plants').select('*').eq('company_id', permData.company_id);
         setPlants(data || []);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
       } else {
-        permQuery = permQuery.eq('user_id', userEmail);
+        // 🎯 SUPERVISOR: માત્ર અસાઇન કરેલા Plants
+        let assignedPlantNames = permData.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+
+        if (assignedPlantNames.length === 0) {
+          setPlants([]);
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
       }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
-        setPlants([]); 
-        return;
-      }
-
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
-
-      setPlants(allowedPlantsData || []);
-
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
@@ -233,6 +254,20 @@ const fetchPlants = async () => {
 
     setLoading(true);
     try {
+      // 🌟 ૧. કરન્ટ યુઝરનો company_id મેળવો
+      let currentCompanyId = null;
+      try {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
      // 🎯 ૧. બંને લેજર માટે ખાલી એરે બનાવો
 let stockLedgerRows = [];
 let materialLedgerRows = [];
@@ -255,6 +290,7 @@ for (const source of returnSources) {
       // ૧. મેઈન ટેબલમાં ઇન્સર્ટ
       const { data: insertedReturn, error: insErr } = await supabase.from('site_material_returns').insert([
         {
+          company_id: currentCompanyId,
           date: returnDate,
           plant_name: selectedPlant,
           return_no: source.returnNo || 'EMPTY',
@@ -279,6 +315,7 @@ for (const source of returnSources) {
 
         if (item.category === 'Finished Product') {
           stockLedgerRows.push({
+            company_id: currentCompanyId,
             date: returnDate,
             plant_name: selectedPlant,
             product_name: exactProductName,
@@ -290,6 +327,7 @@ for (const source of returnSources) {
         } else {
           // 👈 Raw Material, Consumable, Tools માટે આ લેજરમાં જશે
           materialLedgerRows.push({
+            company_id: currentCompanyId,
             date: returnDate,
             plant_name: selectedPlant,
             material_name: item.material,
@@ -372,6 +410,13 @@ if (materialLedgerRows.length > 0) {
         alert("કૃપા કરીને પૉપ-અપ બ્લોકર બંધ કરો.");
         return;
       }
+// ... (handlePrintReturnSlip નો ઉપરનો ભાગ એમને એમ) ...
+
+      // 🎯 કંપનીની વિગતો માટે ડિફોલ્ટ સેટ કરો (જો કોઈ કારણસર કંપની ડેટા ન મળે તો)
+      const cName = companyDetails?.company_name || 'T&J INFRA';
+      const cLogo = companyDetails?.logo_url || COMPANY_LOGO_BASE64;
+      const cEmail = companyDetails?.email || 'admin@tnjinfra.com';
+      const cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
 
       printWindow.document.write(`
         <html>
@@ -397,18 +442,24 @@ if (materialLedgerRows.length > 0) {
           </head>
           <body>
             <div class="page-border">
-              <img src="${COMPANY_LOGO_BASE64}" class="watermark" alt="Watermark" />
+              <!-- 🎯 ડાયનેમિક વોટરમાર્ક -->
+              <img src="${cLogo}" class="watermark" alt="Watermark" />
               <div class="content-wrapper">
                 <table class="letterhead-table">
                   <tr>
-                    <td style="width: 155px; text-align: left;"><img src="${COMPANY_LOGO_BASE64}" alt="Logo" style="height: 100px; width: auto; object-fit: contain;" /></td>
+                    <!-- 🎯 ડાયનેમિક લોગો -->
+                    <td style="width: 155px; text-align: left;"><img src="${cLogo}" alt="Logo" style="height: 100px; width: auto; max-width: 150px; object-fit: contain;" /></td>
                     <td style="text-align: center;">
-                      <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0;">T&J INFRA</h1>
+                      <!-- 🎯 ડાયનેમિક કંપનીનું નામ -->
+                      <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0; text-transform: uppercase;">${cName}</h1>
                       <p style="font-size: 9px; color: #a32a2a; font-weight: bold; margin: 2px 0 0 0;">(AN ISO 9001:2015, 14001:2015, 45001:2018 CERTIFIED COMPANY)</p>
+                      <!-- 🎯 ડાયનેમિક ઈમેલ -->
+                      <p style="font-size: 10px; color: #2563eb; font-weight: bold; margin: 4px 0 0 0;">Email: ${cEmail}</p>
                     </td>
                   </tr>
                 </table>
-                <div class="address-box">Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057</div>
+                <!-- 🎯 ડાયનેમિક એડ્રેસ -->
+                <div class="address-box">${cAddress}</div>
                 <div class="title-box">Site Material Return Slip</div>
                 <table class="details-table">
                   <tr>

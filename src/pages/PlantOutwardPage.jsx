@@ -13,6 +13,7 @@ export default function PlantOutwardPage({ user }) {
   const [products, setProducts] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
   const [availableSpecs, setAvailableSpecs] = useState({}); // { "itemKey": ["3mm - 4 wires", ...] }
+  const [companyDetails, setCompanyDetails] = useState(null);
   
   const [loading, setLoading] = useState(false);
   const [transporters, setTransporters] = useState([]);
@@ -65,41 +66,59 @@ const [existingBills, setExistingBills] = useState([]);
  const fetchPlants = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
       
-      // 1. ADMIN માટે (બધા જ Plants બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('plants').select('*');
+      // ૧. કરન્ટ યુઝરનો રોલ, અસાઈન પ્લાન્ટ્સ અને company_id મેળવો
+      const { data: permData, error: permErr } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_plants, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+        // 🌟 નવો ઉમેરેલો કોડ: કંપનીની ડિટેલ્સ ફેચ કરવા માટે
+      if (permData && permData.company_id) {
+        const { data: compData, error: compErr } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', permData.company_id)
+          .maybeSingle();
+          
+        console.log("Supabase Company Error:", compErr); 
+        console.log("Fetched Company Data:", compData);
+        
+        if (compData) {
+          setCompanyDetails(compData);
+        }
+      }
+
+      const adminCheck = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+      if (adminCheck && permData.company_id) {
+        // 🎯 એડમિન માટે: માત્ર તેની કંપનીના જ પ્લાન્ટ્સ
+        const { data } = await supabase
+          .from('plants')
+          .select('*')
+          .eq('company_id', permData.company_id);
         setPlants(data || []);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (માત્ર અસાઇન કરેલા Plants બતાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
       } else {
-        permQuery = permQuery.eq('user_id', userEmail);
+        // 🎯 સુપરવાઈઝર માટે: માત્ર અસાઇન કરેલા પ્લાન્ટ્સ
+        let assignedPlantNames = permData?.assigned_plants || [];
+        if (typeof assignedPlantNames === 'string') {
+            try { assignedPlantNames = JSON.parse(assignedPlantNames); } catch(e) { assignedPlantNames = []; }
+        }
+
+        if (assignedPlantNames.length === 0) {
+          setPlants([]); 
+          return;
+        }
+
+        const { data: allowedPlantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .in('plant_name', assignedPlantNames);
+
+        setPlants(allowedPlantsData || []);
       }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      // જો કોઈ પ્લાન્ટ અસાઇન ન હોય અથવા એરર આવે તો ખાલી લિસ્ટ બતાવો
-      if (permError || !permData || !permData.assigned_plants || permData.assigned_plants.length === 0) {
-        setPlants([]); 
-        return;
-      }
-
-      // જે Plants અસાઇન થયા છે, માત્ર તેનો જ ડેટા ફેચ કરો
-      const assignedPlantNames = permData.assigned_plants;
-      const { data: allowedPlantsData } = await supabase
-        .from('plants')
-        .select('*')
-        .in('plant_name', assignedPlantNames);
-
-      setPlants(allowedPlantsData || []);
-
     } catch (err) {
       console.error('Error fetching plants:', err);
       setPlants([]);
@@ -558,6 +577,23 @@ const handleSubmitOutward = async (e) => {
 
     setLoading(true);
     try {
+// 🌟 કરન્ટ યુઝરનો company_id મેળવો
+      let currentCompanyId = null;
+      try {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('company_id')
+          .eq('id', session?.user?.id || user?.id)
+          .maybeSingle();
+
+        if (profileData && profileData.company_id) {
+          currentCompanyId = profileData.company_id;
+        }
+      } catch (err) {
+        console.error("Error fetching company_id:", err);
+      }
+
+
       let stockLedgerRows = [];
       let materialLedgerRows = []; 
       let rowsToInsert = [];
@@ -589,6 +625,7 @@ const handleSubmitOutward = async (e) => {
             }
 
             const singleRowData = {
+              company_id: currentCompanyId,
               date: dprDate,                        
               plant_name: selectedPlant,
               party_name: source.party,
@@ -605,6 +642,7 @@ const handleSubmitOutward = async (e) => {
             };
 
             rowsToInsert.push({ 
+              company_id: currentCompanyId,
               singleRowData, 
               exactProductName, 
               finalSizeVariant, 
@@ -662,6 +700,7 @@ const handleSubmitOutward = async (e) => {
         // કેટેગરી મુજબ સાચા લેજરમાં એન્ટ્રી નાખો
         if (obj.categoryStr.toLowerCase() === 'finished product') {
           stockLedgerRows.push({
+            company_id: currentCompanyId,
             date: dprDate,
             plant_name: selectedPlant,
             product_name: obj.exactProductName,
@@ -672,6 +711,7 @@ const handleSubmitOutward = async (e) => {
           });
         } else {
           materialLedgerRows.push({
+            company_id: currentCompanyId,
             date: dprDate,
             plant_name: selectedPlant,
             material_name: obj.rawMaterial,
@@ -802,76 +842,57 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
         }).join('')
       : `<tr><td colspan="5" style="text-align: center; padding: 10px;">No items found</td></tr>`;
 
+   // 🎯 અહીં કંપનીની ડાયનેમિક વિગતો સેટ કરો
+    const cName = companyDetails?.company_name || 'T&J INFRA';
+    const cLogo = companyDetails?.logo_url || COMPANY_LOGO_BASE64;
+    const cEmail = companyDetails?.email || 'sales@tnjinfra.com';
+    const cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
+    const cWebsite = companyDetails?.website || 'www.tnjinfra.com';
+
     printWindow.document.write(`
       <html>
         <head>
           <title>Delivery Challan - ${dcNumber}</title>
           <style>
+            /* તમારા CSS સ્ટાઈલ્સ એમને એમ રહેશે... */
             body { font-family: 'Arial', sans-serif; color: #000; margin: 0; padding: 10px; background: #fff; }
             .page-border { border: 2px solid #000; padding: 10px 10px 45px 10px; position: relative; min-height: 94vh; box-sizing: border-box; }
-            
-            .watermark {
-              position: absolute;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%);
-              width: 450px;
-              opacity: 0.08;
-              z-index: 0;
-              pointer-events: none;
-            }
-
+            .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 450px; opacity: 0.08; z-index: 0; pointer-events: none; }
             .content-wrapper { position: relative; z-index: 1; }
-
             .letterhead-table { width: 100%; border-collapse: collapse; border-bottom: 2px solid #000; margin-bottom: 5px; }
             .letterhead-table td { border: none; padding: 4px 5px; vertical-align: middle; }
-            
             .address-box { border: 1px solid #000; border-top: none; padding: 5px 10px; font-size: 11px; font-weight: bold; margin-bottom: 0; background: #f8fafc; text-align: center; }
-            
             .capabilities-box { border: 1px solid #000; border-top: 1px solid #000; background: #f1f5f9; padding: 5px 10px; text-align: center; margin-bottom: 0; }
             .capabilities-title { font-size: 11px; font-weight: bold; color: #000; text-transform: uppercase; margin-bottom: 2px; }
             .capabilities-desc { font-size: 10px; color: #334155; line-height: 1.4; }
-
             .contact-box { border: 1px solid #000; border-top: 1px solid #000; padding: 6px 10px; font-size: 11px; margin-bottom: 12px; }
             .contact-box p { margin: 2px 0; font-weight: bold; }
-
             .title-box { text-align: center; background: #e2e8f0; border: 1px solid #000; padding: 6px; font-size: 14px; font-weight: bold; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 1px; }
-
-        
             .details-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; table-layout: fixed; }
             .details-table td { border: 1px solid #000; padding: 10px 14px; vertical-align: top; line-height: 1.6; word-break: break-word; overflow-wrap: break-word; }
-
             table.main-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
             th { background-color: #f1f5f9; color: #000; border: 1px solid #000; padding: 6px; text-align: center; font-size: 12px; }
-        
             .footer-table { width: 100%; border-collapse: collapse; margin-top: 50px; font-size: 12px; }
             .footer-table td { border: none; padding: 10px; font-weight: bold; }
-            
-            .generated-by { 
-              position: absolute; 
-              bottom: 10px; 
-              right: 15px; 
-              font-size: 9px; 
-              color: #64748b; 
-              font-style: italic; 
-            }
+            .generated-by { position: absolute; bottom: 10px; right: 15px; font-size: 9px; color: #64748b; font-style: italic; }
           </style>
         </head>
         <body>
           <div class="page-border">
             
-            <img src="${COMPANY_LOGO_BASE64}" class="watermark" alt="Watermark" />
+            <!-- 🎯 ડાયનેમિક વોટરમાર્ક -->
+            <img src="${cLogo}" class="watermark" alt="Watermark" />
 
             <div class="content-wrapper">
-              
-              
               <table class="letterhead-table">
                 <tr>
                   <td style="width: 155px; text-align: left;">
-                    <img src="${COMPANY_LOGO_BASE64}" alt="Logo" style="height: 100px; width: auto; object-fit: contain; display: block;" />
+                    <!-- 🎯 ડાયનેમિક લોગો -->
+                    <img src="${cLogo}" alt="Logo" style="height: 100px; width: auto; max-width: 150px; object-fit: contain; display: block;" />
                   </td>
                   <td style="text-align: center;">
-                    <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0; letter-spacing: 1px;">T&J INFRA</h1>
+                    <!-- 🎯 ડાયનેમિક નામ -->
+                    <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0; letter-spacing: 1px; text-transform: uppercase;">${cName}</h1>
                     <p style="font-size: 9px; color: #a32a2a; font-weight: bold; margin: 2px 0 0 0;">(AN ISO 9001:2015, 14001:2015, 45001:2018 CERTIFIED COMPANY)</p>
                   </td>
                 </tr>
@@ -880,10 +901,11 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                     <table style="width: 100%; border-collapse: collapse;">
                       <tr>
                         <td style="border: none; text-align: left; font-size: 10px; font-weight: bold; padding: 0; width: 160px;">
-                          Website: <a href="https://www.tnjinfra.com" style="color: #2563eb;">www.tnjinfra.com</a>
+                          Website: <a href="https://${cWebsite}" style="color: #2563eb;">${cWebsite}</a>
                         </td>
                         <td style="border: none; text-align: right; font-size: 10px; font-weight: bold; padding: 0;">
-                          Email: <a href="mailto:sales@tnjinfra.com" style="color: #2563eb;">sales@tnjinfra.com</a>
+                          <!-- 🎯 ડાયનેમિક ઈમેલ -->
+                          Email: <a href="mailto:${cEmail}" style="color: #2563eb;">${cEmail}</a>
                         </td>
                       </tr>
                     </table>
@@ -891,10 +913,10 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                 </tr>
               </table>
 
-              <div class="address-box">
-                Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057
-              </div>
+              <!-- 🎯 ડાયનેમિક એડ્રેસ -->
+              <div class="address-box">${cAddress}</div>
 
+              <!-- બાકીનો તમારો બધો HTML એમને એમ રહેશે... -->
               <div class="capabilities-box">
                 <div class="capabilities-title">OUR CAPABILITIES</div>
                 <div class="capabilities-desc">
@@ -1645,51 +1667,96 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
             </button>
 <button 
   type="button" 
-  onClick={async () => {
+ onClick={async () => {
     if (window.confirm("શું તમે ખરેખર આ આખી આઉટવર્ડ એન્ટ્રી ડિલીટ કરવા માંગો છો?")) {
       try {
         const currentDc = outwardSources[0]?.dcNumber;
 
+        // 🌟 કરન્ટ યુઝરનો company_id મેળવો
+        let currentCompanyId = null;
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const { data: profileData } = await supabase
+            .from('user_profiles')
+            .select('company_id')
+            .eq('id', session?.user?.id || user?.id)
+            .maybeSingle();
+
+          if (profileData && profileData.company_id) {
+            currentCompanyId = profileData.company_id;
+          }
+        } catch (err) {
+          console.error("Error fetching company_id:", err);
+        }
+
         if (currentDc && currentDc !== 'EMPTY') {
-          // ૧. એ જ DC નંબર વાળા બધા રેકૉર્ડ્સના IDs શોધો
-          const { data: matchedRows, error: fetchErr } = await supabase
+          // ૧. 🎯 માત્ર આઉટવર્ડ (OUTWARD) પ્રકારના જ રેકૉર્ડ્સ શોધો જે આ પ્લાન્ટ અને DC નંબરના હોય
+          let query = supabase
             .from('plant_material_outward')
             .select('id')
             .eq('plant_name', selectedPlant)
             .eq('dc_number', currentDc);
 
+          if (currentCompanyId) {
+            query = query.eq('company_id', currentCompanyId);
+          }
+
+          const { data: matchedRows, error: fetchErr } = await query;
           if (fetchErr) throw fetchErr;
 
           if (matchedRows && matchedRows.length > 0) {
             const idsToDelete = matchedRows.map(r => r.id);
 
-            // ૨. લેજરમાંથી અને મેઈન ટેબલમાંથી એ બધા IDs ડિલીટ કરો
-            await supabase.from('stock_ledger').delete().in('reference_id', idsToDelete);
-            await supabase.from('material_stock_ledger').delete().in('reference_id', idsToDelete);
-            
-            const { error: delErr } = await supabase
-              .from('plant_material_outward')
+            // ૨. 🎯 લેજરમાંથી માત્ર અને માત્ર 'OUTWARD' ટ્રાન્ઝેક્શન ટાઇપ વાળા જ રેકૉર્ડ્સ ડિલીટ કરો (પ્રોડક્શન કે ઇનવર્ડ બચાઈ રહેશે!)
+            let stockDelQuery = supabase.from('stock_ledger')
               .delete()
-              .in('id', idsToDelete);
+              .eq('transaction_type', 'OUTWARD') // 👈 આ સૌથી મહત્ત્વનું ફિલ્ટર છે
+              .in('reference_id', idsToDelete);
 
+            let matDelQuery = supabase.from('material_stock_ledger')
+              .delete()
+              .eq('transaction_type', 'OUTWARD') // 👈 આ પણ આઉટવર્ડ પૂરતું સીમિત રહેશે
+              .in('reference_id', idsToDelete);
+            
+            if (currentCompanyId) {
+              stockDelQuery = stockDelQuery.eq('company_id', currentCompanyId);
+              matDelQuery = matDelQuery.eq('company_id', currentCompanyId);
+            }
+
+            await stockDelQuery;
+            await matDelQuery;
+            
+            // ૩. 🎯 મેઈન આઉટવર્ડ ટેબલમાંથી પણ એ જ રેકૉર્ડ્સ ડિલીટ કરો
+            let outwardDelQuery = supabase.from('plant_material_outward').delete().in('id', idsToDelete);
+            if (currentCompanyId) {
+              outwardDelQuery = outwardDelQuery.eq('company_id', currentCompanyId);
+            }
+
+            const { error: delErr } = await outwardDelQuery;
             if (delErr) throw delErr;
           }
         } else {
-          // જો DC નંબર ન હોય તો સિંગલ editingId થી ડિલીટ કરો
-          await supabase.from('stock_ledger').delete().eq('reference_id', editingId);
-          await supabase.from('material_stock_ledger').delete().eq('reference_id', editingId);
-          
-          const { error: delErr } = await supabase
-            .from('plant_material_outward')
-            .delete()
-            .eq('id', editingId);
+          // જો DC નંબર ન હોય તો માત્ર સિંગલ editingId અને 'OUTWARD' ટાઇપ સાથે ડિલીટ કરો
+          let stockDelQuery = supabase.from('stock_ledger').delete().eq('transaction_type', 'OUTWARD').eq('reference_id', editingId);
+          let matDelQuery = supabase.from('material_stock_ledger').delete().eq('transaction_type', 'OUTWARD').eq('reference_id', editingId);
+          let outwardDelQuery = supabase.from('plant_material_outward').delete().eq('id', editingId);
 
+          if (currentCompanyId) {
+            stockDelQuery = stockDelQuery.eq('company_id', currentCompanyId);
+            matDelQuery = matDelQuery.eq('company_id', currentCompanyId);
+            outwardDelQuery = outwardDelQuery.eq('company_id', currentCompanyId);
+          }
+
+          await stockDelQuery;
+          await matDelQuery;
+          
+          const { error: delErr } = await outwardDelQuery;
           if (delErr) throw delErr;
         }
 
-       triggerAlert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
+        triggerAlert("✅ આઉટવર્ડ એન્ટ્રી સફળતાપૂર્વક ડિલીટ થઈ ગઈ છે!");
 
-        // ૩. ફોર્મ રિસેટ કરો અને નવો DC નંબર મેળવો
+        // ૪. ફોર્મ રિસેટ કરો અને નવો DC નંબર મેળવો
         let nextDc = '';
         if (selectedPlant) {
           nextDc = await fetchNextDcNumber(selectedPlant);
@@ -1697,7 +1764,7 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
 
         setEditingId(null);
         setExistingBills([]);
-        setDprDate(new Date().toISOString().split('T')[0]); // તારીખ આજની કરી દો
+        setDprDate(new Date().toISOString().split('T')[0]);
         
         setOutwardSources([
           {
