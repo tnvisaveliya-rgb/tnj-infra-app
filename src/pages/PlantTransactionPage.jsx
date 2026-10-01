@@ -37,17 +37,39 @@ export default function MasterTransactionHub({ adminUser }) {
   // ==========================================
   // 🛠️ Fetch Plants AND Sites Data
   // ==========================================
-  useEffect(() => {
+useEffect(() => {
     const fetchLocationsData = async () => {
       try {
-        const { data: plantsData } = await supabase.from('plants').select('*');
+        // 🌟 ૧. Current user no company_id melovo
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user;
+        let userCompanyId = null;
+
+        if (currentUser) {
+          const { data: permData } = await supabase
+            .from('user_permissions')
+            .select('company_id')
+            .eq('user_id', currentUser.id)
+            .maybeSingle();
+          userCompanyId = permData?.company_id;
+        }
+
+        // 🌟 ૨. Plants ma company_id filter lagavo
+        let plantQuery = supabase.from('plants').select('*');
+        if (userCompanyId) plantQuery = plantQuery.eq('company_id', userCompanyId);
+        const { data: plantsData } = await plantQuery;
+
         const formattedPlants = (plantsData || []).map(p => ({
           name: p.plant_name,
           state: p.state || 'Unknown',
           type: 'Plant'
         }));
 
-        const { data: sitesData } = await supabase.from('sites').select('*');
+        // 🌟 ૩. Sites ma company_id filter lagavo
+        let siteQuery = supabase.from('sites').select('*');
+        if (userCompanyId) siteQuery = siteQuery.eq('company_id', userCompanyId);
+        const { data: sitesData } = await siteQuery;
+
         const formattedSites = (sitesData || []).map(s => ({
           name: s.site_name,
           state: s.state || 'Unknown', 
@@ -66,6 +88,7 @@ export default function MasterTransactionHub({ adminUser }) {
     };
     
     fetchLocationsData();
+    fetchPendingRequests();
   }, []);
 
   useEffect(() => {
@@ -83,20 +106,49 @@ export default function MasterTransactionHub({ adminUser }) {
   }, [selectedState, selectedType, allLocationsDb]);
 
   // ==========================================
-  // Fetch Pending Requests 
   // ==========================================
-  const fetchPendingRequests = async () => {
-    const { data } = await supabase
-      .from('plant_fund_transfers') 
-      .select('*')
-      .eq('status', 'PENDING')
-      .order('created_at', { ascending: false });
-    setPendingRequests(data || []);
-  };
+  // Fetch Pending Requests (SaaS & Multi-Tenant Ready)
+  // ==========================================
+ const fetchPendingRequests = async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = adminUser || session?.user;
+      
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    fetchPendingRequests();
-  }, []);
+      const { data: permData } = await supabase
+        .from('user_permissions')
+        .select('company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      const currentCompanyId = permData?.company_id;
+
+      let query = supabase
+        .from('plant_fund_transfers') 
+        .select('*')
+        .eq('status', 'PENDING');
+
+      if (currentCompanyId) {
+        query = query.eq('company_id', currentCompanyId);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setPendingRequests(data || []);
+
+    } catch (err) {
+      console.error("Error fetching pending requests:", err);
+      setPendingRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ==========================================
   // Fetch Ledger Data based on View Mode
@@ -105,9 +157,27 @@ export default function MasterTransactionHub({ adminUser }) {
     const fetchLedgerData = async () => {
       setLoading(true);
       try {
-        if (viewMode === 'SUPERVISOR') {
+      if (viewMode === 'SUPERVISOR') {
+          // 🌟 Current user no company_id melovo
+          const { data: { session } } = await supabase.auth.getSession();
+          const currentUser = session?.user;
+          let userCompanyId = null;
+
+          if (currentUser) {
+            const { data: permData } = await supabase
+              .from('user_permissions')
+              .select('company_id')
+              .eq('user_id', currentUser.id)
+              .maybeSingle();
+            userCompanyId = permData?.company_id;
+          }
           let fundQuery = supabase.from('plant_fund_transfers').select('*');
           let expQuery = supabase.from('plant_expenses').select('*');
+          if (userCompanyId) {
+            fundQuery = fundQuery.eq('company_id', userCompanyId);
+            expQuery = expQuery.eq('company_id', userCompanyId);
+          }
+
 
           if (!isAllDates) {
             fundQuery = fundQuery.gte('request_date', fromDate).lte('request_date', toDate);
@@ -204,10 +274,25 @@ export default function MasterTransactionHub({ adminUser }) {
           });
 
           setLedgerSummary(finalArray);
+} else {
+          // 🛠️ LABOUR MODE
+          const { data: { session } } = await supabase.auth.getSession();
+          const currentUser = session?.user;
+          let userCompanyId = null;
 
-        } else {
+          if (currentUser) {
+            const { data: permData } = await supabase
+              .from('user_permissions')
+              .select('company_id')
+              .eq('user_id', currentUser.id)
+              .maybeSingle();
+            userCompanyId = permData?.company_id;
+          }
           // 🛠️ LABOUR MODE
           let query = supabase.from('plant_expenses').select('*');
+          if (userCompanyId) {
+            query = query.eq('company_id', userCompanyId);
+          }
           if (!isAllDates) {
             query = query.gte('expense_date', fromDate).lte('expense_date', toDate);
           }
