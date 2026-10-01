@@ -124,29 +124,28 @@ function AuthListenerWrapper({ children, setNotifications }) {
 const fetchNotifications = async () => {
     try {
       const list = [];
-     const { data: permData } = await supabase
+      const currentUser = user;
+      if (!currentUser) return;
+
+      // ૧. ડેટાબેઝમાંથી કરન્ટ યૂઝરનો રોલ અને કંપની ID મેળવો
+      const { data: permData, error: permErr } = await supabase
         .from('user_permissions')
         .select('role, assigned_sites, company_id')
-        .eq('user_id', user?.id)
+        .eq('user_id', currentUser.id)
         .maybeSingle();
 
-      const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+      if (permErr || !permData) return;
+
+      // 🎯 ૨. ડાયનેમિક એડમિન ચેક (કોઈપણ કંપનીનો એડમિન, મેનેજર કે BDM હોય તે એડમિન ગણાશે)
+      const isAdmin = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
       const currentCompanyId = permData?.company_id;
 
       let allowedPlants = [];
-      if (!isOwner && user?.id) {
-        const { data: permData } = await supabase
-          .from('user_permissions')
-          .select('assigned_sites')
-          .eq('user_id', user.id)
-          .single();
-        
-        if (permData && permData.assigned_sites) {
-          allowedPlants = permData.assigned_sites.map(s => s.trim().toLowerCase());
-        }
+      if (!isAdmin && permData?.assigned_sites) {
+        allowedPlants = permData.assigned_sites.map(s => s.trim().toLowerCase());
       }
 
-      // 🌟 ૧. Plants ના નામ ફેચ કરો જેથી ખબર પડે કયું પ્લાન્ટ છે અને કઈ સાઇટ
+      // ૩. Plants ના નામ ફેચ કરો જેથી ખબર પડે કયું પ્લાન્ટ છે અને કઈ સાઇટ
       const { data: plantsData } = await supabase.from('plants').select('*');
       const plantNamesSet = new Set(
         plantsData?.map(p => (p.name || p.plant_name || '').trim().toLowerCase()) || []
@@ -154,14 +153,15 @@ const fetchNotifications = async () => {
 
       let fundQuery = supabase
         .from('plant_fund_transfers')
-        .select('id, plant_name, purpose, requested_amount, approved_amount, status, supervisor_name, received_by');
+        .select('id, plant_name, purpose, requested_amount, approved_amount, status, supervisor_name, received_by, company_id');
 
-        // 🎯 SaaS માટે કંપની આઈડી ફિલ્ટર
+      // 🎯 ૪. SaaS મલ્ટી-ટેનન્ટ ફિલ્ટર: માત્ર એ જ કંપનીની રિક્વેસ્ટ લાવો જેની આ એડમિન કે યૂઝર છે
       if (currentCompanyId) {
         fundQuery = fundQuery.eq('company_id', currentCompanyId);
       }
+
       fundQuery = fundQuery
-        .in('status', ['PENDING', 'SENT', 'pending', 'se  nt'])
+        .in('status', ['PENDING', 'SENT', 'pending', 'sent'])
         .order('id', { ascending: false })
         .limit(15);
 
@@ -178,30 +178,32 @@ const fetchNotifications = async () => {
           const amt = Number(item.approved_amount || item.requested_amount || 0);
           const itemPlant = (item.plant_name || '').trim().toLowerCase();
 
-          // 🌟 ૨. ચેક કરો કે આ પ્લાન્ટ છે કે સાઇટ
           const isPlant = plantNamesSet.has(itemPlant);
 
-          if (!isOwner) {
+          // જો એડમિન ન હોય, તો માત્ર તેના અસાઇન કરેલા પ્લાન્ટ કે પોતાની રિક્વેસ્ટ જ દેખાડો
+          if (!isAdmin) {
             const isMyPlant = allowedPlants.includes(itemPlant);
+            const userEmail = (currentUser.email || '').trim().toLowerCase();
             const isMyRequest = (item.supervisor_name || '').toLowerCase().includes(userEmail.split('@')[0]);
             if (!isMyPlant && !isMyRequest) return;
           }
+
+          // પાથ અને ટેબ નક્કી કરો
           let targetPath = isPlant ? '/plantemployee-dashboard' : '/siteemployee-dashboard';
           let targetTab = isPlant ? 'supervisiorfundrequest' : 'sitesupervisorfundrequest';
-          if (isOwner) {
+          
+          if (isAdmin) {
             targetPath = '/plant-transaction';
-            targetTab = 'planttransaction'; // Athva tamaru plant transaction page nu tab/route name
+            targetTab = 'planttransaction'; 
           }
+
           if (st === 'SENT') {
             list.push({
               id: `fund-${item.id}`,
               title: `🎉 Admin Approved: ₹${amt.toLocaleString('en-IN')}`,
               subText: `${item.purpose || 'ફંડ'} (${item.plant_name}) - સ્વીકારો (Receive)`,
-              
-              // 🌟 ૩. ડાયનેમિક પાથ અને ટેબ (Plant હોય તો plant dashboard, baki site dashboard)
               tab: targetTab,
               path: targetPath,
-              
               time: 'Payment Sent',
               color: '#16a34a'
             });
@@ -211,11 +213,8 @@ const fetchNotifications = async () => {
               id: `fund-${item.id}`,
               title: `⏳ Pending Approval: ₹${amt.toLocaleString('en-IN')}`,
               subText: `${item.purpose || 'ફંડ રિક્વેસ્ટ'} - [સ્થળ: ${item.plant_name}]`,
-              
-              // 🌟 ૪. ડાયનેમિક પાથ અને ટેબ
               tab: targetTab,
               path: targetPath,
-              
               time: `By: ${item.supervisor_name || 'Supervisor'}`,
               color: '#ea580c'
             });
