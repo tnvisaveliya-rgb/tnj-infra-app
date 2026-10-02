@@ -389,15 +389,33 @@ const location = useLocation();
     fetchDashboardData();
   }, [user, selectedPlant]);
 
- useEffect(() => {
+
+useEffect(() => {
     const fetchSiteList = async () => {
       try {
         const userEmail = (user?.email || '').trim().toLowerCase();
         const userId = user?.id;
 
-        // ૧. જો એડમિન હોય તો બધી જ સાઇટ્સ દેખાશે
-        if (userEmail === 'infra.tnj@gmail.com') {
-          const { data, error } = await supabase.from('sites').select('site_name');
+        if (!userEmail && !userId) return;
+
+        // ૧. કરન્ટ યૂઝરનો company_id અને role મેળવો
+        let userCompanyId = null;
+        let userRole = '';
+        
+        const { data: perm } = await supabase
+          .from('user_permissions')
+          .select('company_id, role, assigned_sites')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        userCompanyId = perm?.company_id;
+        userRole = (perm?.role || '').toLowerCase();
+
+        const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm') || userRole.includes('company admin') || userEmail === 'infra.tnj@gmail.com';
+
+        // ૨. જો એડમિન હોય તો તે જ કંપનીની બધી સાઇટ્સ દેખાશે
+        if (isAdmin && userCompanyId) {
+          const { data, error } = await supabase.from('sites').select('site_name').eq('company_id', userCompanyId);
           if (!error && data) {
             const unique = [...new Set(data.map(d => d.site_name).filter(Boolean))];
             setPlantList(unique);
@@ -408,22 +426,26 @@ const location = useLocation();
           return;
         }
 
-        // ૨. બાકીના સુપરવાઇઝર માટે માત્ર અસાઇન કરેલી સાઇટ્સ જ આવશે
-        const { data: permData, error: permError } = await supabase
-          .from('user_permissions')
-          .select('assigned_sites')
-          .eq('user_id', userId)
-          .single();
-
-        if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-          setPlantList([]);
-          return;
+        // ૩. સુપરવાઇઝર માટે માત્ર અસાઇન કરેલી સાઇટ્સ જ આવશે
+        let assignedSiteNames = perm?.assigned_sites || [];
+        if (typeof assignedSiteNames === 'string') {
+          try { assignedSiteNames = JSON.parse(assignedSiteNames); } catch(e) { assignedSiteNames = []; }
         }
 
-        const assignedSiteNames = permData.assigned_sites;
-        setPlantList(assignedSiteNames);
-        if (assignedSiteNames.length > 0 && selectedPlant === 'All') {
-          setSelectedPlant(assignedSiteNames[0]);
+        if (assignedSiteNames.length > 0 && userCompanyId) {
+          const { data: siteData } = await supabase
+            .from('sites')
+            .select('site_name')
+            .eq('company_id', userCompanyId) // 👈 SaaS Company Isolation Filter
+            .in('site_name', assignedSiteNames);
+
+          const validSites = (siteData || []).map(d => d.site_name).filter(Boolean);
+          setPlantList(validSites);
+          if (validSites.length > 0 && selectedPlant === 'All') {
+            setSelectedPlant(validSites[0]);
+          }
+        } else {
+          setPlantList([]);
         }
 
       } catch (err) {
@@ -437,38 +459,48 @@ const location = useLocation();
     }
   }, [user]);
 
-
-  const fetchDashboardData = async () => {
-      try {
+ const fetchDashboardData = async () => {
+    try {
       const todayStr = new Date().toISOString().split('T')[0];
       const userEmail = (user?.email || '').toLowerCase().trim();
+      const userId = user?.id;
 
       if (!userEmail) return;
-// 🌟 Jo user ne koi site assigned nathi ane admin pan nathi, to dashboard data fetch j na karo
-    const isOwner = (userEmail === 'infra.tnj@gmail.com');
-    if (!isOwner && (!plantList || plantList.length === 0)) {
-      setWorkingBalance(0);
-      setTodayExpense(0);
-      setRawMaterialsStock([]);
-      return;
-    }
+
+      // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+      let userCompanyId = null;
+      let userRole = '';
+      if (userId) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id, role').eq('user_id', userId).maybeSingle();
+        userCompanyId = p?.company_id;
+        userRole = (p?.role || '').toLowerCase();
+      }
+
+      const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm') || userRole.includes('company admin') || userEmail === 'infra.tnj@gmail.com';
+
+      if (!isAdmin && (!plantList || plantList.length === 0)) {
+        setWorkingBalance(0);
+        setTodayExpense(0);
+        setRawMaterialsStock([]);
+        return;
+      }
+
       let totalIncome = 0;
       let totalExpense = 0;
       let todayExpSum = 0;
 
       // =========================================================
-      // ૧. યુઝરને મળેલી તમામ ફંડ આવક (USER ID SPECIFIC)
+      // ૧. ફંડ આવક (Fund Transfers)
       // =========================================================
-      const { data: fundData, error: fundErr } = await supabase
-        .from('plant_fund_transfers')
-        .select('*');
+      let fundQuery = supabase.from('plant_fund_transfers').select('*');
+      if (userCompanyId) fundQuery = fundQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+      const { data: fundData, error: fundErr } = await fundQuery;
 
       if (!fundErr && fundData) {
         fundData.forEach(item => {
           const status = (item.status || '').toUpperCase();
           const recBy = (item.received_by || '').toLowerCase().trim();
 
-          // માત્ર આ યુઝરને મળેલ અને સ્વીકારેલ (RECEIVED) ફંડ
           if (status === 'RECEIVED' && recBy === userEmail) {
             const amt = parseFloat(item.approved_amount || item.requested_amount || 0);
             totalIncome += amt;
@@ -477,11 +509,11 @@ const location = useLocation();
       }
 
       // =========================================================
-      // ૨. યુઝરે કરેલા પ્લાન્ટ ખર્ચા (PLANT EXPENSES BY USER)
+      // ૨. પ્લાન્ટ ખર્ચા (Plant Expenses)
       // =========================================================
-      const { data: plantExpData, error: plantExpErr } = await supabase
-        .from('plant_expenses')
-        .select('*');
+      let plantExpQuery = supabase.from('plant_expenses').select('*');
+      if (userCompanyId) plantExpQuery = plantExpQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+      const { data: plantExpData, error: plantExpErr } = await plantExpQuery;
 
       if (!plantExpErr && plantExpData) {
         plantExpData.forEach(item => {
@@ -500,11 +532,11 @@ const location = useLocation();
       }
 
       // =========================================================
-      // ૩. સાઇટ ટ્રાન્ઝેક્શન્સ (SITE TRANSACTIONS BY USER)
+      // ૩. સાઇટ ટ્રાન્ઝેક્શન્સ (Site Transactions)
       // =========================================================
-      const { data: siteTxData, error: siteTxErr } = await supabase
-        .from('site_transactions')
-        .select('*');
+      let siteTxQuery = supabase.from('site_transactions').select('*');
+      if (userCompanyId) siteTxQuery = siteTxQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+      const { data: siteTxData, error: siteTxErr } = await siteTxQuery;
 
       if (!siteTxErr && siteTxData) {
         siteTxData.forEach(item => {
@@ -538,17 +570,21 @@ const location = useLocation();
         });
       }
 
-      // 🌟 લાઈવ શિલક (Live Cash in Hand with logged-in user)
       setWorkingBalance(totalIncome - totalExpense);
       setTodayExpense(todayExpSum);
 
-      // (ઇન્વેન્ટરી અને એટેન્ડન્સનો આગળનો કોડ એમ જ રહેશે...)
-      // ૪. RAW MATERIAL, STORE & ASSETS STOCK
-let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 ટેબલનું નામ બદલ્યું
-    if (selectedPlant && selectedPlant !== 'All') {
-      matQuery = matQuery.eq('site_name', selectedPlant); // 👈 plant_name ના બદલે site_name
-    }
-    const { data: matLedger, error: matErr } = await matQuery;
+      // =========================================================
+      // ૪. મટીરિયલ સ્ટોક લેજર (Material Stock Ledger)
+      // =========================================================
+      let matQuery = supabase.from('site_material_stock_ledger').select('*');
+      if (userCompanyId) matQuery = matQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+      if (selectedPlant && selectedPlant !== 'All') {
+        matQuery = matQuery.eq('site_name', selectedPlant);
+      } else if (plantList && plantList.length > 0) {
+        matQuery = matQuery.in('site_name', plantList);
+      }
+      const { data: matLedger, error: matErr } = await matQuery;
 
       if (!matErr && matLedger) {
         const stockMap = {};
@@ -556,40 +592,26 @@ let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 
         const checkIsRawMaterial = (name) => {
           const n = name.toLowerCase();
           return (
-            n.includes('cement') ||
-            n.includes('steel') ||
-            n.includes('wire') ||
-            n.includes('mm') ||
-            n.includes('aggregate') ||
-            n.includes('sand') ||
-            n.includes('dust') ||
-            n.includes('flyash') ||
-            n.includes('rmc') ||
-            n.includes('tmt')
+            n.includes('cement') || n.includes('steel') || n.includes('wire') ||
+            n.includes('mm') || n.includes('aggregate') || n.includes('sand') ||
+            n.includes('dust') || n.includes('flyash') || n.includes('rmc') || n.includes('tmt')
           );
         };
 
         const checkIsAsset = (name) => {
           const n = name.toLowerCase();
           return (
-            n.includes('mould') ||
-            n.includes('mold') ||
-            n.includes('machine') ||
-            n.includes('vibrator') ||
-            n.includes('crane') ||
-            n.includes('batching') ||
-            n.includes('silow') ||
-            n.includes('asset')
+            n.includes('mould') || n.includes('mold') || n.includes('machine') ||
+            n.includes('vibrator') || n.includes('crane') || n.includes('batching') ||
+            n.includes('silow') || n.includes('asset')
           );
         };
+
         const checkIsFinished = (name) => {
           const n = name.toLowerCase();
           return (
-            n.includes('panel') ||
-            n.includes('column') ||
-            n.includes('drain') ||
-            n.includes('beam') ||
-            n.includes('wall')
+            n.includes('panel') || n.includes('column') || n.includes('drain') ||
+            n.includes('beam') || n.includes('wall')
           );
         };  
 
@@ -606,9 +628,8 @@ let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 
             let determinedCategory = 'store';
             if (checkIsAsset(rawName)) {
               determinedCategory = 'asset';
-              
-           } else if (checkIsFinished(rawName)) {
-              determinedCategory = 'finished'; // 👈 Finished goods mate
+            } else if (checkIsFinished(rawName)) {
+              determinedCategory = 'finished';
             } else if (checkIsRawMaterial(rawName)) {
               determinedCategory = 'raw';
             }
@@ -624,11 +645,8 @@ let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 
           if (type === 'INWARD' || type === 'IN' || type.includes('INWARD')) {
             stockMap[key].stock += qty;
           } else if (
-            type === 'OUTWARD' || 
-            type === 'OUT' || 
-            type.includes('CONSUM') || 
-            type.includes('ISSUE') || 
-            type.includes('OUTWARD')
+            type === 'OUTWARD' || type === 'OUT' || type.includes('CONSUM') || 
+            type.includes('ISSUE') || type.includes('OUTWARD')
           ) {
             stockMap[key].stock -= qty;
           }
@@ -636,67 +654,71 @@ let matQuery = supabase.from('site_material_stock_ledger').select('*'); // 👈 
 
         setRawMaterialsStock(Object.values(stockMap));
       }
-// 🏗️ TOTAL WORK SUMMARY FETCH KARVA MATE
-let reportQuery = supabase.from('daily_reports').select('*');
-if (selectedPlant && selectedPlant !== 'All') {
-  reportQuery = reportQuery.eq('site_name', selectedPlant);
-} else if (plantList && plantList.length > 0) {
-  reportQuery = reportQuery.in('site_name', plantList);
-}
 
-const { data: repData } = await reportQuery;
-let pTotal = 0, cInstTotal = 0 ,pErectionTotal = 0,singleTotal = 0, doubleTotal = 0, finishTotal = 0, otherTotal = 0;
+      // =========================================================
+      // ૫. ડેઇલી રિપોર્ટ્સ (Daily Reports / Work Summary)
+      // =========================================================
+      let reportQuery = supabase.from('daily_reports').select('*');
+      if (userCompanyId) reportQuery = reportQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
 
-if (repData && repData.length > 0) {
-  repData.forEach(rep => {
-    // Paling Work Total
-    if (Array.isArray(rep.paling_work)) {
-      rep.paling_work.forEach(p => {
-        pTotal += Number(p.qty || 0);
+      if (selectedPlant && selectedPlant !== 'All') {
+        reportQuery = reportQuery.eq('site_name', selectedPlant);
+      } else if (plantList && plantList.length > 0) {
+        reportQuery = reportQuery.in('site_name', plantList);
+      }
+
+      const { data: repData } = await reportQuery;
+      let pTotal = 0, cInstTotal = 0, pErectionTotal = 0, singleTotal = 0, doubleTotal = 0, finishTotal = 0, otherTotal = 0;
+
+      if (repData && repData.length > 0) {
+        repData.forEach(rep => {
+          if (Array.isArray(rep.paling_work)) {
+            rep.paling_work.forEach(p => {
+              pTotal += Number(p.qty || 0);
+            });
+          }
+
+          if (Array.isArray(rep.contractor_details)) {
+            rep.contractor_details.forEach(c => {
+              if (Array.isArray(c.workItems)) {
+                c.workItems.forEach(w => {
+                  if (w.workType === '1. Column Installation') {
+                    cInstTotal += Number(w.quantity || 0);
+                  } else if (w.workType === '3. Panel Erection') {
+                    pErectionTotal += Number(w.quantity || 0);
+                  } else if (w.workType === '2. Column Concrete') {
+                    singleTotal += Number(w.singleCastingQty || 0);
+                    doubleTotal += Number(w.doubleCastingQty || 0);
+                  } else if (w.workType === '4. Finishing Work') {
+                    finishTotal += Number(w.runningFeet || 0);
+                  } else if (w.workType === 'Other') {
+                    otherTotal += Number(w.quantity || 0);
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+
+      setTotalWorkSummary({
+        paling: pTotal,
+        columnInstallation: cInstTotal,
+        panelErection: pErectionTotal,
+        singleColumn: singleTotal,
+        doubleColumn: doubleTotal,
+        finishingWork: finishTotal,
+        otherWork: otherTotal
       });
-    }
 
-    // Contractor Details & Work Items Total
-    if (Array.isArray(rep.contractor_details)) {
-      rep.contractor_details.forEach(c => {
-        if (Array.isArray(c.workItems)) {
-          c.workItems.forEach(w => {
-            if (w.workType === '1. Column Installation') {
-              cInstTotal += Number(w.quantity || 0);
-            } else if (w.workType === '3. Panel Erection') {
-              pErectionTotal += Number(w.quantity || 0);
-            } else if (w.workType === '2. Column Concrete') {
-              singleTotal += Number(w.singleCastingQty || 0);
-              doubleTotal += Number(w.doubleCastingQty || 0);
-            } else if (w.workType === '4. Finishing Work') {
-              finishTotal += Number(w.runningFeet || 0);
-            } else if (w.workType === 'Other') {
-              otherTotal += Number(w.quantity || 0);
-            }
-          });
-        }
-      });
-    }
-  });
-}
-
-setTotalWorkSummary({
-  paling: pTotal,
-  columnInstallation: cInstTotal,
-  panelErection: pErectionTotal,
-  singleColumn: singleTotal,
-  doubleColumn: doubleTotal,
-  finishingWork: finishTotal,
-  otherWork: otherTotal
-});
-// ૫. ATTENDANCE FETCH
-      const { data: attData, error: attError } = await supabase
-        .from('site_attendance')
-        .select('*')
-        .order('created_at', { ascending: false }); // 👈 માત્ર આ એક નવી લાઈન ઉમેરો!
+      // =========================================================
+      // ૬. એટેન્ડન્સ (Site Attendance)
+      // =========================================================
+      let attQuery = supabase.from('site_attendance').select('*');
+      if (userCompanyId) attQuery = attQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+      const { data: attData, error: attError } = await attQuery.order('created_at', { ascending: false });
 
       if (!attError && attData && attData.length > 0) {
-        // હવે નવો ડેટા (OUT) પહેલા આવશે, એટલે find() સાચો જ પંચ પકડશે
         const userAtt = attData.find(a => 
           (a.employee_name === userEmail || a.created_by === userEmail) && 
           (a.created_at && a.created_at.split('T')[0] === todayStr)

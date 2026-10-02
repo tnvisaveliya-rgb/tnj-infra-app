@@ -52,11 +52,23 @@ const AdminSiteReportPage = () => {
 
   const [expandedId, setExpandedId] = useState(null); 
 
-  // ૧. સાઇટ્સની યાદી અને રાજ્યો (States) ફેચ કરવા
+// ૧. સાઇટ્સની યાદી અને રાજ્યો (States) ફેચ કરવા (SaaS Support)
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data, error } = await supabase.from('sites').select('site_name, state');
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        
+        let userCompanyId = null;
+        if (userId) {
+          const { data: perm } = await supabase.from('user_permissions').select('company_id').eq('user_id', userId).maybeSingle();
+          userCompanyId = perm?.company_id;
+        }
+
+        let siteQuery = supabase.from('sites').select('site_name, state');
+        if (userCompanyId) siteQuery = siteQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+        const { data, error } = await siteQuery;
         if (!error && data) {
           setAllSitesDb(data);
           const uniqueStates = [...new Set(data.map(d => d.state).filter(Boolean))];
@@ -71,7 +83,6 @@ const AdminSiteReportPage = () => {
     };
     fetchSites();
   }, []);
-
   // ૨. રાજ્ય (State) બદલાય ત્યારે સાઇટનું લિસ્ટ ફિલ્ટર કરવું
   useEffect(() => {
     let filtered = allSitesDb;
@@ -82,17 +93,25 @@ const AdminSiteReportPage = () => {
     setSiteList(unique);
   }, [selectedState, allSitesDb]);
 // ૩. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું (સાઇટ 'All' હોય તો માત્ર તે સાઇટ્સના જ કોન્ટ્રાક્ટર આવે)
- // ૩. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું (All Sites (General) ને પણ સામેલ કરવા માટે)
+// ૩. સાઇટ મુજબ કોન્ટ્રાક્ટર/લેબર લિસ્ટ લાવવું (SaaS Support)
   useEffect(() => {
     const fetchContractors = async () => {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        
+        let userCompanyId = null;
+        if (userId) {
+          const { data: perm } = await supabase.from('user_permissions').select('company_id').eq('user_id', userId).maybeSingle();
+          userCompanyId = perm?.company_id;
+        }
+
         let query = supabase.from('contractors').select('*');
+        if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
         
         if (selectedSite && selectedSite !== 'All') {
-          // જો કોઈ ચોક્કસ સાઇટ સિલેક્ટ હોય, અથવા તે 'All Sites (General)' હોય
           query = query.or(`site_name.eq."${selectedSite}",company_name.eq."${selectedSite}",site_name.eq."All Sites (General)"`);
         } else if (siteList.length > 0) {
-          // જો સાઇટ 'All' હોય, તો બધી સાઇટ્સની સાથે 'All Sites (General)' વાળા પણ આવી જશે
           const sitesWithGeneral = [...siteList, 'All Sites (General)'];
           query = query.in('site_name', sitesWithGeneral);
         }
@@ -119,6 +138,25 @@ const AdminSiteReportPage = () => {
 const fetchSiteReportData = async () => {
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      
+      let userCompanyId = null;
+      if (userId) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', userId).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      if (!userCompanyId || siteList.length === 0) {
+        setReportRows([]);
+        setSiteStockData([]);
+        setSiteVendorData([]);
+        setSiteInwardData([]);
+        setSiteOutwardData([]);
+        setLoading(false);
+        return;
+      }
+
       // ==========================================
       // A. DAILY REPORT LOGIC
       // ==========================================
@@ -126,8 +164,13 @@ const fetchSiteReportData = async () => {
       const uniqueColSet = new Set();
 
       let reportQuery = supabase.from('daily_reports').select('*');
-      if (selectedSite && selectedSite !== 'All') reportQuery = reportQuery.eq('site_name', selectedSite);
-      else if (selectedState !== 'All' && siteList.length > 0) reportQuery = reportQuery.in('site_name', siteList); 
+      reportQuery = reportQuery.eq('company_id', userCompanyId); // SaaS Company Filter
+
+      if (selectedSite && selectedSite !== 'All') {
+        reportQuery = reportQuery.eq('site_name', selectedSite);
+      } else if (siteList.length > 0) {
+        reportQuery = reportQuery.in('site_name', siteList); // 👈 All select hase tyare fakt siteList mujab j aavse
+      }
 
       if (!isAllDates) {
         if (fromDate) reportQuery = reportQuery.gte('report_date', fromDate);
@@ -193,9 +236,14 @@ const fetchSiteReportData = async () => {
       const upadByDateMap = {};
       let totalUpadSum = 0;
       let upadQuery = supabase.from('plant_expenses').select('amount, expense_date, paid_to, expense_category, plant_name').ilike('expense_category', '%ઉપાડ%');
+      
+      upadQuery = upadQuery.eq('company_id', userCompanyId);
 
-      if (selectedSite && selectedSite !== 'All') upadQuery = upadQuery.eq('plant_name', selectedSite);
-      else if (siteList.length > 0) upadQuery = upadQuery.in('plant_name', siteList);
+      if (selectedSite && selectedSite !== 'All') {
+        upadQuery = upadQuery.eq('plant_name', selectedSite);
+      } else if (siteList.length > 0) {
+        upadQuery = upadQuery.in('plant_name', siteList);
+      }
 
       if (selectedContractor && selectedContractor !== 'All') upadQuery = upadQuery.eq('paid_to', selectedContractor);
       
@@ -223,11 +271,16 @@ const fetchSiteReportData = async () => {
       setReportRows(Object.values(groupedByDate).sort((a, b) => new Date(b.date) - new Date(a.date)));
 
       // ==========================================
-      // C. STOCK REGISTER LOGIC (Cleaned up outwardMap)
+      // C. STOCK REGISTER LOGIC
       // ==========================================
       let ledgerQuery = supabase.from('site_material_stock_ledger').select('*');
-      if (selectedSite !== 'All') ledgerQuery = ledgerQuery.eq('site_name', selectedSite);
-      else if (selectedState !== 'All' && siteList.length > 0) ledgerQuery = ledgerQuery.in('site_name', siteList);
+      ledgerQuery = ledgerQuery.eq('company_id', userCompanyId);
+
+      if (selectedSite !== 'All') {
+        ledgerQuery = ledgerQuery.eq('site_name', selectedSite);
+      } else if (siteList.length > 0) {
+        ledgerQuery = ledgerQuery.in('site_name', siteList);
+      }
       
       if (!isAllDates) ledgerQuery = ledgerQuery.lte('date', toDate); 
 
@@ -269,11 +322,16 @@ const fetchSiteReportData = async () => {
       setSiteStockData(Object.values(stockMap));
 
       // ==========================================
-      // D. INWARD REPORT LOGIC (from 'site_material_inward')
+      // D. INWARD REPORT LOGIC
       // ==========================================
       let inwardQuery = supabase.from('site_material_inward').select('*');
-      if (selectedSite !== 'All') inwardQuery = inwardQuery.eq('site_name', selectedSite);
-      else if (selectedState !== 'All' && siteList.length > 0) inwardQuery = inwardQuery.in('site_name', siteList);
+      inwardQuery = inwardQuery.eq('company_id', userCompanyId);
+
+      if (selectedSite !== 'All') {
+        inwardQuery = inwardQuery.eq('site_name', selectedSite);
+      } else if (siteList.length > 0) {
+        inwardQuery = inwardQuery.in('site_name', siteList);
+      }
       
       if (!isAllDates) {
         if (fromDate) inwardQuery = inwardQuery.gte('date', fromDate);
@@ -284,13 +342,12 @@ const fetchSiteReportData = async () => {
       const inwardVendorMap = {};
       const inwardMaterialMap = {};
 
-if (inwardData) {
+      if (inwardData) {
         inwardData.forEach(row => {
           const qty = Number(row.qty || row.quantity) || 0;
           const itemName = row.material_name || row.item_name || 'Unknown Material'; 
           const uom = row.unit || row.uom || 'Nos';
           
-          // 👇 Ahiya supplier ane site_name banne combine kari didha che (Jethi plant ane site banne dekhay)
           const supplierName = row.supplier_name || row.vendor_name || 'Plant Direct';
           const siteName = row.site_name ? ` (Site: ${row.site_name})` : '';
           const supplier = `${supplierName}${siteName}`;
@@ -320,6 +377,7 @@ if (inwardData) {
           inwardMaterialMap[itemName].totalInward += qty;
         });
       }
+      
       const finalVendors = Object.values(inwardVendorMap).map(v => {
         const matsList = Object.entries(v.materialsMap).map(([mName, mData]) => ({
           name: mName,
@@ -334,11 +392,16 @@ if (inwardData) {
       setSiteInwardData(Object.values(inwardMaterialMap));
 
       // ==========================================
-      // E. OUTWARD REPORT LOGIC (from 'site_material_outward')
+      // E. OUTWARD REPORT LOGIC
       // ==========================================
       let outwardQuery = supabase.from('site_material_outward').select('*');
-      if (selectedSite !== 'All') outwardQuery = outwardQuery.eq('site_name', selectedSite);
-      else if (selectedState !== 'All' && siteList.length > 0) outwardQuery = outwardQuery.in('site_name', siteList);
+      outwardQuery = outwardQuery.eq('company_id', userCompanyId);
+
+      if (selectedSite !== 'All') {
+        outwardQuery = outwardQuery.eq('site_name', selectedSite);
+      } else if (siteList.length > 0) {
+        outwardQuery = outwardQuery.in('site_name', siteList);
+      }
       
       if (!isAllDates) {
         if (fromDate) outwardQuery = outwardQuery.gte('date', fromDate);
@@ -379,7 +442,6 @@ if (inwardData) {
       setLoading(false);
     }
   };
-  
   
   const toggleAccordion = (id) => setExpandedId(expandedId === id ? null : id);
 

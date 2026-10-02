@@ -66,7 +66,7 @@ const fetchPlants = async () => {
         return;
       }
 
-      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role) || userEmail === 'infra.tnj@gmail.com';
+      const adminCheck = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role) 
 
       if (adminCheck && permData.company_id) {
         // 🎯 ADMIN: માત્ર પોતાની કંપનીના જ પ્લાન્ટ્સ બતાવો

@@ -48,45 +48,45 @@ export default function PlantOutwardPage({ user }) {
   }, [selectedSiteId]);
 
   // 🌟 ૧. સાઇટ્સ ફેચ કરવા માટેનું ફંક્શન
-  const fetchSites = async () => {
+const fetchSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setSitesList(data || []);
-        return;
+      // ૧. Current user no company_id melovo
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setSitesList(sitesData || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: allowedSitesData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+
+          setSitesList(allowedSitesData || []);
+          return;
+        }
       }
-
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.maybeSingle();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        const { data: allSites } = await supabase.from('sites').select('*');
-        setSitesList(allSites || []);
-        return;
-      }
-
-      const assignedSitesNames = permData.assigned_sites;
-      const { data: allowedSitesData } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSitesNames);
-
-      setSitesList(allowedSitesData || []);
-
+      setSitesList([]);
     } catch (err) {
       console.error('Error fetching sites:', err);
-      const { data: fallbackSites } = await supabase.from('sites').select('*');
-      setSitesList(fallbackSites || []);
+      setSitesList([]);
     }
   };
 
@@ -102,28 +102,59 @@ export default function PlantOutwardPage({ user }) {
     });
   };
 
-  const fetchMasters = async (siteId) => {
-    const { data: partData } = await supabase.from('site_outward_parties').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
+const fetchMasters = async (siteId) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let pQuery = supabase.from('site_outward_parties').select('*');
+    if (userCompanyId) pQuery = pQuery.eq('company_id', userCompanyId);
+    const { data: partData } = await pQuery;
     setParties(partData || []);
-    const { data: siteData } = await supabase.from('sites').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
+
+    let sQuery = supabase.from('sites').select('*');
+    if (userCompanyId) sQuery = sQuery.eq('company_id', userCompanyId);
+    const { data: siteData } = await sQuery;
     setSites(siteData || []);
-    const { data: prodData } = await supabase.from('plant_work_descriptions').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
+
+    let prodQuery = supabase.from('plant_work_descriptions').select('*');
+    if (userCompanyId) prodQuery = prodQuery.eq('company_id', userCompanyId);
+    const { data: prodData } = await prodQuery;
     setProducts(prodData || []);
-    const { data: transData } = await supabase.from('site_transporters').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
+
+    let transQuery = supabase.from('site_transporters').select('*');
+    if (userCompanyId) transQuery = transQuery.eq('company_id', userCompanyId);
+    const { data: transData } = await transQuery;
     setTransporters(transData || []);
-    const { data: matData } = await supabase.from('site_materials_master').select('*').or(`plant_id.eq.${siteId},plant_id.is.null`);
+
+    let matQuery = supabase.from('site_materials_master').select('*');
+    if (userCompanyId) matQuery = matQuery.eq('company_id', userCompanyId);
+    const { data: matData } = await matQuery;
     setMaterials(matData || []);
   };
-
   // 🌟 site_material_outward ટેબલમાંથી હિસ્ટ્રી લાવવી
-  const fetchRecentHistory = async () => {
+const fetchRecentHistory = async () => {
     if (!selectedSite) return;
-    const { data } = await supabase
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let query = supabase
       .from('site_material_outward')
       .select('*')
-      .eq('site_name', selectedSite)
-      .order('created_at', { ascending: false })
-      .limit(10);
+      .eq('site_name', selectedSite);
+
+    if (userCompanyId) query = query.eq('company_id', userCompanyId);
+
+    const { data } = await query.order('created_at', { ascending: false }).limit(10);
     setRecentHistory(data || []);
   };
 
@@ -423,6 +454,13 @@ if (itemCategory === 'Finished Product') {
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Supervisor';
 
+    // 🌟 Current user no company_id melovo
+    let userCompanyId = null;
+    const currentUser = user || session?.user;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
     setLoading(true);
     try {
       let materialLedgerRows = []; 
@@ -454,6 +492,7 @@ if (itemCategory === 'Finished Product') {
             }
 
             const singleRowData = {
+              company_id: userCompanyId,
               date: dprDate,                     
               site_name: selectedSite, // 🌟 પ્લાન્ટની જગ્યાએ સાઇટ
               party_name: source.party,
@@ -470,6 +509,7 @@ if (itemCategory === 'Finished Product') {
             };
 
             rowsToInsert.push({ 
+              company_id: userCompanyId,
               singleRowData, 
               exactProductName, 
               finalSizeVariant, 
@@ -520,6 +560,7 @@ if (itemCategory === 'Finished Product') {
 
         // 🌟 બધું જ મટીરિયલ site_material_stock_ledger માં OUTWARD તરીકે જમા થશે
         materialLedgerRows.push({
+          company_id: userCompanyId,
           date: dprDate,
           site_name: selectedSite,
           material_name: obj.singleRowData.material_name,

@@ -55,46 +55,47 @@ function AttendancePage({ sites = [], user }) {
 const loadSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-      const userId = user?.id || session?.user?.id;
+      const currentUser = user || session?.user;
+      if (!currentUser) return;
       
-      // 1. ADMIN માટે (બધી Site અને Plant બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-    
-        const { data: plantsData } = await supabase.from('plants').select('*');
-        
-        // બંનેના ડેટાને સરખા ફોર્મેટમાં લાવીએ જેથી ડ્રોપડાઉનમાં ગોઠવી શકાય
-
-        const formattedPlants = (plantsData || []).map(p => ({ id: `plant_${p.id}`, name: p.plant_name }));
-
-    setFetchedSites(formattedPlants);
-        return;
-      }
-
-      // 2. SUPERVISOR માટે (તેમને અસાઇન કરેલી સાઇટ અને પ્લાન્ટ)
-      // અહીં 'assigned_plants' પણ સિલેક્ટ કર્યું છે
-      let permQuery = supabase.from('user_permissions').select('assigned_sites, assigned_plants');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.single();
+      // ૧. ડેટાબેઝમાંથી કરન્ટ યૂઝરનો role અને company_id મેળવો (કોઈ હાર્ડકોડ નહીં)
+      const { data: permData, error: permError } = await supabase
+        .from('user_permissions')
+        .select('role, assigned_sites, assigned_plants, company_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
 
       if (permError || !permData) {
         setFetchedSites([]); 
         return;
       }
 
-  
+      const userCompanyId = permData.company_id;
+      const isAdmin = ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+      // ૨. જો એડમિન હોય તો માત્ર પોતાની કંપનીના જ પ્લાન્ટ/સાઇટ બતાવો
+      if (isAdmin && userCompanyId) {
+        const { data: plantsData } = await supabase
+          .from('plants')
+          .select('*')
+          .eq('company_id', userCompanyId);
+          
+        const formattedPlants = (plantsData || []).map(p => ({ id: `plant_${p.id}`, name: p.plant_name }));
+        setFetchedSites(formattedPlants);
+        return;
+      }
+
+      // ૩. જો સુપરવાઇઝર હોય તો પોતાની કંપનીના અસાઇન કરેલા પ્લાન્ટ્સ બતાવો
       const assignedPlantNames = permData.assigned_plants || [];
+      let allowedPlants = [];
 
-     let allowedPlants = [];
+      if (assignedPlantNames.length > 0 && userCompanyId) {
+        const { data: plantData } = await supabase
+          .from('plants')
+          .select('*')
+          .eq('company_id', userCompanyId)
+          .in('plant_name', assignedPlantNames);
 
-     // અસાઇન કરેલા Plants ફેચ કરો
-      if (assignedPlantNames.length > 0) {
-        const { data: plantData } = await supabase.from('plants').select('*').in('plant_name', assignedPlantNames);
         if (plantData) {
           allowedPlants = plantData.map(p => ({ 
             id: `plant_${p.id}`, 
@@ -103,14 +104,12 @@ const loadSites = async () => {
         }
       }
 
-   
-
-     setFetchedSites(allowedPlants);
+      setFetchedSites(allowedPlants);
     } catch (err) {
       console.error('Error loading assigned plants:', err);
       setFetchedSites([]);
     }
-  }
+  };
   const availableSites = (sites && sites.length > 0) ? sites : fetchedSites;
 
   const checkLocation = () => {
@@ -136,35 +135,58 @@ const loadSites = async () => {
   };
 
   const loadAttendanceHistory = async (email) => {
-    let query = supabase
-      .from('site_attendance')
-      .select('*')
-      .eq('employee_name', email)
-      .order('created_at', { ascending: false });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
 
-    if (fromDate) query = query.gte('created_at', `${fromDate}T00:00:00`);
-    if (toDate) query = query.lte('created_at', `${toDate}T23:59:59`);
-
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error("Error loading history:", error.message);
-    } else if (data && data.length > 0) {
-      setHistory(data);
-      
-      if (!fromDate && !toDate) {
-        const latestPunch = data[0].punch_type; 
-        setCurrentStatus(latestPunch);
-        if (latestPunch === 'IN') {
-          setAttendanceSite(data[0].site_name);
-        } else {
-          setAttendanceSite(''); 
-        }
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+        userCompanyId = permData?.company_id;
       }
-    } else {
-      setHistory([]);
-      setCurrentStatus('OUT');
-      setAttendanceSite('');
+
+      let query = supabase
+        .from('site_attendance')
+        .select('*')
+        .eq('employee_name', email);
+
+      // 🎯 SaaS ફિલ્ટર: માત્ર પોતાની જ કંપનીના રેકોર્ડ્સ
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      query = query.order('created_at', { ascending: false });
+
+      if (fromDate) query = query.gte('created_at', `${fromDate}T00:00:00`);
+      if (toDate) query = query.lte('created_at', `${toDate}T23:59:59`);
+
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error("Error loading history:", error.message);
+      } else if (data && data.length > 0) {
+        setHistory(data);
+        
+        if (!fromDate && !toDate) {
+          const latestPunch = data[0].punch_type; 
+          setCurrentStatus(latestPunch);
+          if (latestPunch === 'IN') {
+            setAttendanceSite(data[0].site_name);
+          } else {
+            setAttendanceSite(''); 
+          }
+        }
+      } else {
+        setHistory([]);
+        setCurrentStatus('OUT');
+        setAttendanceSite('');
+      }
+    } catch (err) {
+      console.error("History load error:", err);
     }
   };
 
@@ -309,7 +331,7 @@ const loadSites = async () => {
     });
   };
 
-  const handlePunch = async (targetType) => {
+const handlePunch = async (targetType) => {
     if (!attendanceSite) {
       setModal({ isOpen: true, message: "⚠️ કૃપા કરીને સાઇટ પસંદ કરો!", onConfirm: () => setModal({ isOpen: false }) });
       return;
@@ -329,9 +351,11 @@ const loadSites = async () => {
     }
 
     const executePunch = async () => {
-      const finalEmail = supervisorEmail || user?.email || localStorage.getItem('userEmail') || "infra.tnj@gmail.com";
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      const finalEmail = supervisorEmail || currentUser?.email || localStorage.getItem('userEmail') || '';
 
-      if (!finalEmail) {
+      if (!finalEmail || !currentUser) {
         setModal({ isOpen: true, message: "એરર: યુઝરની ઓળખ થઈ શકી નથી. કૃપા કરીને ફરી લોગિન કરો.", onConfirm: () => setModal({ isOpen: false }) });
         return;
       }
@@ -342,6 +366,15 @@ const loadSites = async () => {
         const { latitude, longitude } = position.coords;
 
         try {
+          // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+          const { data: permData } = await supabase
+            .from('user_permissions')
+            .select('company_id')
+            .eq('user_id', currentUser.id)
+            .maybeSingle();
+
+          const userCompanyId = permData?.company_id;
+
           const folderName = finalEmail.replace(/[^a-zA-Z0-9]/g, '_'); 
           const todayDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-'); 
           const fileName = `attendance/${folderName}/${targetType}_${todayDate}_${Date.now()}.jpg`;
@@ -355,6 +388,7 @@ const loadSites = async () => {
           }
 
           const payload = {
+            company_id: userCompanyId, // 👈 સંપૂર્ણ ડાયનેમિક કંપની આઈડી
             employee_name: finalEmail, 
             site_name: attendanceSite,
             punch_type: targetType, 
@@ -409,8 +443,23 @@ const handleLeaveSubmit = async () => {
 
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      
+      // ૧. કરન્ટ યૂઝરનો company_id ડેટાબેઝમાંથી મેળવો
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+        userCompanyId = permData?.company_id;
+      }
+
       const { error } = await supabase.from('leave_requests').insert([
         {
+          company_id: userCompanyId, // 👈 આ ફરજિયાત છે
           employee_email: supervisorEmail,
           from_date: leaveFromDate,
           to_date: leaveToDate,
@@ -439,7 +488,6 @@ const handleLeaveSubmit = async () => {
       setLoading(false);
     }
   };
-
 
   const formatDateToDDMMYYYY = (dateString) => {
     if (!dateString) return '';
@@ -696,54 +744,7 @@ return (
             )}
           </div>
         )}
-        {showLeaveBox && (
-          <div style={{ backgroundColor: '#faf5ff', padding: '12px', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#581c87', marginBottom: '8px' }}>Apply for Leave:</div>
-            
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-              <div style={{ flex: 1, minWidth: '110px' }}>
-                <span style={{ fontSize: '10px', color: '#6b21a8' }}>From Date:</span>
-                <input type="date" value={leaveFromDate} onChange={(e) => setLeaveFromDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: '110px' }}>
-                <span style={{ fontSize: '10px', color: '#6b21a8' }}>To Date:</span>
-                <input type="date" value={leaveToDate} onChange={(e) => setLeaveToDate(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px' }} />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '10px' }}>
-              <span style={{ fontSize: '10px', color: '#6b21a8', display: 'block', marginBottom: '4px' }}>Leave Type:</span>
-              <div style={{ display: 'flex', gap: '15px', fontSize: '11px', color: '#4c1d95', fontWeight: 'bold' }}>
-                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input type="radio" name="leaveType" value="Personal" checked={leaveType === 'Personal'} onChange={(e) => setLeaveType(e.target.value)} /> Personal
-                </label>
-                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input type="radio" name="leaveType" value="Medical" checked={leaveType === 'Medical'} onChange={(e) => setLeaveType(e.target.value)} /> Medical
-                </label>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '10px' }}>
-              <textarea 
-                value={leaveReason} 
-                onChange={(e) => setLeaveReason(e.target.value)} 
-                placeholder="રજાનું કારણ લખો..." 
-                rows="2"
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '11px', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <div style={{ textAlign: 'right' }}>
-              <button 
-                onClick={handleLeaveSubmit} 
-                disabled={loading}
-                style={{ padding: '8px 16px', backgroundColor: '#9333ea', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
-                {loading ? 'Submitting...' : 'Submit Leave'}
-              </button>
-            </div>
-            </div>
-         
-        )}
+       
 
       </div>
 

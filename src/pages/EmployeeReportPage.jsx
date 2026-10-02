@@ -46,22 +46,47 @@ function EmployeeReportPage() {
     applyFilters();
   }, [selectedEmployee, selectedSite, fromDate, toDate, attendanceLogs]);
 
-  const fetchAllAttendance = async () => {
-    const { data, error } = await supabase
-      .from('site_attendance')
-      .select('*')
-      .order('created_at', { ascending: false });
+const fetchAllAttendance = async () => {
+    try {
+      // ૧. Current admin no company_id melovo
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = session?.user;
+      let userCompanyId = null;
 
-    if (error) {
-      console.error("Error fetching logs:", error.message);
-    } else if (data) {
-      setAttendanceLogs(data);
+      if (currentUser) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+        userCompanyId = permData?.company_id;
+      }
 
-      const uniqueEmployees = [...new Set(data.map(item => item.employee_name))];
-      const uniqueSites = [...new Set(data.map(item => item.site_name))];
-      
-      setEmployeeList(uniqueEmployees);
-      setSiteList(uniqueSites);
+      // ૨. Attendance query banavo
+      let query = supabase
+        .from('site_attendance')
+        .select('*');
+
+      // 🎯 SaaS Multi-Tenant Filter: Fhakat potani company no data
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching logs:", error.message);
+      } else if (data) {
+        setAttendanceLogs(data);
+
+        const uniqueEmployees = [...new Set(data.map(item => item.employee_name))];
+        const uniqueSites = [...new Set(data.map(item => item.site_name))];
+        
+        setEmployeeList(uniqueEmployees);
+        setSiteList(uniqueSites);
+      }
+    } catch (err) {
+      console.error("Fetch attendance error:", err);
     }
   };
 

@@ -75,57 +75,77 @@ const fetchSites = async () => {
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      // 1. ADMIN માટે (બધી જ સાઇટ્સ બતાવો)
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setPlants(data || []);
-        return;
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setPlants(sitesData || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: allowedSitesData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+
+          setPlants(allowedSitesData || []);
+          return;
+        }
       }
-
-      // 2. SUPERVISOR માટે (user_permissions ટેબલમાંથી અસાઇન કરેલી સાઇટ્સ લાવો)
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        setPlants([]); 
-        return;
-      }
-
-      const assignedSitesNames = permData.assigned_sites;
-      const { data: allowedSitesData } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSitesNames);
-
-      setPlants(allowedSitesData || []);
-
+      setPlants([]);
     } catch (err) {
       console.error('Error fetching sites:', err);
-      setsites([]);
+      setPlants([]);
     }
   };
 const fetchMyRequests = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = (user?.email || session?.user?.email || '').toLowerCase().trim();
-      const isAdmin = (userEmail === 'infra.tnj@gmail.com');
+      const currentUser = user || session?.user;
+      const userEmail = (currentUser?.email || '').toLowerCase().trim();
+      const userId = currentUser?.id;
+
+      if (!userEmail && !userId) return;
+
+      // ૧. કરન્ટ યૂઝરનો company_id અને role મેળવો
+      let userCompanyId = null;
+      let userRole = '';
+      if (userId) {
+        const { data: perm } = await supabase
+          .from('user_permissions')
+          .select('company_id, role')
+          .eq('user_id', userId)
+          .maybeSingle();
+        userCompanyId = perm?.company_id;
+        userRole = (perm?.role || '').toLowerCase();
+      }
+
+      // ૨. ચેક કરો કે કરન્ટ યૂઝર એડમિન છે કે નહીં (રોલના આધારે, હાર્ડકોડ નહીં!)
+      const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm');
 
       let query = supabase
         .from('plant_fund_transfers')
         .select('*')
         .eq('plant_name', selectedPlant);
 
-      // જો એડમિન ન હોય, તો સુપરવાઇઝર માટે:
-      // ૧. જે તેમણે મોકલી છે (supervisor_name અથવા created_by / submitted_by)
-      // ૨. અથવા જે તેમણે સ્વીકારી છે (received_by)
+      // ૩. SaaS કંપની આઈડી ફિલ્ટર (જેથી ડેટા મિક્સ ન થાય)
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      // ૪. જો એડમિન ન હોય (એટલે કે સુપરવાઇઝર હોય), તો માત્ર તેની જ રિક્વેસ્ટ બતાવો
       if (!isAdmin && userEmail) {
-        // સુપરવાઇઝર શોર્ટ નેમ અથવા ઈમેલના આધારે તેમની રિક્વેસ્ટ્સ લાવો
         const shortName = userEmail.split('@')[0].trim();
         query = query.or(`received_by.ilike.${userEmail},supervisor_name.ilike.${shortName}`);
       }
@@ -139,7 +159,6 @@ const fetchMyRequests = async () => {
       setRequests([]);
     }
   };
-
   // 🟢 સુપરવાઇઝર જ્યારે એડમિને મોકલેલા પૈસા સ્વીકારે
   const handleAcceptFund = async (item) => {
     const confirmReceive = window.confirm(`શું તમને ₹${item.approved_amount} (${item.payment_mode || 'Cash'}) મળી ગયા છે?`);
@@ -183,8 +202,15 @@ const fetchMyRequests = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || '';
 
+      // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+      let userCompanyId = null;
+      const currentUser = user || session?.user;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
       const isDirect = incomeType === 'DIRECT_INCOME';
-// ઉદાહરણ તરીકે: user?.email = "infra.tnj@gmail.com" હોય તો માત્ર "infra.tnj" મળશે
+
 const supervisorShortName = (user?.email || currentLoggedUser || '')
   .split('@')[0]
   .trim();
@@ -195,6 +221,7 @@ const payload = {
 
 };
       const { error } = await supabase.from('plant_fund_transfers').insert([{
+        company_id: userCompanyId,
         plant_name: selectedPlant,
         request_date: requestDate,
         requested_amount: Number(amount),

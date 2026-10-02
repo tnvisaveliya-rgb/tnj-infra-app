@@ -24,46 +24,48 @@ export default function SiteMaterialInward({ user }) {
   const [existingBills, setExistingBills] = useState([]);
 
   // 🌟 ૧. સાઇટ્સ ફેચ કરવા માટે (ડેટાબેઝમાં sites ટેબલમાંથી)
-  const fetchSites = async () => {
+const fetchSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setSites(data || []);
-        return;
+      // ૧. કરન્ટ યૂઝરનો company_id મેળવો
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+        // જો એડમિન હોય તો માત્ર પોતાની કંપનીની સાઇટ્સ બતાવો
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setSites(sitesData || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: allowedSitesData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+
+          setSites(allowedSitesData || []);
+          return;
+        }
       }
-
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.single();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        setSites([]); 
-        return;
-      }
-
-      const assignedSitesNames = permData.assigned_sites;
-      const { data: allowedSitesData } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSitesNames);
-
-      setSites(allowedSitesData || []);
-
+      setSites([]);
     } catch (err) {
       console.error('Error fetching sites:', err);
       setSites([]);
     }
   };
-
 const handleEditClick = async (entry) => {
     setEditingId(entry.id);
     setDprDate(entry.date || dprDate);
@@ -221,13 +223,23 @@ const handleEditClickWithTimeCheck = (entry) => {
     }
   }, [selectedSite]);
 
-  const fetchRecentHistory = async () => {
-    const { data } = await supabase
-      .from('site_material_inward') // 🌟 નવું ટેબલ
-      .select('*')
-      .eq('site_name', selectedSite) // 🌟 સાઇટ મુજબ
-      .order('created_at', { ascending: false })
-      .limit(10);
+ const fetchRecentHistory = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let query = supabase
+      .from('site_material_inward')
+      .select('*');
+
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+    if (selectedSite) query = query.eq('site_name', selectedSite);
+
+    const { data } = await query.order('created_at', { ascending: false }).limit(10);
     setRecentHistory(data || []);
   };
 const fetchMasters = async (siteName) => {
@@ -237,10 +249,25 @@ const fetchMasters = async (siteName) => {
     }
 
     try {
-      const { data: outwardData, error } = await supabase
+      // 🌟 કરન્ટ યૂઝરનો company_id મેળવો (SaaS Support)
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      let query = supabase
         .from('plant_material_outward')
         .select('*')
         .ilike('site_name', `%${siteName.trim()}%`);
+
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      const { data: outwardData, error } = await query;
 
       if (error) {
         console.error('Error fetching outward data:', error);
@@ -257,54 +284,57 @@ const fetchMasters = async (siteName) => {
             site_name: siteName
           })).filter((v, i, arr) => arr.findIndex(t => t.name === v.name) === i);
 
-        // ૨. મટીરિયલ (નામ અને સાઇઝ છૂટા પાડવાનું લોજીક)
+        // ૨. મટીરિયલ (કેટેગરી મુજબ અલગ પાડવાનું લોજીક)
         const parsedMaterials = [];
         
         outwardData.forEach(o => {
           if (o.material_name && o.material_name.trim() !== '') {
             const rawName = o.material_name.trim();
-            const itemType = o.item_type ? o.item_type.trim() : 'Finished Product';
+            
+            // 🌟 ડેટાબેઝમાંથી સાચી કેટેગરી પકડો (જો ખાલી હોય તો ડિફોલ્ટ Raw Material ગણો)
+            let itemType = o.item_type ? o.item_type.trim() : 'Raw Material'; 
             
             let parsedName = rawName;
             let parsedSize = '';
             
-        if (itemType === 'Finished Product') {
-              // ૧. કૌંસ (...) અને તેમાં લખેલી Steel details કાઢી નાખો
+            // જો Finished Product હોય તો જ નામ અને સાઇઝ અલગ કરો
+            if (itemType.toLowerCase().includes('finish')) {
+              itemType = 'Finished Product';
               const noBrackets = rawName.replace(/\s*\(.*?\)\s*/g, '').trim();
-              
-              // ૨. 'પહેલી સ્પેસ' (First Space) શોધો
               const firstSpaceIndex = noBrackets.indexOf(' ');
               
               if (firstSpaceIndex !== -1) {
-                // પહેલી સ્પેસ પહેલાનો શબ્દ મટીરિયલ બનશે (દા.ત. "Column")
                 parsedName = noBrackets.substring(0, firstSpaceIndex).trim(); 
-                
-                // પહેલી સ્પેસ પછીનું બધું જ સાઈઝ ગણાશે (દા.ત. "8ft * 150mm")
                 parsedSize = noBrackets.substring(firstSpaceIndex + 1).trim();      
               } else {
-                // જો નામમાં કોઈ સ્પેસ જ ન હોય
                 parsedName = noBrackets;
               }
+            } else {
+              // જો Raw Material, Consumable કે બીજી કેટેગરી હોય તો તેને તેની ઓરિજિનલ કેટેગરી આપો
+              if (itemType.toLowerCase().includes('raw')) itemType = 'Raw Material';
+              else if (itemType.toLowerCase().includes('consumable')) itemType = 'Consumable Item';
+              else if (itemType.toLowerCase().includes('tool')) itemType = 'Tools and Hardware';
+              else if (itemType.toLowerCase().includes('asset')) itemType = 'Asset';
             }
             
             parsedMaterials.push({
               id: `out_mat_${Math.random()}`,
               name: parsedName,
-              product_size: parsedSize, // 🌟 સાઇઝ અલગ સેવ થશે એટલે સાઇઝના બોક્સમાં દેખાશે
-              item_type: itemType,
+              product_size: parsedSize,
+              item_type: itemType, // 🌟 સાચી કેટેગરી અહીં સેવ થશે
               site_name: siteName
             });
           }
         });
 
-        // ડુપ્લિકેટ કાઢવા (મટીરિયલનું નામ અને સાઇઝ બંને સરખા હોય તેને જ ડુપ્લિકેટ ગણશે)
+        // ડુપ્લિકેટ કાઢવા (નામ, સાઇઝ અને કેટેગરી ત્રણેય સરખા હોય તો)
         const uniqueMaterials = parsedMaterials.filter((v, i, arr) => 
-          arr.findIndex(t => t.name === v.name && t.product_size === v.product_size) === i
+          arr.findIndex(t => t.name === v.name && t.product_size === v.product_size && t.item_type === v.item_type) === i
         );
 
         setSuppliers(outwardSuppliers);
-        setMaterials(uniqueMaterials);
-        setProducts(uniqueMaterials); 
+        setMaterials(uniqueMaterials); // 👈 આમાં હવે બધી કેટેગરીના મટીરિયલ્સ હશે જે ઉપર ફિલ્ટર થશે
+        setProducts(uniqueMaterials.filter(m => m.item_type === 'Finished Product')); // ફિનિશ્ડ ગુડ્સ માટે અલગ
       } else {
         setSuppliers([]); setMaterials([]); setProducts([]);
       }
@@ -412,6 +442,13 @@ const handleSiteChange = (e) => {
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Supervisor';
 
+    // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+    let userCompanyId = null;
+    const currentUser = user || session?.user;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
     setLoading(true);
     try {
       let stockLedgerRows = [];
@@ -515,7 +552,8 @@ const handleSiteChange = (e) => {
                   item_type: categoryStr,
                   description: source.description || '',
                   bill_url: finalBillUrlString,
-                  submitted_by: currentLoggedUser
+                  submitted_by: currentLoggedUser,
+                  company_id: userCompanyId
                 })
                 .eq('id', editingId)
                 .select()
@@ -538,7 +576,8 @@ const handleSiteChange = (e) => {
                   description: source.description || '',
                   item_type: categoryStr,
                   bill_url: finalBillUrlString,
-                  submitted_by: currentLoggedUser
+                  submitted_by: currentLoggedUser,
+                  company_id: userCompanyId
                 }])
                 .select()
                 .single();
@@ -549,6 +588,7 @@ const handleSiteChange = (e) => {
 
            // 🌟 ગમે તે કેટેગરી હોય (Raw Material કે Finished Product), સાઇટ માટે બધું જ એક જ ફોર્મેટમાં જમા થશે
             materialLedgerRows.push({
+              company_id: userCompanyId,
               date: dprDate,
               site_name: selectedSite,
               material_name: materialNameToSave, // પૂરેપૂરું નામ અને સાઈઝ સાથે
@@ -1188,8 +1228,12 @@ const handleRequestEditAfter24Hours = async (entry) => {
                   
                   if (confirmDelete) {
                     try {
-                      await supabase.from('site_material_stock_ledger').delete().eq('reference_id', editingId);
-   
+                     // 🌟 ફ્ક્ત આ ઇનવર્ડ રેકોર્ડ સાથે જોડાયેલ લેજર એન્ટ્રી જ ડિલીટ થશે
+          await supabase
+            .from('site_material_stock_ledger')
+            .delete()
+            .eq('reference_id', editingId)
+            .eq('transaction_type', 'INWARD');
 
                       const { error: delErr } = await supabase
                         .from('site_material_inward')

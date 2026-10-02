@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase';
 
-const AdminDashboardStats= () => {
-  const [formData, setFormData] = useState({ companyName: '', gstin: '', email: '', password: '' });
+const AdminDashboardStats = () => {
+  // 🌟 ૧. formData માં address ઉમેર્યું
+  const [formData, setFormData] = useState({ companyName: '', gstin: '', address: '', email: '', password: '' });
   const [logoFile, setLogoFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -27,6 +28,7 @@ const AdminDashboardStats= () => {
         body: {
           company_name: formData.companyName,
           gstin: formData.gstin,
+          address: formData.address, // 👈 ડીબી ફંક્શનમાં એડ્રેસ મોકલ્યું
           logo_url: logo_url,
           admin_email: formData.email,
           admin_password: formData.password,
@@ -35,7 +37,7 @@ const AdminDashboardStats= () => {
 
       if (error) throw error;
       setMessage('New company ane admin account successfully create thai gayu che!');
-      setFormData({ companyName: '', gstin: '', email: '', password: '' });
+      setFormData({ companyName: '', gstin: '', address: '', email: '', password: '' });
       setLogoFile(null);
     } catch (error) {
       setMessage(`Error: ${error.message}`);
@@ -44,7 +46,7 @@ const AdminDashboardStats= () => {
     }
   };
 
-  const inputStyle = { width: '100%', padding: '10px', marginTop: '4px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' };
+  const inputStyle = { width: '100%', padding: '10px', marginTop: '4px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box', fontFamily: 'sans-serif' };
   const labelStyle = { display: 'block', fontSize: '14px', fontWeight: '600', color: '#333', marginTop: '16px' };
 
   return (
@@ -63,6 +65,10 @@ const AdminDashboardStats= () => {
 
         <label style={labelStyle}>GSTIN</label>
         <input type="text" name="gstin" value={formData.gstin} onChange={handleInputChange} required style={inputStyle} placeholder="24XXXXX1234X1ZX" />
+
+        {/* 🌟 ૨. એડ્રેસ નાખવા માટેનું ટેક્સ્ટ એરિયા (Address Field) */}
+        <label style={labelStyle}>Company Address</label>
+        <textarea name="address" value={formData.address} onChange={handleInputChange} rows="3" required style={{ ...inputStyle, resize: 'vertical' }} placeholder="Enter complete company address..." />
 
         <label style={labelStyle}>Company Logo</label>
         <input type="file" accept="image/*" onChange={(e) => setLogoFile(e.target.files[0])} style={inputStyle} />

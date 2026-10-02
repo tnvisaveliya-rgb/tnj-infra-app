@@ -855,12 +855,33 @@ const handleLabourUpdate = async (contractorId, formData) => {
     else { loadAllData(); showAlert("Deleted successfully!") }
   }
 
-  const handleDeleteSite = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this site?")) return
-    const { error } = await supabase.from('sites').delete().eq('id', id)
-    if (error) showAlert("Error deleting site: " + error.message)
-    else { loadAllData(); showAlert("Site deleted successfully!") }
+  const handleDeleteSite = async (siteName, siteId) => {
+  if (!window.confirm("Are you sure you want to delete this site?")) return;
+
+  // 1. Pehla site_bom table mathi site_name na aadhare delete karo
+  const { error: bomError } = await supabase
+    .from('site_bom')
+    .delete()
+    .eq('site_name', siteName);
+
+  if (bomError) {
+    showAlert("BOM Delete Error: " + bomError.message);
+    return;
   }
+
+  // 2. Pachi sites table mathi id na aadhare delete karo
+  const { error: siteError } = await supabase
+    .from('sites')
+    .delete()
+    .eq('id', siteId);
+
+  if (siteError) {
+    showAlert("Error deleting site: " + siteError.message);
+  } else {
+    loadAllData();
+    showAlert("Site and its BOM deleted successfully!");
+  }
+};
 
 const availableProductsForPlant = products.filter(p => {
     // જો પ્લાન્ટ સિલેક્ટ ન કર્યો હોય તો બધી જ બતાવવી
@@ -1635,7 +1656,7 @@ return (
 
     {/* Buttons */}
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
-      <button onClick={() => handleDeleteSite(s.id)} style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <button onClick={() => handleDeleteSite(s.site_name, s.id)} style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
         <Trash2 size={14} /> Delete
       </button>
       <div style={{ display: 'flex', gap: '8px' }}>

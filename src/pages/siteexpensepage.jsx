@@ -201,45 +201,44 @@ const handleEditClickWithTimeCheck = (entry) => {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
-  const fetchSites = async () => {
+const fetchSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setSites(data || []);
-        return;
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setSites(sitesData || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: allowedSitesData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+
+          setSites(allowedSitesData || []);
+          return;
+        }
       }
-
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.maybeSingle();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        const { data: allSites } = await supabase.from('sites').select('*');
-        setSites(allSites || []);
-        return;
-      }
-
-      const assignedSitesNames = permData.assigned_sites;
-      const { data: allowedSitesData } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSitesNames);
-
-      setSites(allowedSitesData || []);
-
+      setSites([]);
     } catch (err) {
       console.error('Error fetching sites:', err);
-      const { data: fallbackSites } = await supabase.from('sites').select('*');
-      setSites(fallbackSites || []);
+      setSites([]);
     }
   };
   
@@ -480,15 +479,40 @@ const handleEditClickWithTimeCheck = (entry) => {
   };
 
   // 🌟 માત્ર plant_expenses ટેબલમાંથી જ ડેટા ફેચ થશે (Admin માટે બધા, Supervisor માટે પોતાના)
-  const fetchExpensesHistory = async () => {
+const fetchExpensesHistory = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = (user?.email || session?.user?.email || localStorage.getItem('userEmail') || '').toLowerCase().trim();
+      const currentUser = user || session?.user;
+      const userEmail = (currentUser?.email || '').toLowerCase().trim();
+      const userId = currentUser?.id;
+
+      if (!userEmail && !userId) return;
+
+      // ૧. કરન્ટ યૂઝરનો company_id અને role મેળવો
+      let userCompanyId = null;
+      let userRole = '';
+      if (userId) {
+        const { data: perm } = await supabase
+          .from('user_permissions')
+          .select('company_id, role')
+          .eq('user_id', userId)
+          .maybeSingle();
+        userCompanyId = perm?.company_id;
+        userRole = (perm?.role || '').toLowerCase();
+      }
+
+      // ૨. ડેટાબેઝ રોલના આધારે નક્કી કરો કે એડમિન છે કે નહીં (હાર્ડકોડ વગર)
+      const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm') || userRole.includes('company admin');
 
       let query = supabase.from('plant_expenses').select('*');
 
-      // જો એડમિન ન હોય, તો માત્ર આ સુપરવાઇઝરે કરેલા ખર્ચા જ લાવો
-      if (userEmail !== 'infra.tnj@gmail.com') {
+      // ૩. SaaS કંપની આઈડી ફિલ્ટર (જેથી બીજી કંપનીનો ડેટા ક્યારેય ન દેખાય)
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      // ૪. જો એડમિન ન હોય (એટલે કે સુપરવાઇઝર હોય), તો માત્ર તેના પોતાના ખર્ચા બતાવો
+      if (!isAdmin && userEmail) {
         query = query.eq('submitted_by', userEmail);
       }
 
@@ -592,6 +616,13 @@ const handleEditClickWithTimeCheck = (entry) => {
 
     setLoading(true);
     try {
+
+      let userCompanyId = null;
+    const currentUser = user || session?.user;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
       const expenseInsertRows = [];
 
       for (const row of expenseRows) {
@@ -602,6 +633,7 @@ const handleEditClickWithTimeCheck = (entry) => {
         }
 
         expenseInsertRows.push({
+          company_id: userCompanyId,
           plant_name: selectedSite,
           expense_date: expenseDate,
           expense_category: row.expenseCategory,
@@ -643,6 +675,7 @@ const handleEditClickWithTimeCheck = (entry) => {
           const newStockLedger = row.stockItems
             .filter(sub => sub.qty && Number(sub.qty) > 0)
             .map(sub => ({
+              company_id: userCompanyId,
               date: expenseDate,
               plant_name: selectedSite,
               material_name: sub.selectedMaterial === '__OTHER__' ? (sub.manualMaterialName?.trim() || 'General Tool') : sub.selectedMaterial,

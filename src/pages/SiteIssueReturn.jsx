@@ -47,65 +47,73 @@ export default function IssueReturnPage({ user }) {
 
   // 1. Fetch Sites (સાઇટ્સ ફેચ કરવા માટે)
   useEffect(() => {
-    const fetchSites = async () => {
+const fetchSites = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
         const userId = user?.id || session?.user?.id;
         
-        if (userEmail === 'infra.tnj@gmail.com') {
-          const { data } = await supabase.from('sites').select('*');
-          setSitesList(data || []);
-          return;
+        // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+        let userCompanyId = null;
+        if (userId || userEmail) {
+          let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+          if (userId) permQuery = permQuery.eq('user_id', userId);
+          else permQuery = permQuery.eq('user_id', userEmail);
+          
+          const { data: permData } = await permQuery.maybeSingle();
+          userCompanyId = permData?.company_id;
+
+          const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+          if (isAdmin && userCompanyId) {
+            const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+            setSitesList(sitesData || []);
+            return;
+          }
+
+          if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+            const { data: allowedSitesData } = await supabase
+              .from('sites')
+              .select('*')
+              .eq('company_id', userCompanyId) // 👈 SaaS Filter
+              .in('site_name', permData.assigned_sites);
+
+            setSitesList(allowedSitesData || []);
+            return;
+          }
         }
-
-        let permQuery = supabase.from('user_permissions').select('assigned_sites');
-        if (userId) {
-          permQuery = permQuery.eq('user_id', userId);
-        } else {
-          permQuery = permQuery.eq('user_id', userEmail);
-        }
-
-        const { data: permData, error: permError } = await permQuery.maybeSingle();
-
-        if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-          const { data: allSites } = await supabase.from('sites').select('*');
-          setSitesList(allSites || []);
-          return;
-        }
-
-        const assignedSitesNames = permData.assigned_sites;
-        const { data: allowedSitesData } = await supabase
-          .from('sites')
-          .select('*')
-          .in('site_name', assignedSitesNames);
-
-        setSitesList(allowedSitesData || []);
-
+        setSitesList([]);
       } catch (err) {
         console.error('Error fetching sites:', err);
-        const { data: fallbackSites } = await supabase.from('sites').select('*');
-        setSitesList(fallbackSites || []);
+        setSitesList([]);
       }
     };
     fetchSites();
   }, []);
 
-  // 2. Fetch Materials Master + Inwarded Materials
+  // Materials Fetch માં
   useEffect(() => {
     const fetchMaterials = async () => {
       try {
-        const { data: masterData } = await supabase
-          .from('site_materials_master')
-          .select('*');
-
-        let query = supabase
-          .from('site_material_inward')
-          .select('material_name, item_type, unit');
-        
-        if (selectedSite) {
-          query = query.eq('site_name', selectedSite);
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = user || session?.user;
+        let userCompanyId = null;
+        if (currentUser) {
+          const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+          userCompanyId = p?.company_id;
         }
+
+        let mQuery = supabase.from('site_materials_master').select('*');
+        if (userCompanyId) mQuery = mQuery.eq('company_id', userCompanyId); // 👈 SaaS Filter
+        const { data: masterData } = await mQuery;
+
+        let query = supabase.from('site_material_inward').select('material_name, item_type, unit');
+        if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+        if (selectedSite) query = query.eq('site_name', selectedSite);
+
+      
+        // ... (બાકીનું મર્જિંગ લોજીક સેમ રહેશે)
+        
 
         const { data: inwardData } = await query;
 
@@ -143,7 +151,7 @@ export default function IssueReturnPage({ user }) {
     fetchMaterials();
   }, [selectedSite]);
 
-  // 3. Fetch Contractors / Labours
+ // Contractors Fetch માં
   useEffect(() => {
     const fetchContractors = async () => {
       if (!selectedSite) {
@@ -152,58 +160,84 @@ export default function IssueReturnPage({ user }) {
       }
 
       try {
-       const { data, error } = await supabase
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = user || session?.user;
+        let userCompanyId = null;
+        if (currentUser) {
+          const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+          userCompanyId = p?.company_id;
+        }
+
+        let query = supabase
           .from('contractors')
           .select('*')
           .or(`site_name.eq.${selectedSite},site_name.is.null`)
-          .or('is_active.eq.true,is_active.is.null'); //
+          .or('is_active.eq.true,is_active.is.null');
 
-        if (error) {
-          console.error("Contractors Fetch Error:", error.message);
-        } else {
-          setLabours(data || []);
-        }
+        if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+        const { data, error } = await query;
+        if (!error) setLabours(data || []);
       } catch (err) {
         console.error("Contractors Error:", err);
       }
     };
-
     fetchContractors();
   }, [selectedSite]);
 
   // 4. Fetch Active Pending Tools
-  const fetchActiveIssues = async () => {
+ const fetchActiveIssues = async () => {
     if (!selectedSite) return;
     try {
-      const { data } = await supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      let query = supabase
         .from('plant_tool_transactions')
         .select('*')
-        .eq('plant_name', selectedSite) // ટેબલ કૉલમ plant_name જ છે
-        .eq('status', 'ISSUED')
-        .order('created_at', { ascending: false });
+        .eq('plant_name', selectedSite)
+        .eq('status', 'ISSUED');
 
+      if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+      const { data } = await query.order('created_at', { ascending: false });
       setActiveIssues(data || []);
     } catch (err) {
       console.error("Active issues error:", err);
     }
   };
 
-  // 5. Fetch All History
   const fetchHistory = async () => {
     if (!selectedSite) return;
     try {
-      const { data, error } = await supabase
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      let query = supabase
         .from('plant_tool_transactions')
         .select('*')
-        .eq('plant_name', selectedSite)
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .eq('plant_name', selectedSite);
 
+      if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
       if (!error) setAllHistory(data || []);
     } catch (err) {
       console.error("History error:", err);
     }
   };
+
+ 
 
   useEffect(() => {
     if (selectedSite) {
@@ -312,6 +346,15 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
+    
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+      
       const allTxToInsert = [];
       const stockLedgerRows = [];
 
@@ -353,6 +396,7 @@ export default function IssueReturnPage({ user }) {
             if (updateErr) throw updateErr;
 
             stockLedgerRows.push({
+              company_id: userCompanyId,
               date: issueDate,
               site_name: selectedSite, // 🌟 site_material_stock_ledger માટે site_name
               material_name: mat,
@@ -365,6 +409,7 @@ export default function IssueReturnPage({ user }) {
 
           } else {
             allTxToInsert.push({
+              company_id: userCompanyId,
               plant_name: selectedSite,
               material_name: mat,
               category: itm.category || 'Tools and Hardware',
@@ -390,6 +435,7 @@ export default function IssueReturnPage({ user }) {
 
         insertedTxs.forEach((row) => {
           stockLedgerRows.push({
+            company_id: userCompanyId,
             date: issueDate,
             site_name: selectedSite, // 🌟 site_material_stock_ledger માટે site_name
             material_name: row.material_name,
@@ -457,6 +503,14 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
+      // handleConfirmReturn ની અંદર try block માં:
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
       const today = new Date().toISOString().split('T')[0];
 
       const summaryParts = [];
@@ -482,6 +536,7 @@ export default function IssueReturnPage({ user }) {
         await supabase
           .from('plant_tool_transactions')
           .insert([{
+            company_id: userCompanyId, //
             plant_name: selectedReturnTx.plant_name,
             material_name: selectedReturnTx.material_name,
             category: selectedReturnTx.category,
@@ -515,6 +570,7 @@ export default function IssueReturnPage({ user }) {
         const { error: returnLedgerErr } = await supabase
           .from('site_material_stock_ledger') // 🌟 site_material_stock_ledger
           .insert([{
+            company_id: userCompanyId, //
             date: today,
             site_name: selectedReturnTx.plant_name, // 🌟 site_name
             material_name: selectedReturnTx.material_name,
@@ -534,6 +590,7 @@ export default function IssueReturnPage({ user }) {
         await supabase
           .from('plant_tool_transactions')
           .insert([{
+            company_id: userCompanyId, // 
             plant_name: selectedReturnTx.plant_name,
             material_name: selectedReturnTx.material_name,
             category: selectedReturnTx.category || 'Tools and Hardware',
@@ -568,8 +625,15 @@ export default function IssueReturnPage({ user }) {
 
     setLoading(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
 
+      const today = new Date().toISOString().split('T')[0];
       const { error: txErr } = await supabase
         .from('plant_tool_transactions')
         .update({
@@ -584,6 +648,7 @@ export default function IssueReturnPage({ user }) {
       const { error: ledgerErr } = await supabase
         .from('site_material_stock_ledger') // 🌟 site_material_stock_ledger
         .insert([{
+          company_id: userCompanyId,
           date: today,
           site_name: repairTx.plant_name, // 🌟 site_name
           material_name: repairTx.material_name,

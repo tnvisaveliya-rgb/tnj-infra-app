@@ -64,11 +64,20 @@ useEffect(() => {
     loadSiteBoms() // 🌟 આ નવું ફંક્શન ઉમેરવાનું છે
   }, [])
 
-  const loadSiteBoms = async () => {
-    const { data, error } = await supabase.from('site_bom').select('*');
-    if (!error) {
-      setSiteBoms(data || []);
+ const loadSiteBoms = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
     }
+
+    let query = supabase.from('site_bom').select('*');
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+    const { data, error } = await query;
+    if (!error) setSiteBoms(data || []);
   }
 
   const loadSites = async () => {
@@ -76,34 +85,34 @@ useEffect(() => {
       const userEmail = user?.email;
       const userId = user?.id;
       
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setSites(data || []);
-        return;
+      // ૧. કરન્ટ યૂઝરનો company_id મેળવો
+      let userCompanyId = null;
+      if (userId) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id, assigned_sites, role')
+          .eq('user_id', userId)
+          .maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        // જો એડમિન હોય તો કંપનીની બધી સાઇટ્સ બતાવો
+        if (permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role) && userCompanyId) {
+          const { data: allSites } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setSites(allSites || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: siteData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+          setSites(siteData || []);
+          return;
+        }
       }
-
-      const { data: permData, error: permError } = await supabase
-        .from('user_permissions')
-        .select('assigned_sites')
-        .eq('user_id', userId)
-        .single();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        setSites([]); 
-        return;
-      }
-
-      const assignedSiteNames = permData.assigned_sites;
-      const { data: siteData, error: siteError } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSiteNames);
-
-      if (!siteError && siteData) {
-        setSites(siteData);
-      } else {
-        setSites([]);
-      }
+      setSites([]);
     } catch (err) {
       console.error('Error loading assigned sites:', err);
       setSites([]);
@@ -111,11 +120,20 @@ useEffect(() => {
   }
 
   const loadContractors = async () => {
-    const { data, error } = await supabase.from('contractors').select('*')
-    .or('is_active.eq.true,is_active.is.null');
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let query = supabase.from('contractors').select('*').or('is_active.eq.true,is_active.is.null');
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+    const { data, error } = await query;
     if (!error) setContractors(data || []);
   }
-
 
 
   // ⏰ ૨૪ કલાક ચેક કરવા માટે
@@ -223,12 +241,24 @@ const handleDeleteReport = (reportId) => {
   };
 const loadMaterialsMaster = async () => {
     try {
-      // 🌟 ૧. ટેબલનું નામ બદલીને 'site_material_stock_ledger' કર્યું
-      const { data, error } = await supabase
-        .from('site_material_inward')
-        .select('material_name, site_name');
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      let query = supabase.from('site_material_inward').select('material_name, site_name, company_id');
+      if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+      const { data, error } = await query;
+      // બાકીનું સેમ લોજીક...
 
       if (!error && data) {
+
+
+        
         // 🌟 ૨. લેજરમાંથી ડુપ્લિકેટ નામ દૂર કરીને યુનિક લિસ્ટ બનાવવું
         const uniqueMaterials = [];
         const seen = new Set();
@@ -259,9 +289,20 @@ const loadMaterialsMaster = async () => {
       setMaterialsMaster([]);
     }
   }
-  const loadReports = async () => {
-    const { data } = await supabase.from('daily_reports').select('*').order('created_at', { ascending: false })
-    setReports(data || [])
+const loadReports = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let query = supabase.from('daily_reports').select('*');
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+    const { data } = await query.order('created_at', { ascending: false });
+    setReports(data || []);
   }
 
   const currentSiteContractors = contractors.filter(c => c.site_name === reportForm.siteName || c.site_name === 'All Sites (General)')
@@ -395,6 +436,13 @@ const confirmAndSave = async () => {
     setError('')
     try {
       const supervisorEmail = user?.email || 'Supervisor'
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
       let reportId = null;
 
       if (editingReportId) {
@@ -407,6 +455,7 @@ const confirmAndSave = async () => {
             paling_work: reportForm.palingWorkRows,
             description: reportForm.description,
             report_date: reportForm.reportDate,
+            company_id: userCompanyId
           })
           .eq('id', editingReportId);
 
@@ -427,6 +476,7 @@ const confirmAndSave = async () => {
         const { data: insertedReport, error: repError } = await supabase
           .from('daily_reports')
           .insert([{
+            company_id: userCompanyId,
             site_name: reportForm.siteName,
             contractor_details: reportForm.contractorRows,
             paling_work: reportForm.palingWorkRows,
@@ -454,6 +504,7 @@ const confirmAndSave = async () => {
             // Column Installation
             if (wItem.workType === '1. Column Installation' && wItem.columnSize && wItem.quantity) {
               ledgerRows.push({
+                company_id: userCompanyId,
                 site_name: reportForm.siteName,
                 date: reportForm.reportDate,
                 material_name: `Column ${wItem.columnSize}`,
@@ -467,6 +518,7 @@ const confirmAndSave = async () => {
             // Panel Erection
             if (wItem.workType === '3. Panel Erection' && wItem.columnSize && wItem.quantity) {
               ledgerRows.push({
+                company_id: userCompanyId,
                 site_name: reportForm.siteName,
                 date: reportForm.reportDate,
                 material_name: `Panel ${wItem.columnSize}`,
@@ -481,6 +533,7 @@ const confirmAndSave = async () => {
             if (wItem.workType === '2. Column Concrete') {
               if (wItem.concreteType === 'RMC' && wItem.actualRmcQty) {
                 ledgerRows.push({
+                  company_id: userCompanyId,
                   site_name: reportForm.siteName,
                   date: reportForm.reportDate,
                   material_name: 'RMC Concrete',
@@ -493,6 +546,7 @@ const confirmAndSave = async () => {
                 const actualBags = parseFloat(wItem.actualCementBags) || 0;
                 if (actualBags > 0) {
                   ledgerRows.push({
+                    company_id: userCompanyId,
                     site_name: reportForm.siteName,
                     date: reportForm.reportDate,
                     material_name: 'Cement',
@@ -515,6 +569,7 @@ const confirmAndSave = async () => {
                       const totalConsump = singleQ * Number(item.consumption);
                       if (totalConsump > 0) {
                         ledgerRows.push({
+                          company_id: userCompanyId,
                           site_name: reportForm.siteName,
                           date: reportForm.reportDate,
                           material_name: item.material,
@@ -534,6 +589,7 @@ const confirmAndSave = async () => {
                       const totalConsump = doubleQ * Number(item.consumption);
                       if (totalConsump > 0) {
                         ledgerRows.push({
+                          company_id: userCompanyId,
                           site_name: reportForm.siteName,
                           date: reportForm.reportDate,
                           material_name: item.material,
@@ -552,6 +608,7 @@ const confirmAndSave = async () => {
             // Finishing Work
             if (wItem.workType === '4. Finishing Work' && wItem.cementBags) {
               ledgerRows.push({
+                company_id: userCompanyId,
                 site_name: reportForm.siteName,
                 date: reportForm.reportDate,
                 material_name: 'Cement',

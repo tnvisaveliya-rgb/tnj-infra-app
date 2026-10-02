@@ -43,53 +43,60 @@ export default function SiteMaterialDamage({ user }) {
     }
   }, [selectedSiteId]);
 
-  const fetchSites = async () => {
+const fetchSites = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
       const userId = user?.id || session?.user?.id;
       
-      if (userEmail === 'infra.tnj@gmail.com') {
-        const { data } = await supabase.from('sites').select('*');
-        setSitesList(data || []);
-        return;
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
+
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
+
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          setSitesList(sitesData || []);
+          return;
+        }
+
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const { data: allowedSitesData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', permData.assigned_sites);
+
+          setSitesList(allowedSitesData || []);
+          return;
+        }
       }
-
-      let permQuery = supabase.from('user_permissions').select('assigned_sites');
-      if (userId) {
-        permQuery = permQuery.eq('user_id', userId);
-      } else {
-        permQuery = permQuery.eq('user_id', userEmail);
-      }
-
-      const { data: permData, error: permError } = await permQuery.maybeSingle();
-
-      if (permError || !permData || !permData.assigned_sites || permData.assigned_sites.length === 0) {
-        const { data: allSites } = await supabase.from('sites').select('*');
-        setSitesList(allSites || []);
-        return;
-      }
-
-      const assignedSitesNames = permData.assigned_sites;
-      const { data: allowedSitesData } = await supabase
-        .from('sites')
-        .select('*')
-        .in('site_name', assignedSitesNames);
-
-      setSitesList(allowedSitesData || []);
+      setSitesList([]);
     } catch (err) {
       console.error('Error fetching sites:', err);
-      const { data: fallbackSites } = await supabase.from('sites').select('*');
-      setSitesList(fallbackSites || []);
+      setSitesList([]);
     }
   };
-
   const fetchMaterialsMaster = async (siteId) => {
     try {
-      const { data, error } = await supabase
-        .from('site_materials_master')
-        .select('*')
-        .or(`plant_id.eq.${siteId},plant_id.is.null`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
+
+      let query = supabase.from('site_materials_master').select('*');
+      if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+      const { data, error } = await query;
       
       if (!error && data) {
         setMaterials(data);
@@ -98,7 +105,6 @@ export default function SiteMaterialDamage({ user }) {
       console.error("Master materials fetch error:", err);
     }
   };
-
   const handleSiteChange = (e) => {
     const siteName = e.target.value;
     setSelectedSite(siteName);
@@ -179,6 +185,14 @@ export default function SiteMaterialDamage({ user }) {
     const { data: { session } } = await supabase.auth.getSession();
     const currentLoggedUser = session?.user?.email || session?.user?.id || user?.email || user?.id || 'Supervisor';
 
+    // 🌟 કરન્ટ યૂઝરનો company_id મેળવો
+    let userCompanyId = null;
+    const currentUser = user || session?.user;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
     setLoading(true);
     try {
       let materialLedgerRows = [];
@@ -191,6 +205,7 @@ export default function SiteMaterialDamage({ user }) {
           const { data: insertedData, error: insErr } = await supabase
             .from('site_material_damage')
             .insert([{
+              company_id: userCompanyId,
               date: dprDate,
               site_name: selectedSite,
               material_name: item.material,
@@ -207,6 +222,7 @@ export default function SiteMaterialDamage({ user }) {
 
           // 🌟 site_material_stock_ledger માં OUTWARD તરીકે એન્ટ્રી જેથી સ્ટોક માઇનસ થઈ જાય
           materialLedgerRows.push({
+            company_id: userCompanyId,
             date: dprDate,
             site_name: selectedSite,
             material_name: item.material,

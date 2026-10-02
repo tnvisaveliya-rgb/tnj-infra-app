@@ -9,12 +9,39 @@ function AdminLeaveRequests() {
   }, []);
 
   const fetchLeaveRequests = async () => {
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (!error) setRequests(data || []);
+    try {
+      // ૧. Current admin no company_id melovo
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = session?.user;
+      let userCompanyId = null;
+
+      if (currentUser) {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+        userCompanyId = permData?.company_id;
+      }
+
+      // ૨. Leave requests query banavo
+      let query = supabase
+        .from('leave_requests')
+        .select('*');
+
+      // 🎯 SaaS Multi-Tenant Filter: Phakat potani company na staff ni leave requests j aavse
+      if (userCompanyId) {
+        query = query.eq('company_id', userCompanyId);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+      
+      if (!error) {
+        setRequests(data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching leave requests:", err);
+    }
   };
 
   const handleLeaveAction = async (req, statusType) => {

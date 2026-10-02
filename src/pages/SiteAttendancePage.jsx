@@ -53,51 +53,51 @@ function SiteAttendancePage({ sites = [], user }) {
   }, [supervisorEmail]);
 
 const loadSites = async () => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
-    const userId = user?.id || session?.user?.id;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = user?.email || session?.user?.email || localStorage.getItem('userEmail') || '';
+      const userId = user?.id || session?.user?.id;
 
-    if (userEmail === 'infra.tnj@gmail.com') {
-      const { data: sitesData } = await supabase.from('sites').select('*'); // 👈 બદલેલ કોડ
-      const formattedSites = (sitesData || []).map(s => ({ id: `site_${s.id}`, name: s.site_name || s.name })); // 👈 બદલેલ કોડ
-      setFetchedSites(formattedSites);
-      return;
-    }
+      let userCompanyId = null;
+      if (userId || userEmail) {
+        let permQuery = supabase.from('user_permissions').select('company_id, assigned_sites, role');
+        if (userId) permQuery = permQuery.eq('user_id', userId);
+        else permQuery = permQuery.eq('user_id', userEmail);
+        
+        const { data: permData } = await permQuery.maybeSingle();
+        userCompanyId = permData?.company_id;
 
-    let permQuery = supabase.from('user_permissions').select('assigned_sites'); // 👈 બદલેલ કોડ
-    if (userId) {
-      permQuery = permQuery.eq('user_id', userId);
-    } else {
-      permQuery = permQuery.eq('user_id', userEmail);
-    }
+        const isAdmin = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
 
-    const { data: permData, error: permError } = await permQuery.single();
+        if (isAdmin && userCompanyId) {
+          const { data: sitesData } = await supabase.from('sites').select('*').eq('company_id', userCompanyId);
+          const formattedSites = (sitesData || []).map(s => ({ id: `site_${s.id}`, name: s.site_name || s.name }));
+          setFetchedSites(formattedSites);
+          return;
+        }
 
-    if (permError || !permData || !permData.assigned_sites) {
-      setFetchedSites([]); 
-      return;
-    }
+        if (permData && permData.assigned_sites && permData.assigned_sites.length > 0) {
+          const assignedSiteNames = permData.assigned_sites || [];
+          const { data: siteData } = await supabase
+            .from('sites')
+            .select('*')
+            .eq('company_id', userCompanyId) // 👈 SaaS Filter
+            .in('site_name', assignedSiteNames);
 
-    const assignedSiteNames = permData.assigned_sites || [];
-    let allowedSites = [];
-
-    if (assignedSiteNames.length > 0) {
-      const { data: siteData } = await supabase.from('sites').select('*').in('site_name', assignedSiteNames);
-      if (siteData) {
-        allowedSites = siteData.map(s => ({ 
-          id: `site_${s.id}`, 
-          name: s.site_name || s.name 
-        }));
+          const allowedSites = (siteData || []).map(s => ({ 
+            id: `site_${s.id}`, 
+            name: s.site_name || s.name 
+          }));
+          setFetchedSites(allowedSites);
+          return;
+        }
       }
+      setFetchedSites([]);
+    } catch (err) {
+      console.error('Error loading assigned sites:', err);
+      setFetchedSites([]);
     }
-
-    setFetchedSites(allowedSites);
-  } catch (err) {
-    console.error('Error loading assigned sites:', err);
-    setFetchedSites([]);
-  }
-};
+  };
   const availableSites = (sites && sites.length > 0) ? sites : fetchedSites;
 
   const checkLocation = () => {
@@ -110,29 +110,49 @@ const loadSites = async () => {
       setLocationStatus('Geolocation not supported');
     }
   };
-  const loadMyLeaves = async (email) => {
-    const { data, error } = await supabase
+const loadMyLeaves = async (email) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
+    let query = supabase
       .from('leave_requests')
       .select('*')
-      .eq('employee_email', email)
-      .order('created_at', { ascending: false });
+      .eq('employee_email', email);
+
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
+
+    const { data, error } = await query.order('created_at', { ascending: false });
     
     if (!error && data) {
       setMyLeaveRequests(data);
     }
   };
 
-  const loadAttendanceHistory = async (email) => {
+const loadAttendanceHistory = async (email) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = user || session?.user;
+    let userCompanyId = null;
+    if (currentUser) {
+      const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+      userCompanyId = p?.company_id;
+    }
+
     let query = supabase
       .from('site_attendance')
       .select('*')
-      .eq('employee_name', email)
-      .order('created_at', { ascending: false });
+      .eq('employee_name', email);
+
+    if (userCompanyId) query = query.eq('company_id', userCompanyId); // 👈 SaaS Filter
 
     if (fromDate) query = query.gte('created_at', `${fromDate}T00:00:00`);
     if (toDate) query = query.lte('created_at', `${toDate}T23:59:59`);
 
-    const { data, error } = await query;
+    const { data, error } = await query.order('created_at', { ascending: false });
     
     if (error) {
       console.error("Error loading history:", error.message);
@@ -396,8 +416,16 @@ const handleLeaveSubmit = async () => {
 
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUser = user || session?.user;
+      let userCompanyId = null;
+      if (currentUser) {
+        const { data: p } = await supabase.from('user_permissions').select('company_id').eq('user_id', currentUser.id).maybeSingle();
+        userCompanyId = p?.company_id;
+      }
       const { error } = await supabase.from('leave_requests').insert([
         {
+          company_id: userCompanyId,  
           employee_email: supervisorEmail,
           from_date: leaveFromDate,
           to_date: leaveToDate,

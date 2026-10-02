@@ -560,6 +560,8 @@ const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isExpensePopupOpen, setIsExpensePopupOpen] = useState(false);
   const [expenseInitialTab, setExpenseInitialTab] = useState('plantexpense');
   const [incomeInitialTab, setIncomeInitialTab] = useState('supervisiorfundrequest');
+
+
 const [isAdmin, setIsAdmin] = useState(false); // 👈 એડમિન ચેક કરવા માટે
   const [finishedGoodsStock, setFinishedGoodsStock] = useState([]); // 👈 ફિનિશ્ડ ગુડ્સના ડેટા માટે
 const [attendanceInfo, setAttendanceInfo] = useState({
@@ -604,93 +606,153 @@ const [attendanceInfo, setAttendanceInfo] = useState({
 useEffect(() => {
     const fetchPlantList = async () => {
       try {
-        if (!user) return;
+        const userEmail = (user?.email || '').trim().toLowerCase();
+        const userId = user?.id;
 
-        const { data: permData, error: permErr } = await supabase
+        if (!userEmail && !userId) return;
+
+        // 🌟 ૧. Current user no company_id ane role melovo
+        let userCompanyId = null;
+        let userRole = '';
+        
+        const { data: perm } = await supabase
           .from('user_permissions')
-          .select('role, assigned_plants, company_id')
-          .eq('user_id', user.id)
+          .select('company_id, role, assigned_plants')
+          .eq('user_id', userId)
           .maybeSingle();
 
-        const adminCheck = permData && ['Manager', 'Admin', 'BDM', 'Company Admin'].includes(permData.role);
-        setIsAdmin(adminCheck);
+        userCompanyId = perm?.company_id;
+        userRole = (perm?.role || '').toLowerCase();
 
-        if (adminCheck && permData.company_id) {
-          // 🎯 એડમિન માટે: કંપનીના બધા પ્લાન્ટ્સ તરત જ ફેચ કરો
-          const { data, error } = await supabase
-            .from('plants')
-            .select('plant_name')
-            .eq('company_id', permData.company_id);
+        const adminCheck = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm') || userRole.includes('company admin') || userEmail === 'infra.tnj@gmail.com';
+        setIsAdmin(adminCheck); // 👈 આનાથી Finished Goods નું બોક્સ દેખાવા લાગશે!
 
+        // 🌟 ૨. Jo Admin hoy to te j company na badha plants aavse
+        if (adminCheck && userCompanyId) {
+          const { data, error } = await supabase.from('plants').select('plant_name').eq('company_id', userCompanyId);
           if (!error && data) {
             const unique = [...new Set(data.map(d => d.plant_name).filter(Boolean))];
             setPlantList(unique);
-            // 🌟 મહત્ત્વનું: જો પ્લાન્ટ લિસ્ટ આવી જાય તો તરત જ ડેશબોર્ડ ડેટા પણ કોલ કરી દો
-            fetchDashboardData(unique); 
+            if (unique.length > 0 && selectedPlant === 'All') {
+              setSelectedPlant('All');
+            }
+          }
+          return;
+        }
+
+        // 🌟 ૩. Supervisor mate fakt assigned_plants j aavse
+        let assigned = perm?.assigned_plants || [];
+        if (typeof assigned === 'string') {
+          try { assigned = JSON.parse(assigned); } catch(e) { assigned = []; }
+        }
+
+        if (assigned.length > 0 && userCompanyId) {
+          const { data: plantData } = await supabase
+            .from('plants')
+            .select('plant_name')
+            .eq('company_id', userCompanyId)
+            .in('plant_name', assigned);
+
+          const validPlants = (plantData || []).map(d => d.plant_name).filter(Boolean);
+          setPlantList(validPlants);
+          if (validPlants.length > 0 && selectedPlant === 'All') {
+            setSelectedPlant(validPlants[0]);
           }
         } else {
-          let assigned = permData?.assigned_plants || [];
-          if (typeof assigned === 'string') {
-              try { assigned = JSON.parse(assigned); } catch(e) { assigned = []; }
-          }
-          setPlantList(assigned);
-          if (assigned.length > 0) {
-            setSelectedPlant(assigned[0]); 
-          }
+          setPlantList([]);
+          setSelectedPlant('');
         }
+
       } catch (err) {
         console.error('Error fetching plant list:', err);
+        setPlantList([]);
       }
     };
 
-    fetchPlantList();
+    if (user) {
+      fetchPlantList();
+    }
   }, [user]);
+
+
 const fetchDashboardData = async () => {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const userEmail = (user?.email || '').toLowerCase().trim();
+      const userId = user?.id; // 👈 userId ની એરર કાયમ માટે સોલ્વ
 
       if (!userEmail) return;
+
+      // 🌟 ૧. કરન્ટ યૂઝરનો company_id અને role મેળવો
+      let userCompanyId = null;
+      let userRole = '';
+      if (userId) {
+        const { data: p } = await supabase
+          .from('user_permissions')
+          .select('company_id, role')
+          .eq('user_id', userId)
+          .maybeSingle();
+        userCompanyId = p?.company_id;
+        userRole = (p?.role || '').toLowerCase();
+      }
+
+      const isAdmin = userRole.includes('admin') || userRole.includes('manager') || userRole.includes('bdm') || userRole.includes('company admin') || userEmail === 'infra.tnj@gmail.com';
+let activePlants = plantList;
+      if (!activePlants || activePlants.length === 0) {
+        if (isAdmin && userCompanyId) {
+          const { data: pData } = await supabase.from('plants').select('plant_name').eq('company_id', userCompanyId);
+          activePlants = (pData || []).map(d => d.plant_name).filter(Boolean);
+        } else if (userId) {
+          const { data: perm } = await supabase.from('user_permissions').select('assigned_plants').eq('user_id', userId).maybeSingle();
+          let assigned = perm?.assigned_plants || [];
+          if (typeof assigned === 'string') {
+            try { assigned = JSON.parse(assigned); } catch(e) { assigned = []; }
+          }
+          activePlants = assigned;
+        }
+      }
+      if (!isAdmin && (!activePlants || activePlants.length === 0)) {
+        setWorkingBalance(0);
+        setTodayExpense(0);
+        setRawMaterialsStock([]);
+        setFinishedGoodsStock([]);
+        return;
+      }
 
       let totalIncome = 0;
       let totalExpense = 0;
       let todayExpSum = 0;
 
       // =========================================================
-      // ૧. યુઝરને મળેલી તમામ ફંડ આવક (USER ID SPECIFIC)
+      // ૨. ફંડ આવક (Plant Fund Transfers) - Company ID સાથે ફિલ્ટર
       // =========================================================
-      const { data: fundData, error: fundErr } = await supabase
-        .from('plant_fund_transfers')
-        .select('*');
+      let fundQuery = supabase.from('plant_fund_transfers').select('*');
+      if (userCompanyId) fundQuery = fundQuery.eq('company_id', userCompanyId);
+      const { data: fundData, error: fundErr } = await fundQuery;
 
       if (!fundErr && fundData) {
         fundData.forEach(item => {
           const status = (item.status || '').toUpperCase();
           const recBy = (item.received_by || '').toLowerCase().trim();
-
-          // માત્ર આ યુઝરને મળેલ અને સ્વીકારેલ (RECEIVED) ફંડ
           if (status === 'RECEIVED' && recBy === userEmail) {
-            const amt = parseFloat(item.approved_amount || item.requested_amount || 0);
-            totalIncome += amt;
+            totalIncome += parseFloat(item.approved_amount || item.requested_amount || 0);
           }
         });
       }
 
       // =========================================================
-      // ૨. યુઝરે કરેલા પ્લાન્ટ ખર્ચા (PLANT EXPENSES BY USER)
+      // ૩. પ્લાન્ટ ખર્ચા (Plant Expenses) - Company ID સાથે ફિલ્ટર
       // =========================================================
-      const { data: plantExpData, error: plantExpErr } = await supabase
-        .from('plant_expenses')
-        .select('*');
+      let plantExpQuery = supabase.from('plant_expenses').select('*');
+      if (userCompanyId) plantExpQuery = plantExpQuery.eq('company_id', userCompanyId);
+      const { data: plantExpData, error: plantExpErr } = await plantExpQuery; // 👈 plantExpErr ડીફાઇન કર્યો
 
       if (!plantExpErr && plantExpData) {
         plantExpData.forEach(item => {
           const subBy = (item.submitted_by || item.created_by || '').toLowerCase().trim();
-          
           if (subBy === userEmail) {
             const amt = parseFloat(item.amount || 0);
             const itemDate = item.expense_date || (item.created_at ? item.created_at.split('T')[0] : '');
-
             totalExpense += amt;
             if (itemDate === todayStr) {
               todayExpSum += amt;
@@ -700,35 +762,23 @@ const fetchDashboardData = async () => {
       }
 
       // =========================================================
-      // ૩. સાઇટ ટ્રાન્ઝેક્શન્સ (SITE TRANSACTIONS BY USER)
+      // ૪. સાઇટ ટ્રાન્ઝેક્શન્સ (Site Transactions)
       // =========================================================
-      const { data: siteTxData, error: siteTxErr } = await supabase
-        .from('site_transactions')
-        .select('*');
+      let siteTxQuery = supabase.from('site_transactions').select('*');
+      if (userCompanyId) siteTxQuery = siteTxQuery.eq('company_id', userCompanyId);
+      const { data: siteTxData, error: siteTxErr } = await siteTxQuery;
 
       if (!siteTxErr && siteTxData) {
         siteTxData.forEach(item => {
           const creator = (item.created_by || item.user_id || item.email || '').toLowerCase().trim();
-
           if (creator === userEmail) {
             const amt = parseFloat(item.amount || item.net_amount || item.total_amount || 0);
             const itemDate = item.date || item.transaction_date || (item.created_at ? item.created_at.split('T')[0] : '');
             const typeStr = (item.type || item.transaction_type || '').toLowerCase();
 
-            if (
-              typeStr.includes('income') || 
-              typeStr.includes('credit') || 
-              typeStr.includes('fund') || 
-              typeStr.includes('receive') || 
-              typeStr.includes('deposit')
-            ) {
+            if (typeStr.includes('income') || typeStr.includes('credit') || typeStr.includes('fund') || typeStr.includes('receive') || typeStr.includes('deposit')) {
               totalIncome += amt;
-            } else if (
-              typeStr.includes('expense') || 
-              typeStr.includes('debit') || 
-              typeStr.includes('payment') || 
-              typeStr.includes('cash')
-            ) {
+            } else if (typeStr.includes('expense') || typeStr.includes('debit') || typeStr.includes('payment') || typeStr.includes('cash')) {
               totalExpense += amt;
               if (itemDate === todayStr) {
                 todayExpSum += amt;
@@ -738,32 +788,22 @@ const fetchDashboardData = async () => {
         });
       }
 
-      // 🌟 લાઈવ શિલક (Live Cash in Hand with logged-in user)
       setWorkingBalance(totalIncome - totalExpense);
       setTodayExpense(todayExpSum);
 
-   
-  // ૪. RAW MATERIAL, STORE & ASSETS STOCK
+      // =========================================================
+      // ૫. રૉ મટીરિયલ સ્ટોક (Material Stock Ledger)
+      // =========================================================
       let matQuery = supabase.from('material_stock_ledger').select('*');
-      
+      if (userCompanyId) matQuery = matQuery.eq('company_id', userCompanyId);
+
       if (selectedPlant && selectedPlant !== 'All') {
         matQuery = matQuery.eq('plant_name', selectedPlant);
-      } else {
-        // 🎯 Fix: Jo plantList huju load na thayu hoy, to direct plants table mathi naamo lai lo
-        let activePlants = plantList;
-        if (!activePlants || activePlants.length === 0) {
-          const { data: allPlantsData } = await supabase.from('plants').select('plant_name');
-          if (allPlantsData && allPlantsData.length > 0) {
-            activePlants = allPlantsData.map(p => p.plant_name).filter(Boolean);
-          }
-        }
-        
-        if (activePlants.length > 0) {
-          matQuery = matQuery.in('plant_name', activePlants);
-        }
+      } else if (activePlants && activePlants.length > 0) {
+        matQuery = matQuery.in('plant_name', activePlants);
       }
 
-      const { data: matLedger, error: matErr } = await matQuery;
+      const { data: matLedger, error: matErr } = await matQuery; // 👈 matErr ડીફાઇન કર્યો
 
       if (!matErr && matLedger) {
         const stockMap = {};
@@ -771,31 +811,18 @@ const fetchDashboardData = async () => {
         const checkIsRawMaterial = (name) => {
           const n = name.toLowerCase();
           return (
-            n.includes('cement') ||
-            n.includes('steel') ||
-            n.includes('wire') ||
-            n.includes('mm') ||
-            n.includes('aggregate') ||
-            n.includes('sand') ||
-            n.includes('dust') ||
-            n.includes('flyash') ||
-            n.includes('rmc') ||
-            n.includes('tmt')
+            n.includes('cement') || n.includes('steel') || n.includes('wire') ||
+            n.includes('mm') || n.includes('aggregate') || n.includes('sand') ||
+            n.includes('dust') || n.includes('flyash') || n.includes('rmc') || n.includes('tmt')
           );
         };
 
         const checkIsAsset = (name) => {
           const n = name.toLowerCase();
           return (
-            n.includes('mould') ||
-            n.includes('mold') ||
-            n.includes('machine') ||
-            n.includes('vibrator') ||
-            n.includes('panel') ||
-            n.includes('crane') ||
-            n.includes('batching') ||
-            n.includes('silow') ||
-            n.includes('asset')
+            n.includes('mould') || n.includes('mold') || n.includes('machine') ||
+            n.includes('vibrator') || n.includes('panel') || n.includes('crane') ||
+            n.includes('batching') || n.includes('silow') || n.includes('asset')
           );
         };
 
@@ -816,94 +843,89 @@ const fetchDashboardData = async () => {
               determinedCategory = 'raw';
             }
 
-            stockMap[key] = { 
-              name: rawName, 
-              stock: 0, 
-              unit,
-              category: determinedCategory
-            };
+            stockMap[key] = { name: rawName, stock: 0, unit, category: determinedCategory };
           }
 
           if (type === 'INWARD' || type === 'IN' || type.includes('INWARD')) {
             stockMap[key].stock += qty;
-          } else if (
-            type === 'OUTWARD' || 
-            type === 'OUT' || 
-            type.includes('CONSUM') || 
-            type.includes('ISSUE') || 
-            type.includes('OUTWARD')
-          ) {
+          } else if (type === 'OUTWARD' || type === 'OUT' || type.includes('CONSUM') || type.includes('ISSUE')) {
             stockMap[key].stock -= qty;
           }
         });
 
         setRawMaterialsStock(Object.values(stockMap));
+      } else {
+        setRawMaterialsStock([]);
       }
 
+// =========================================================
+      // ૬. ફિનિશ્ડ ગુડ્સ સ્ટોક (Finished Goods Stock) - સુધારેલું અને સુરક્ષિત લોજિક
+      // =========================================================
+      if (!activePlants || activePlants.length === 0) {
+        setFinishedGoodsStock([]);
+      } else {
+        try {
+          let fgQuery = supabase.from('stock_ledger').select('*');
+          
+          // જો કૉલમ ઉપલબ્ધ હોય તો જ company_id ફિલ્ટર લગાવો, નહીંતર એરર ન આવે
+          if (userCompanyId) {
+            // નોંધ: જો stock_ledger ટેબલમાં company_id કૉલમ ન હોય તો આ લાઈન કમેન્ટ કરી શકાય
+            fgQuery = fgQuery.eq('company_id', userCompanyId);
+          }
 
-       // 🌟 Finished Goods stock lavva mate (isAdmin check vagar direct query)
-      try {
-        let fgQuery = supabase.from('stock_ledger').select('*');
-        
-        let activePlants = plantList;
-        if (!activePlants || activePlants.length === 0) {
-          const { data: dbPlants } = await supabase.from('plants').select('plant_name');
-          if (dbPlants) activePlants = dbPlants.map(p => p.plant_name).filter(Boolean);
+          if (selectedPlant && selectedPlant !== 'All') {
+            fgQuery = fgQuery.eq('plant_name', selectedPlant);
+          } else {
+            fgQuery = fgQuery.in('plant_name', activePlants);
+          }
+
+          const { data: fgData, error: fgError } = await fgQuery;
+          
+          if (fgError) {
+            console.error("FG Stock Fetch Error:", fgError.message);
+            setFinishedGoodsStock([]);
+          } else if (fgData && fgData.length > 0) {
+            const fgStockMap = {};
+
+            fgData.forEach(item => {
+              const pName = (item.product_name || item.name || '').trim().toUpperCase(); 
+              const pVariant = (item.size_variant || item.variant || '').trim(); 
+              const uniqueKey = `${pName} | ${pVariant}`.trim();
+
+              if (!uniqueKey || uniqueKey === '|') return;
+
+              const type = (item.transaction_type || '').toUpperCase();
+              const qty = Number(item.qty || item.quantity || 0);
+
+              if (!fgStockMap[uniqueKey]) {
+                fgStockMap[uniqueKey] = { name: pName, variant: pVariant, stock: 0, unit: 'Nos' };
+              }
+
+              if (type === 'PRODUCTION' || type === 'INWARD' || type === 'IN') {
+                fgStockMap[uniqueKey].stock += qty;
+              } else if (type === 'OUTWARD' || type === 'BROKEN' || type === 'OUT') {
+                fgStockMap[uniqueKey].stock -= qty;
+              }
+            });
+
+            setFinishedGoodsStock(Object.values(fgStockMap));
+          } else {
+            setFinishedGoodsStock([]); 
+          }
+        } catch (fgCatchErr) {
+          console.error("FG Stock Catch Error:", fgCatchErr);
+          setFinishedGoodsStock([]);
         }
-
-        if (selectedPlant && selectedPlant !== 'All') {
-          fgQuery = fgQuery.eq('plant_name', selectedPlant);
-        } else if (activePlants.length > 0) {
-          fgQuery = fgQuery.in('plant_name', activePlants);
-        }
-
-        const { data: fgData, error: fgError } = await fgQuery;
-        
-        if (!fgError && fgData) {
-          const fgStockMap = {};
-
-          fgData.forEach(item => {
-            const pName = (item.product_name || item.name || '').trim().toUpperCase(); 
-            const pVariant = (item.size_variant || item.variant || '').trim(); 
-            const uniqueKey = `${pName} | ${pVariant}`.trim();
-
-            if (!uniqueKey || uniqueKey === '|') return;
-
-            const type = (item.transaction_type || '').toUpperCase();
-            const qty = Number(item.qty || item.quantity || 0);
-
-            if (!fgStockMap[uniqueKey]) {
-              fgStockMap[uniqueKey] = { 
-                name: pName, 
-                variant: pVariant, 
-                stock: 0, 
-                unit: 'Nos'
-              };
-            }
-
-            if (type === 'PRODUCTION' || type === 'INWARD' || type === 'IN') {
-              fgStockMap[uniqueKey].stock += qty;
-            } else if (type === 'OUTWARD' || type === 'BROKEN' || type === 'OUT') {
-              fgStockMap[uniqueKey].stock -= qty;
-            }
-          });
-
-          setFinishedGoodsStock(Object.values(fgStockMap));
-        } else {
-          setFinishedGoodsStock([]); 
-        }
-      } catch (err) {
-        console.error('Error fetching FG stock:', err);
-        setFinishedGoodsStock([]); 
       }
-// ૫. ATTENDANCE FETCH
-      const { data: attData, error: attError } = await supabase
-        .from('site_attendance')
-        .select('*')
-        .order('created_at', { ascending: false }); // 👈 માત્ર આ એક નવી લાઈન ઉમેરો!
+
+      // =========================================================
+      // ૭. એટેન્ડન્સ (Attendance)
+      // =========================================================
+      let attQuery = supabase.from('site_attendance').select('*');
+      if (userCompanyId) attQuery = attQuery.eq('company_id', userCompanyId);
+      const { data: attData, error: attError } = await attQuery.order('created_at', { ascending: false });
 
       if (!attError && attData && attData.length > 0) {
-        // હવે નવો ડેટા (OUT) પહેલા આવશે, એટલે find() સાચો જ પંચ પકડશે
         const userAtt = attData.find(a => 
           (a.employee_name === userEmail || a.created_by === userEmail) && 
           (a.created_at && a.created_at.split('T')[0] === todayStr)
