@@ -320,7 +320,7 @@ function App() {
       if (data) {
         setTenantData(data);
         // Website નું title અપડેટ થશે
-        document.title = `${data.name} - ERP Portal`;
+       document.title = `${data.company_name || 'T&J Infra'} - ERP Portal`;
         
         // Browser tab નો લોગો (favicon) અપડેટ થશે
         const favicon = document.getElementById('dynamic-favicon');
