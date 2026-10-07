@@ -14,6 +14,7 @@ export default function PlantOutwardPage({ user }) {
   const [showPreview, setShowPreview] = useState(false);
   const [availableSpecs, setAvailableSpecs] = useState({}); // { "itemKey": ["3mm - 4 wires", ...] }
   const [companyDetails, setCompanyDetails] = useState(null);
+  const [selectedPlantDetails, setSelectedPlantDetails] = useState(null);
   
   const [loading, setLoading] = useState(false);
   const [transporters, setTransporters] = useState([]);
@@ -353,6 +354,8 @@ if (itemCategory === 'Finished Product') {
     const foundPlant = plants.find(p => p.plant_name === plantName);
     const plantId = foundPlant ? foundPlant.id : '';
     setSelectedPlantId(plantId);
+    // 🎯 અહીં સિલેક્ટ કરેલા પ્લાન્ટની પૂરેપૂરી વિગતો સેવ કરી લો (ચલણ પ્રિન્ટ કરવા માટે)
+    setSelectedPlantDetails(foundPlant || null);
 
     if (plantName) {
       // 1. ડેટાબેઝમાંથી પેલા પ્લાન્ટનો છેલ્લો DC નંબર શોધીને નવો DC નંબર બનાવો
@@ -841,13 +844,18 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
           `;
         }).join('')
       : `<tr><td colspan="5" style="text-align: center; padding: 10px;">No items found</td></tr>`;
-
-   // 🎯 અહીં કંપનીની ડાયનેમિક વિગતો સેટ કરો
-    const cName = companyDetails?.company_name || 'T&J INFRA';
-    const cLogo = companyDetails?.logo_url || COMPANY_LOGO_BASE64;
-    const cEmail = companyDetails?.email || 'sales@tnjinfra.com';
-    const cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
-    const cWebsite = companyDetails?.website || 'www.tnjinfra.com';
+// 🎯 pName/pLogo na badle direct cName, cLogo, cEmail define karo jethi error na aave
+    const cName = selectedPlantDetails?.plant_name || selectedPlant || companyDetails?.company_name || 'T&J INFRA';
+    const cLogo = selectedPlantDetails?.logo_url || companyDetails?.logo_url || COMPANY_LOGO_BASE64;
+    const cEmail = selectedPlantDetails?.email || companyDetails?.email || 'sales@tnjinfra.com';
+    
+    let cAddress = selectedPlantDetails?.address2 || '';
+    if (!cAddress) {  
+      cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
+    }
+    const cWebsite = selectedPlantDetails?.website || companyDetails?.website || 'www.tnjinfra.com';
+    const cContact = selectedPlantDetails?.contact_number || '+91 8238598234';
+    const cManager = selectedPlantDetails?.manager_name || 'Mr. Tarun Patel';
 
     printWindow.document.write(`
       <html>
@@ -924,10 +932,10 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                 </div>
               </div>
 
-              <div class="contact-box">
-                <p>Mr. Tarun Patel</p>
-                <p style="color: #334155;">Mo.: +91 8238598234 / 9898664655</p>
-              </div>
+            <div class="contact-box">
+    <p>${cManager}</p>
+    <p style="color: #334155;">Mo.: ${cContact}</p>
+  </div>
 
               <div class="title-box">
                 Delivery Challan
@@ -1175,34 +1183,43 @@ const handlePrintDC = async (dcNumber, partyName, siteName, itemsArray, vehicleN
                         />
                       )}
                     </div>
+{/* 2. Site Dropdown / Manual Input */}
+<div style={{ flex: 1 }}>
+  {(() => {
+    // 🎯 ૧. ચેક કરો કે કરન્ટ પાર્ટી લિસ્ટમાં છે કે નહીં
+    const isPartyInList = parties.some(p => {
+      const pName = typeof p === 'string' ? p : (p.party_name || p.name);
+      return pName && pName.trim().toLowerCase() === (source.party || '').trim().toLowerCase();
+    });
 
-                    {/* 2. Site Dropdown (માત્ર સિલેક્ટ કરેલી પાર્ટીની સાઈટો જ બતાવશે, કોઈ Other નહીં) */}
-                    <div style={{ flex: 1 }}>
-                      {source.party === 'OTHER_PARTY_MANUAL' || (!parties.some(p => (typeof p === 'string' ? p : (p.party_name || p.name)) === source.party) && source.party !== '' && parties.length > 0 && partySites.length === 0) ? (
-                        /* જો કસ્ટમ પાર્ટી હોય તો સાઈટ જાતે ટાઈપ કરવા માટેનું બોક્સ */
-                        <input 
-                          type="text" 
-                          placeholder="Type site name manually..." 
-                          value={source.site} 
-                          onChange={(e) => updateOutwardSource(sIndex, 'site', e.target.value)} 
-                          style={{ width: '100%', padding: '7px 8px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '11px', backgroundColor: '#eff6ff', boxSizing: 'border-box' }} 
-                        />
-                      ) : (
-                        /* સામાન્ય સંજોગોમાં ફક્ત પાર્ટીની લિસ્ટવાળી સાઈટોનું ડ્રોપડાઉન */
-                        <select 
-                          value={source.site || ''} 
-                          onClick={handleDropdownClick}
-                          onChange={(e) => updateOutwardSource(sIndex, 'site', e.target.value)} 
-                          style={{ width: '100%', padding: '7px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
-                        >
-                          <option value="">-- Select Site (Required) --</option>
-                          {partySites.map((s, idx) => {
-                            const sName = typeof s === 'string' ? s : (s.name || s.site_name);
-                            return <option key={`site-${idx}`} value={sName}>{sName}</option>;
-                          })}
-                        </select>
-                      )}
-                    </div>
+    // 🎯 ૨. જો પાર્ટી 'OTHER_PARTY_MANUAL' હોય અથવા લિસ્ટમાં ન હોય (મેન્યુઅલ ટાઈપ કરેલી હોય) તો સાઇટમાં પણ મેન્યુઅલ ઇનપુટ બોક્સ બતાવો
+    const showManualSiteInput = source.party === 'OTHER_PARTY_MANUAL' || (!isPartyInList && source.party !== '');
+
+    return showManualSiteInput ? (
+      <input 
+        type="text" 
+        placeholder="Type site name manually..." 
+        value={source.site === 'OTHER_SITE_MANUAL' ? '' : source.site} 
+        onChange={(e) => updateOutwardSource(sIndex, 'site', e.target.value)} 
+        autoFocus
+        style={{ width: '100%', padding: '7px 8px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '11px', backgroundColor: '#eff6ff', boxSizing: 'border-box' }} 
+      />
+    ) : (
+      <select 
+        value={source.site || ''} 
+        onClick={handleDropdownClick}
+        onChange={(e) => updateOutwardSource(sIndex, 'site', e.target.value)} 
+        style={{ width: '100%', padding: '7px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+      >
+        <option value="">-- Select Site (Required) --</option>
+        {partySites.map((s, idx) => {
+          const sName = typeof s === 'string' ? s : (s.name || s.site_name);
+          return <option key={`site-${idx}`} value={sName}>{sName}</option>;
+        })}
+      </select>
+    );
+  })()}
+</div>
 
                   </div>
           {/* 📦 Material Items */}

@@ -14,6 +14,7 @@ export default function PlantExpensesPage({ user }) {
   const [isLocked, setIsLocked] = useState(false);
   const [editRequested, setEditRequested] = useState(false);
 const [currentCompanyId, setCurrentCompanyId] = useState(null);
+const [editingTraId, setEditingTraId] = useState(null);
   // 🌟 રિપોર્ટના તમામ સ્ટેટ્સ અહીં ઉપર જ ડીકલેર કરો
   const [reportPlantFilter, setReportPlantFilter] = useState('All');
   const [showReportModal, setShowReportModal] = useState(false);
@@ -362,6 +363,10 @@ const handleOpenPreview = (e) => {
 // ✏️ એડિટ વખતે સ્ટોકની વિગતો સાથે ડેટા લોડ કરવો
 const handleEditExpense = async (item) => {
     setEditingExpenseId(item.id);
+// 👇 અહીં String ની જગ્યાએ Number વાપરો
+    const currentTraId = item.tra_id ? Number(item.tra_id) : Number(item.id); 
+    setEditingTraId(currentTraId);
+    
     setExpenseDate(item.expense_date || expenseDate);
     setSelectedPlant(item.plant_name || selectedPlant);
 
@@ -379,7 +384,7 @@ const handleEditExpense = async (item) => {
         let { data: stockData } = await supabase
           .from('material_stock_ledger')
           .select('*')
-          .eq('reference_id', rawRefId)
+         .eq('reference_id', currentTraId)
           .eq('plant_name', item.plant_name)
           .eq('transaction_type', 'INWARD');
 
@@ -439,6 +444,7 @@ const handleDeleteCurrentExpense = async () => {
     setLoading(true);
     try {
       const expId = Number(editingExpenseId);
+    const currentTraId = editingTraId ? Number(editingTraId) : expId;
 
       // ૧. બિલ URL મેળવી સ્ટોરેજમાંથી ફાઈલ ડિલીટ કરવી
       try {
@@ -467,14 +473,14 @@ const handleDeleteCurrentExpense = async () => {
         await supabase
           .from('material_stock_ledger')
           .delete()
-          .eq('reference_id', String(expId))
+         .eq('reference_id', currentTraId)
           .eq('transaction_type', 'INWARD');
           
         // 🌟 નવો ઉમેરેલો કોડ: inward ટેબલમાંથી પણ કાઢી નાખવા
         await supabase
           .from('plant_material_inward')
           .delete()
-          .eq('reference_id', String(expId));
+          .eq('reference_id', currentTraId);
       } catch (stockErr) {
         console.warn("Stock/Inward delete note:", stockErr);
       }
@@ -493,6 +499,7 @@ const handleDeleteCurrentExpense = async () => {
 
       // ૪. ફોર્મ રીસેટ કરવું
       setEditingExpenseId(null);
+      setEditingTraId(null);
       setExpenseRows([
         {
           id: Date.now(),
@@ -678,7 +685,9 @@ const handleFinalSubmit = async () => {
     // ૧. અપડેટ મોડ (Edit)
     if (editingExpenseId) {
       const updatePayload = expenseInsertRows[0];
-      const expId = Number(editingExpenseId);
+    // Edit મોડની શરૂઆતમાં:
+const expId = Number(editingExpenseId);
+const currentTraId = editingTraId ? Number(editingTraId) : expId; // 👈 String કાઢીને Number રાખ્યું
 
       if (!updatePayload.bill_url) {
         const existingItem = expensesHistory.find(h => Number(h.id) === expId);
@@ -694,9 +703,9 @@ const handleFinalSubmit = async () => {
 
       if (updateErr) throw updateErr;
 
-      // 🌟 બંને ટેબલમાંથી જૂનો ડેટા ડિલીટ કરો
-      await supabase.from('material_stock_ledger').delete().eq('reference_id', String(expId));
-      await supabase.from('plant_material_inward').delete().eq('reference_id', String(expId));
+  // 🌟 બંને ટેબલમાંથી જૂનો ડેટા tra_id થી ડિલીટ કરો
+      await supabase.from('material_stock_ledger').delete().eq('reference_id', currentTraId);
+      await supabase.from('plant_material_inward').delete().eq('reference_id', currentTraId);
 
       const row = expenseRows[0];
       if (row.addToStock && row.stockItems && row.stockItems.length > 0) {
@@ -710,7 +719,7 @@ const handleFinalSubmit = async () => {
             transaction_type: 'INWARD',
             qty: Number(sub.qty),
             unit: sub.unit || 'Nos',
-            reference_id: String(expId)
+            reference_id: currentTraId
           }));
 
         if (newStockLedger.length > 0) {
@@ -736,7 +745,7 @@ const handleFinalSubmit = async () => {
               bill_url: updatePayload.bill_url,
               description: updatePayload.remarks, // 👈 ઈમેજ મુજબ એડ કર્યું
               submitted_by: currentLoggedUser,    // 👈 ઈમેજ મુજબ એડ કર્યું
-              reference_id: stock.reference_id
+             reference_id: stock.reference_id
             };
           });
           await supabase.from('plant_material_inward').insert(inwardRows);
@@ -744,6 +753,7 @@ const handleFinalSubmit = async () => {
       }
 
       setEditingExpenseId(null);
+      setEditingTraId(null);
       triggerAlert("✅ ખર્ચ અને સ્ટોક સફળતાપૂર્વક અપડેટ થઈ ગયા છે!");
 
     } else {
@@ -751,6 +761,12 @@ const handleFinalSubmit = async () => {
       for (let rIdx = 0; rIdx < expenseRows.length; rIdx++) {
         const row = expenseRows[rIdx];
         const payload = expenseInsertRows[rIdx];
+
+
+
+// નવો કોડ (આ રીતે ૮ આંકડાનો નંબર બનાવો):
+const newTraId = Math.floor(10000000 + Math.random() * 90000000); 
+payload.tra_id = newTraId;
 
         const { data: newExp, error: expErr } = await supabase
           .from('plant_expenses')
@@ -777,7 +793,7 @@ const handleFinalSubmit = async () => {
                 transaction_type: 'INWARD',
                 qty: Number(subItem.qty),
                 unit: subItem.unit || 'Nos',
-                reference_id: String(savedExpenseId)
+             reference_id: newTraId
               });
             }
           }
@@ -1186,6 +1202,7 @@ const handleFinalSubmit = async () => {
                     type="button"
                     onClick={() => {
                       setEditingExpenseId(null);
+                      setEditingTraId(null);
                       setExpenseRows([
                         {
                           id: Date.now(),

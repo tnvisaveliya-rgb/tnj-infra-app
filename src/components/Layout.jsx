@@ -23,6 +23,7 @@ const [siteDprRequests, setSiteDprRequests] = useState([]);
 const [isAdmin, setIsAdmin] = useState(false);
   // 🔔 સુપરવાઈઝરના નોટિફિકેશન માટેનું સ્ટેટ
   const [supervisorNotifs, setSupervisorNotifs] = useState([]);
+  const [companyDetails, setCompanyDetails] = useState(null);
   // 🌟 ડેટાબેઝમાંથી રોલ ચેક કરવા માટે useEffect ઉમેરો
   useEffect(() => {
     const checkAdminRole = async () => {
@@ -52,7 +53,30 @@ const [isAdmin, setIsAdmin] = useState(false);
 
     fetchSupervisorNotifs(); // 👈 નવું ફંક્શન કોલ કર્યું
   }, [user, userEmail]);
+useEffect(() => {
+  const fetchCompanyDetails = async () => {
+    if (!user) return;
+    const { data: permData } = await supabase
+      .from('user_permissions')
+      .select('company_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
+    if (permData && permData.company_id) {
+      const { data: compData } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', permData.company_id)
+        .maybeSingle();
+
+      if (compData) {
+        setCompanyDetails(compData);
+      }
+    }
+  };
+
+  fetchCompanyDetails();
+}, [user]);
 
 const fetchSupervisorNotifs = async () => {
     if (isAdmin || !user) return; 
@@ -653,8 +677,8 @@ const handlesignout = async () => {
                 padding: '4px'
               }}>
                 <img 
-                  src="/logo.png" 
-                  alt="T&J Infra Logo" 
+                 src={companyDetails?.logo_url || "/logo.png"}
+                 alt="Company Logo"
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                   onError={(e) => {
                     e.target.style.display = 'none';
@@ -668,7 +692,7 @@ const handlesignout = async () => {
 
               <div>
                 <h2 style={{ margin: 0, fontSize: '15px', fontWeight: '900', letterSpacing: '0.4px', color: '#ffffff' }}>
-                  T&J INFRA
+                {companyDetails?.company_name || 'T&J INFRA'}
                 </h2>
                 <span style={{ fontSize: '10px', color: '#38bdf8', fontWeight: '700', letterSpacing: '0.6px', textTransform: 'uppercase' }}>
                   Enterprise Suite

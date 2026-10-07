@@ -1,9 +1,52 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Building2, ArrowLeftRight, ClipboardList, Factory, Receipt, FileText, Users, Briefcase,FolderKanban } from 'lucide-react'
-
+import { useAuth } from '../context/AuthContext' // 👈 AuthContext ઈમ્પોર્ટ કરો
+import { supabase } from '../lib/supabase'
 function Dashboard() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const [companyName, setCompanyName] = useState(''); // 👈 શરુઆતમાં ખાલી રાખો
+  const [loading, setLoading] = useState(true);     // 👈 લોડિંગ સ્ટેટ ઉમેરો
+
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (permData && permData.company_id) {
+          const { data: compData } = await supabase
+            .from('companies')
+            .select('company_name')
+            .eq('id', permData.company_id)
+            .maybeSingle();
+
+          if (compData && compData.company_name) {
+            setCompanyName(compData.company_name);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching company name:", err);
+      } finally {
+        setLoading(false); // 👈 ડેટા આવી ગયા પછી લોડિંગ બંધ કરો
+      }
+    };
+
+    fetchCompanyName();
+  }, [user]);
+
+  // જો ડેટા લોડ થતો હોય તો જૂનું નામ બતાવવાને બદલે લોડિંગ બતાવો
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: '40px', fontSize: '14px', color: '#64748b' }}>Loading...</div>;
+  }
 
   // સેક્શન પ્રમાણે ટેબ્સની યાદી
   const sections = [
@@ -56,7 +99,7 @@ function Dashboard() {
           ← Back
         </button>
         <div>
-          <h1 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>T&J Infra Management Panel</h1>
+          <h1 style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>{companyName} Management Panel</h1>
           <p style={{ fontSize: '10px', color: '#64748b', margin: '2px 0 0 0' }}>Corporate Dashboard & Operations Center</p>
         </div>
       </div>

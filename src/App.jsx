@@ -296,6 +296,42 @@ const fetchNotifications = async () => {
 function App() {
   const [notifications, setNotifications] = useState([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [tenantData, setTenantData] = useState(null);
+  // 🌟 ૨. સબડોમેઇન પકડીને લોગો અને નામ લાવવા માટેનો નવો કોડ
+  useEffect(() => {
+    const getTenantData = async () => {
+      const host = window.location.hostname; // e.g., shreeinfra.tnjinfra.in
+      const parts = host.split('.');
+      
+      // Default subdomain 'app' રાખીએ જો localhost હોય કે main domain હોય
+      let currentSubdomain = 'app'; 
+      
+      if (parts.length >= 3 && parts[0] !== 'www') {
+        currentSubdomain = parts[0]; // અહીં 'shreeinfra' મળી જશે
+      }
+
+      // Supabase માંથી કંપનીનો ડેટા લાવીએ
+      const { data, error } = await supabase
+        .from('companies') // ⚠️ નોંધ: તમારા ટેબલનું નામ જો companies ન હોય તો અહીં સાચું નામ લખજો
+        .select('*')
+        .eq('subdomain', currentSubdomain)
+        .single();
+
+      if (data) {
+        setTenantData(data);
+        // Website નું title અપડેટ થશે
+        document.title = `${data.name} - ERP Portal`;
+        
+        // Browser tab નો લોગો (favicon) અપડેટ થશે
+        const favicon = document.getElementById('dynamic-favicon');
+        if (favicon && data.logo_url) {
+          favicon.href = data.logo_url;
+        }
+      }
+    };
+
+    getTenantData();
+  }, []);
 
   return (
     <AuthProvider>
@@ -313,6 +349,7 @@ function App() {
                     notifications={notifications} 
                     isNotifOpen={isNotifOpen} 
                     setIsNotifOpen={setIsNotifOpen}
+                    tenantData={tenantData}
                   >
                     <AppRoutes 
                       notifications={notifications} 

@@ -519,7 +519,7 @@ return (
       }}>
         <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '90px', height: '90px', background: '#3b82f6', filter: 'blur(40px)', opacity: 0.4, borderRadius: '50%' }}></div>
         <div style={{ fontSize: '8px', letterSpacing: '1px', textTransform: 'uppercase', color: '#93c5fd', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px' }}>
-          ⚡ T&J INFRA PORTAL
+          ⚡ PORTAL
         </div>
         <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: '#ffffff', margin: '0 0 10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Camera size={20} color="#f8f9fa" /> Attendance

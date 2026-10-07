@@ -15,7 +15,7 @@ export default function SiteMaterialReturnPage({ user }) {
   const [products, setProducts] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [transporters, setTransporters] = useState([]);
-  
+  const [selectedPlantDetails, setSelectedPlantDetails] = useState(null);
   const [loading, setLoading] = useState(false);
   const [recentReturns, setRecentReturns] = useState([]);
 
@@ -52,6 +52,7 @@ export default function SiteMaterialReturnPage({ user }) {
       fetchRecentReturns();
     }
   }, [selectedPlant]);
+
 
 const fetchPlants = async () => {
     try {
@@ -177,9 +178,11 @@ const fetchPlants = async () => {
   const handlePlantChange = async (e) => {
     const plantName = e.target.value;
     setSelectedPlant(plantName);
+
     const foundPlant = plants.find(p => p.plant_name === plantName);
     const plantId = foundPlant ? foundPlant.id : '';
     setSelectedPlantId(plantId);
+    setSelectedPlantDetails(foundPlant || null);
 
     if (plantName) {
       const nextRetNo = await fetchNextReturnNumber(plantName);
@@ -187,7 +190,7 @@ const fetchPlants = async () => {
     } else {
       setReturnSources(prev => prev.map(src => ({ ...src, returnNo: '' })));
     }
-  };
+    };
 
   const handleDropdownClick = () => {
     if (!selectedPlant) {
@@ -381,7 +384,26 @@ if (materialLedgerRows.length > 0) {
     }
   };
 
-  const handlePrintReturnSlip = async (returnNo, partyName, siteName, vehicleNo, transName, entryDate, submittedUser) => {
+ const handlePrintReturnSlip = async (returnNo, partyName, siteName, vehicleNo, transName, entryDate, submittedUser) => {
+    
+    // 🌟 સાઇટનું એડ્રેસ ફેચ કરવા માટેનો કોડ
+    let siteAddress = '';
+    try {
+      if (siteName && siteName !== '-') {
+        const { data: siteData, error: siteError } = await supabase
+          .from('sites')
+          .select('address')
+          .eq('site_name', siteName)
+          .maybeSingle();
+
+        if (!siteError && siteData) {
+          siteAddress = siteData.address || '';
+        }
+      }
+    } catch (err) {
+      console.log("Site address fetch error:", err);
+    }
+
     try {
       const { data: allRows, error } = await supabase
         .from('site_material_returns')
@@ -390,6 +412,7 @@ if (materialLedgerRows.length > 0) {
         .eq('return_no', returnNo);
 
       if (error) throw error;
+      // ... બાકીનો કોડ એમનેમ રહેશે ...
 
       const itemsArray = allRows && allRows.length > 0 ? allRows : [];
 
@@ -411,97 +434,161 @@ if (materialLedgerRows.length > 0) {
         return;
       }
 // ... (handlePrintReturnSlip નો ઉપરનો ભાગ એમને એમ) ...
+// 🎯 સિલેક્ટ કરેલા પ્લાન્ટ અથવા કંપનીના ડેટા ડાયનેમિક સેટ થશે
+    const cName = selectedPlantDetails?.plant_name || selectedPlant || companyDetails?.company_name || 'T&J INFRA';
+    const cLogo = selectedPlantDetails?.logo_url || companyDetails?.logo_url || COMPANY_LOGO_BASE64;
+    const cEmail = selectedPlantDetails?.email || companyDetails?.email || 'sales@tnjinfra.com';
+    
+    // માત્ર એડ્રેસ લેવા માટે
+    let cAddress = selectedPlantDetails?.address2 || selectedPlantDetails?.location || '';
+    if (!cAddress) {
+      cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
+    }
 
-      // 🎯 કંપનીની વિગતો માટે ડિફોલ્ટ સેટ કરો (જો કોઈ કારણસર કંપની ડેટા ન મળે તો)
-      const cName = companyDetails?.company_name || 'T&J INFRA';
-      const cLogo = companyDetails?.logo_url || COMPANY_LOGO_BASE64;
-      const cEmail = companyDetails?.email || 'admin@tnjinfra.com';
-      const cAddress = companyDetails?.address || 'Corporate Address: 404, Gala Magnus, Safal Parisar Road, South Bopal, Ahmedabad, Gujarat - 380057';
+    const cWebsite = selectedPlantDetails?.website || companyDetails?.website || 'www.tnjinfra.com';
+    const cContact = selectedPlantDetails?.contact_number || '+91 8238598234';
+    const cManager = selectedPlantDetails?.manager_name || 'Mr. Tarun Patel';
 
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Material Return Slip - ${returnNo}</title>
-            <style>
-              body { font-family: 'Arial', sans-serif; color: #000; margin: 0; padding: 10px; background: #fff; }
-              .page-border { border: 2px solid #000; padding: 10px 10px 45px 10px; position: relative; min-height: 94vh; box-sizing: border-box; }
-              .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 450px; opacity: 0.08; z-index: 0; pointer-events: none; }
-              .content-wrapper { position: relative; z-index: 1; }
-              .letterhead-table { width: 100%; border-collapse: collapse; border-bottom: 2px solid #000; margin-bottom: 5px; }
-              .letterhead-table td { border: none; padding: 4px 5px; vertical-align: middle; }
-              .address-box { border: 1px solid #000; border-top: none; padding: 5px 10px; font-size: 11px; font-weight: bold; background: #f8fafc; text-align: center; }
-              .title-box { text-align: center; background: #fee2e2; border: 1px solid #000; padding: 6px; font-size: 14px; font-weight: bold; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 1px; color: #991b1b; }
-              .details-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; table-layout: fixed; }
-              .details-table td { border: 1px solid #000; padding: 10px 14px; vertical-align: top; line-height: 1.6; word-break: break-word; }
-              table.main-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-              th { background-color: #f1f5f9; color: #000; border: 1px solid #000; padding: 6px; text-align: center; font-size: 12px; }
-              .footer-table { width: 100%; border-collapse: collapse; margin-top: 50px; font-size: 12px; }
-              .footer-table td { border: none; padding: 10px; font-weight: bold; }
-              .generated-by { position: absolute; bottom: 10px; right: 15px; font-size: 9px; color: #64748b; font-style: italic; }
-            </style>
-          </head>
-          <body>
-            <div class="page-border">
-              <!-- 🎯 ડાયનેમિક વોટરમાર્ક -->
-              <img src="${cLogo}" class="watermark" alt="Watermark" />
-              <div class="content-wrapper">
-                <table class="letterhead-table">
-                  <tr>
+ printWindow.document.write(`
+      <html>
+        <head>
+          <title>Delivery Challan - ${returnNo}</title>
+          <style>
+            /* તમારા CSS સ્ટાઈલ્સ એમને એમ રહેશે... */
+            body { font-family: 'Arial', sans-serif; color: #000; margin: 0; padding: 10px; background: #fff; }
+            .page-border { border: 2px solid #000; padding: 10px 10px 45px 10px; position: relative; min-height: 94vh; box-sizing: border-box; }
+            .watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 450px; opacity: 0.08; z-index: 0; pointer-events: none; }
+            .content-wrapper { position: relative; z-index: 1; }
+            .letterhead-table { width: 100%; border-collapse: collapse; border-bottom: 2px solid #000; margin-bottom: 5px; }
+            .letterhead-table td { border: none; padding: 4px 5px; vertical-align: middle; }
+            .address-box { border: 1px solid #000; border-top: none; padding: 5px 10px; font-size: 11px; font-weight: bold; margin-bottom: 0; background: #f8fafc; text-align: center; }
+            .capabilities-box { border: 1px solid #000; border-top: 1px solid #000; background: #f1f5f9; padding: 5px 10px; text-align: center; margin-bottom: 0; }
+            .capabilities-title { font-size: 11px; font-weight: bold; color: #000; text-transform: uppercase; margin-bottom: 2px; }
+            .capabilities-desc { font-size: 10px; color: #334155; line-height: 1.4; }
+            .contact-box { border: 1px solid #000; border-top: 1px solid #000; padding: 6px 10px; font-size: 11px; margin-bottom: 12px; }
+            .contact-box p { margin: 2px 0; font-weight: bold; }
+            .title-box { text-align: center; background: #e2e8f0; border: 1px solid #000; padding: 6px; font-size: 14px; font-weight: bold; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 1px; }
+            .details-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; table-layout: fixed; }
+            .details-table td { border: 1px solid #000; padding: 10px 14px; vertical-align: top; line-height: 1.6; word-break: break-word; overflow-wrap: break-word; }
+            table.main-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+            th { background-color: #f1f5f9; color: #000; border: 1px solid #000; padding: 6px; text-align: center; font-size: 12px; }
+            .footer-table { width: 100%; border-collapse: collapse; margin-top: 50px; font-size: 12px; }
+            .footer-table td { border: none; padding: 10px; font-weight: bold; }
+            .generated-by { position: absolute; bottom: 10px; right: 15px; font-size: 9px; color: #64748b; font-style: italic; }
+          </style>
+        </head>
+        <body>
+          <div class="page-border">
+            
+            <!-- 🎯 ડાયનેમિક વોટરમાર્ક -->
+            <img src="${cLogo}" class="watermark" alt="Watermark" />
+
+            <div class="content-wrapper">
+              <table class="letterhead-table">
+                <tr>
+                  <td style="width: 155px; text-align: left;">
                     <!-- 🎯 ડાયનેમિક લોગો -->
-                    <td style="width: 155px; text-align: left;"><img src="${cLogo}" alt="Logo" style="height: 100px; width: auto; max-width: 150px; object-fit: contain;" /></td>
-                    <td style="text-align: center;">
-                      <!-- 🎯 ડાયનેમિક કંપનીનું નામ -->
-                      <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0; text-transform: uppercase;">${cName}</h1>
-                      <p style="font-size: 9px; color: #a32a2a; font-weight: bold; margin: 2px 0 0 0;">(AN ISO 9001:2015, 14001:2015, 45001:2018 CERTIFIED COMPANY)</p>
-                      <!-- 🎯 ડાયનેમિક ઈમેલ -->
-                      <p style="font-size: 10px; color: #2563eb; font-weight: bold; margin: 4px 0 0 0;">Email: ${cEmail}</p>
-                    </td>
-                  </tr>
-                </table>
-                <!-- 🎯 ડાયનેમિક એડ્રેસ -->
-                <div class="address-box">${cAddress}</div>
-                <div class="title-box">Site Material Return Slip</div>
-                <table class="details-table">
-                  <tr>
-                    <td style="width: 50%;">
-                      <div><b>Return No:</b> ${returnNo}</div>
-                      <div><b>Party Name:</b> ${partyName || '-'}</div>
-                      <div><b>Site Name:</b> ${siteName || '-'}</div>
-                    </td>
-                    <td style="width: 50%;">
-                      <div><b>Date:</b> ${entryDate}</div>
-                      <div><b>Transporter:</b> ${transName && transName !== 'EMPTY' ? transName : '-'}</div>
-                      <div><b>Vehicle No:</b> ${vehicleNo && vehicleNo !== 'EMPTY' ? vehicleNo : '-'}</div>
-                    </td>
-                  </tr>
-                </table>
-                <table class="main-table">
-                  <thead>
-                    <tr>
-                      <th>Sr No</th>
-                      <th>Material Description</th>
-                      <th>Condition</th>
-                      <th>UOM</th>
-                      <th>Quantity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${itemsTableRows}
-                  </tbody>
-                </table>
-                <table class="footer-table">
-                  <tr>
-                    <td>Receiver's Signature (Plant)</td>
-                    <td style="text-align: right;">Authorized Signatory</td>
-                  </tr>
-                </table>
+                    <img src="${cLogo}" alt="Logo" style="height: 100px; width: auto; max-width: 150px; object-fit: contain; display: block;" />
+                  </td>
+                  <td style="text-align: center;">
+                    <!-- 🎯 ડાયનેમિક નામ -->
+                    <h1 style="font-size: 36px; font-weight: 800; color: #a32a2a; margin: 0; letter-spacing: 1px; text-transform: uppercase;">${cName}</h1>
+                    <p style="font-size: 9px; color: #a32a2a; font-weight: bold; margin: 2px 0 0 0;">(AN ISO 9001:2015, 14001:2015, 45001:2018 CERTIFIED COMPANY)</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="padding-top: 6px; padding-bottom: 4px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="border: none; text-align: left; font-size: 10px; font-weight: bold; padding: 0; width: 160px;">
+                          Website: <a href="https://${cWebsite}" style="color: #2563eb;">${cWebsite}</a>
+                        </td>
+                        <td style="border: none; text-align: right; font-size: 10px; font-weight: bold; padding: 0;">
+                          <!-- 🎯 ડાયનેમિક ઈમેલ -->
+                          Email: <a href="mailto:${cEmail}" style="color: #2563eb;">${cEmail}</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- 🎯 ડાયનેમિક એડ્રેસ -->
+              <div class="address-box">${cAddress}</div>
+
+              <!-- બાકીનો તમારો બધો HTML એમને એમ રહેશે... -->
+              <div class="capabilities-box">
+                <div class="capabilities-title">OUR CAPABILITIES</div>
+                <div class="capabilities-desc">
+                  Precast Manufacturing & Erection | Boundary & Compound Wall Solutions | Fabrication and PEB Work | Oil-Gas & Siphon Pipe Lines | Solar & Electrical | Sign Board & Demarcation
+                </div>
               </div>
-              <div class="generated-by">Generated by: ${submittedUser || 'System User'}</div>
+
+            <div class="contact-box">
+    <p>${cManager}</p>
+    <p style="color: #334155;">Mo.: ${cContact}</p>
+  </div>
+
+              <div class="title-box">
+                Site Material Return Slip
+              </div>
+
+              <table class="details-table">
+                <tr>
+                  <td style="width: 50%;">
+                    <div style="margin-bottom: 4px;"><b>DC No:</b> <span style="font-weight: 600;">${returnNo}</span></div>
+                    <div style="margin-bottom: 4px;"><b>Party Name:</b> <span style="font-weight: 600;">${partyName || '-'}</span></div>
+                    <div style="margin-bottom: 4px;"><b>Site Name:</b> <span style="font-weight: 600;">${siteName || '-'}</span></div>
+                    ${siteAddress ? `<div style="color: #334155; font-size: 11px; margin-top: 2px;"><b>Site Address:</b> ${siteAddress}</div>` : ''}
+                  </td>
+                  <td style="width: 50%;">
+                    <div style="margin-bottom: 4px;"><b>Date:</b> <span style="font-weight: 600;">${entryDate}</span></div>
+                    <div style="margin-bottom: 4px;"><b>Transporter:</b> <span style="font-weight: 600;">${transName && transName !== 'EMPTY' ? transName : '-'}</span></div>
+                    <div><b>Vehicle No:</b> <span style="font-weight: 600;">${vehicleNo && vehicleNo !== 'EMPTY' ? vehicleNo : '-'}</span></div>
+                  </td>
+                </tr>
+              </table>
+
+              <table class="main-table">
+                <thead>
+                  <tr>
+                    <th style="width: 45px;">Sr No</th>
+                    <th>Material / Product Description</th>
+                    <th style="width: 110px;">Size</th>
+                    <th style="width: 80px;">UOM</th>
+                    <th style="width: 90px;">Quantity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsTableRows}
+                </tbody>
+              </table>
+
+              <table class="footer-table">
+                <tr>
+                  <td>Receiver's Signature</td>
+                  <td style="text-align: right;">Authorized Signatory</td>
+                </tr>
+              </table>
+
             </div>
-            <script>window.onload = function() { window.print(); window.onafterprint = function() { window.close(); }; }</script>
-          </body>
-        </html>
-      `);
+
+            <div class="generated-by">
+              Generated by: ${submittedUser || 'System User'}
+            </div>
+
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+              window.onafterprint = function() { window.close(); };
+            };
+          </script>
+        </body>
+      </html>
+    `);
+   
       printWindow.document.close();
     } catch (err) {
       console.error("Print Error:", err);

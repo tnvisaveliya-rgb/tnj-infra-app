@@ -44,6 +44,11 @@ const [supplierMaterialsList, setSupplierMaterialsList] = useState([
   const [editingPlantId, setEditingPlantId] = useState(null);
   const [editPlantForm, setEditPlantForm] = useState({ plant_name: '', location: '', manager_name: '', state: '' });
 // 1. કન્ફર્મ મોડલ માટેનું સ્ટેટ
+const [plantAddress2, setPlantAddress2] = useState(''); // 👈 નવું સ્ટેટ
+  const [plantLogo, setPlantLogo] = useState(null);       // 👈 લોગો ફાઇલ માટે
+  const [plantEmail, setPlantEmail] = useState('');       // 👈 ઈમેઈલ માટે
+  const [plantWebsite, setPlantWebsite] = useState('');   // 👈 વેબસાઈટ માટે
+  const [plantContact, setPlantContact] = useState('');   // 👈 કોન્ટેક્ટ નંબર માટે
 
 const [modalConfig, setModalConfig] = useState({
   isOpen: false,
@@ -189,9 +194,24 @@ setTransporters(tData || []);
 
       if (profileError || !profileData) throw new Error("Company ID fetching failed.");
 
+      // 🎯 Logo Upload Logic (જો લોગો સિલેક્ટ કર્યો હોય તો)
+      let logo_url = null;
+      if (plantLogo) {
+        const fileName = `${Date.now()}.${plantLogo.name.split('.').pop()}`;
+        const { error: uploadError } = await supabase.storage.from('company-logos').upload(fileName, plantLogo);
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('company-logos').getPublicUrl(fileName);
+        logo_url = urlData.publicUrl;
+      }
+
       const payload = { 
         plant_name: plantName.trim(), 
         location: plantLocation.trim() || '', 
+        address2: plantAddress2.trim() || '',       // 👈 એડ્રેસ ૨
+        logo_url: logo_url,                         // 👈 લોગો URL
+        email: plantEmail.trim() || '',             // 👈 ઈમેઈલ
+        website: plantWebsite.trim() || '',         // 👈 વેબસાઈટ
+        contact_number: plantContact.trim() || '',  // 👈 કોન્ટેક્ટ નંબર
         manager_name: plantManager.trim() || '',
         state: plantState, 
         company_id: profileData.company_id // 👈 Ahiya error hati te dynamic ID thi solve kari
@@ -201,9 +221,10 @@ setTransporters(tData || []);
       
       if (error) {
         showAlert("Error: " + error.message);
-      } else { 
+  } else { 
         showAlert("✅ Plant Added Successfully!"); 
-        setPlantName(''); setPlantLocation(''); setPlantManager(''); setPlantState(''); 
+        setPlantName(''); setPlantAddress2(''); setPlantLogo(null); setPlantEmail('');
+        setPlantWebsite(''); setPlantContact(''); setPlantLocation(''); setPlantManager(''); setPlantState(''); 
         setActiveModal(null); 
         await loadAllData(); 
       }
@@ -212,23 +233,42 @@ setTransporters(tData || []);
     }
   };
 
-  // 2. 📝 પ્લાન્ટ અપડેટ કરવા માટે
-  const handleUpdatePlant = async (id) => {
+const handleUpdatePlant = async (id) => {
     if (!editPlantForm.plant_name.trim()) { showAlert("Please enter plant name!"); return; }
     
-    const { error } = await supabase.from('plants').update({
+    try {
+      let logo_url = editPlantForm.logo_url;
+      
+      // Jo navo logo upload karyo hoy to
+      if (editPlantForm.logoFile) {
+        const fileName = `${Date.now()}.${editPlantForm.logoFile.name.split('.').pop()}`;
+        const { error: uploadError } = await supabase.storage.from('company-logos').upload(fileName, editPlantForm.logoFile);
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from('company-logos').getPublicUrl(fileName);
+        logo_url = urlData.publicUrl;
+      }
+
+      const { error } = await supabase.from('plants').update({
         plant_name: editPlantForm.plant_name.trim(),
-        location: editPlantForm.location.trim() || '',
-        manager_name: editPlantForm.manager_name.trim() || '',
+        location: editPlantForm.location ? editPlantForm.location.trim() : '',
+        address2: editPlantForm.address2 ? editPlantForm.address2.trim() : '',
+        logo_url: logo_url,
+        email: editPlantForm.email ? editPlantForm.email.trim() : '',
+        website: editPlantForm.website ? editPlantForm.website.trim() : '',
+        contact_number: editPlantForm.contact_number ? editPlantForm.contact_number.trim() : '',
+        manager_name: editPlantForm.manager_name ? editPlantForm.manager_name.trim() : '',
         state: editPlantForm.state || ''
       }).eq('id', id);
 
-    if (error) {
-      showAlert("Error updating plant: " + error.message);
-    } else {
-      showAlert("✅ Plant Successfully Updated!");
-      setEditingPlantId(null); // Edit mode mathi bahar aavva mate
-      loadAllData();
+      if (error) {
+        showAlert("Error updating plant: " + error.message);
+      } else {
+        showAlert("✅ Plant Successfully Updated!");
+        setEditingPlantId(null);
+        loadAllData();
+      }
+    } catch (err) {
+      showAlert("System Error: " + err.message);
     }
   };
   // ૧. Add New Category
@@ -1406,14 +1446,72 @@ return (
               return filteredPlantsList.map(p => (
                 <div key={p.id} style={{ display: 'flex', flexDirection: 'column', padding: '14px', backgroundColor: '#fff', borderRadius: '10px', border: '1px solid #cbd5e1', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
                   
-                  {editingPlantId === p.id ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <input placeholder="Plant Name" value={editPlantForm.plant_name} onChange={(e) => setEditPlantForm({ ...editPlantForm, plant_name: e.target.value })} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px' }} />
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                       
-                        <input placeholder="Location" value={editPlantForm.location} onChange={(e) => setEditPlantForm({ ...editPlantForm, location: e.target.value })} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px' }} />
-                      </div>
-                      <input placeholder="Manager Name" value={editPlantForm.manager_name} onChange={(e) => setEditPlantForm({ ...editPlantForm, manager_name: e.target.value })} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px' }} />
+                 {editingPlantId === p.id ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div>
+        <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Plant Name *</label>
+        <input placeholder="Plant Name" value={editPlantForm.plant_name || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, plant_name: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+      </div>
+
+      <div>
+        <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>State *</label>
+        <select value={editPlantForm.state || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, state: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', backgroundColor: '#fff', boxSizing: 'border-box' }}>
+          <option value="">Select State</option>
+          {statesList.map(st => <option key={st} value={st}>{st}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Address 1 (Location)</label>
+          <input placeholder="Location" value={editPlantForm.location || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, location: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Address 2</label>
+          <input placeholder="Address 2" value={editPlantForm.address2 || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, address2: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+      </div>
+
+      <div>
+        <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Plant Logo (ચલણ માટે)</label>
+        
+        {/* 🌟 જો પહેલેથી લોગો સેવ થયેલો હોય તો તેનું પ્રિવ્યૂ બતાવવા માટે */}
+        {editPlantForm.logo_url && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+            <img src={editPlantForm.logo_url} alt="Plant Logo" style={{ width: '35px', height: '35px', objectFit: 'contain', borderRadius: '4px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc' }} />
+            <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: 'bold' }}>✓ Logo already uploaded</span>
+          </div>
+        )}
+
+        <input 
+          type="file" 
+          accept="image/*" 
+          onChange={(e) => setEditPlantForm({ ...editPlantForm, logoFile: e.target.files[0] })} 
+          style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '11px', backgroundColor: '#fff', boxSizing: 'border-box' }} 
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Email</label>
+          <input placeholder="Email" value={editPlantForm.email || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, email: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Website</label>
+          <input placeholder="Website" value={editPlantForm.website || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, website: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Contact Number</label>
+          <input placeholder="Contact Number" value={editPlantForm.contact_number || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, contact_number: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#64748b' }}>Manager Name</label>
+          <input placeholder="Manager Name" value={editPlantForm.manager_name || ''} onChange={(e) => setEditPlantForm({ ...editPlantForm, manager_name: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '12px', boxSizing: 'border-box' }} />
+        </div>
+      </div>
                       
                      {/* 🎯 બટન્સ: Delete (ડાબી બાજુ) અને Update & Cancel (જમણી બાજુ) */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
@@ -1455,17 +1553,30 @@ return (
                       </div>
                      {/* 🎯 ફક્ત Edit બટન (Delete અંદર આપી દીધું છે) */}
                       <div style={{ display: 'flex' }}>
-                        <button 
-                          onClick={() => { setEditingPlantId(p.id); setEditPlantForm({ plant_name: p.plant_name, location: p.location || '', manager_name: p.manager_name || '', state: p.state || '' }); }} 
-                          style={{ 
-                            background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', 
-                            padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', 
-                            display: 'flex', alignItems: 'center', gap: '6px', 
-                            fontWeight: 'bold', fontSize: '11px' 
-                          }}
-                        >
-                          <Edit2 size={13} /> Edit
-                        </button>
+                   <button 
+  onClick={() => { 
+    setEditingPlantId(p.id); 
+    setEditPlantForm({ 
+      plant_name: p.plant_name || '', 
+      location: p.location || '', 
+      address2: p.address2 || '',             // 👈 જૂનું Address 2
+      email: p.email || '',                   // 👈 જૂનો Email
+      website: p.website || '',               // 👈 જૂની Website
+      contact_number: p.contact_number || '', // 👈 જૂનો Contact Number
+      manager_name: p.manager_name || '',     // 👈 જૂનો Manager Name
+      state: p.state || ''  ,
+      logo_url: p.logo_url || ''                  // 👈 જૂનું State
+    }); 
+  }} 
+  style={{ 
+    background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', 
+    padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', 
+    display: 'flex', alignItems: 'center', gap: '6px', 
+    fontWeight: 'bold', fontSize: '11px' 
+  }}
+>
+  <Edit2 size={13} /> Edit
+</button>
                       </div>
                     </div>
                   )}
@@ -2841,10 +2952,43 @@ return (
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Location (Optional)</label>
                   <input placeholder="Enter location..." value={plantLocation} onChange={(e) => setPlantLocation(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Manager Name (Optional)</label>
-                  <input placeholder="Enter manager name..." value={plantManager} onChange={(e) => setPlantManager(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
-                </div>
+                
+                
+{/* 🌟 નવું: Address 2 */}
+      <div>
+        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Address 2 (Optional)</label>
+        <input placeholder="Enter address line 2..." value={plantAddress2} onChange={(e) => setPlantAddress2(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+      </div>
+
+      {/* 🌟 નવું: Plant Logo Upload */}
+      <div>
+        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Plant Logo (ચલણ માટે)</label>
+        <input type="file" accept="image/*" onChange={(e) => setPlantLogo(e.target.files[0])} style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box', backgroundColor: '#fff' }} />
+      </div>
+
+      {/* 🌟 નવું: Email & Website */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Email Address</label>
+          <input type="email" placeholder="plant@example.com" value={plantEmail} onChange={(e) => setPlantEmail(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Website</label>
+          <input type="text" placeholder="www.example.com" value={plantWebsite} onChange={(e) => setPlantWebsite(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+        </div>
+      </div>
+
+      {/* 🌟 નવું: Contact Number & Manager */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Contact Number</label>
+          <input type="tel" placeholder="Phone number..." value={plantContact} onChange={(e) => setPlantContact(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '4px' }}>Manager Name</label>
+          <input placeholder="Manager name..." value={plantManager} onChange={(e) => setPlantManager(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', boxSizing: 'border-box' }} />
+        </div>
+      </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                   <button onClick={handleSavePlant} style={{ flex: 1, backgroundColor: '#1e3a8a', color: '#fff', padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Save Plant</button>
                   <button onClick={() => { setActiveModal(null); setPlantState(''); }} style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>Cancel</button>

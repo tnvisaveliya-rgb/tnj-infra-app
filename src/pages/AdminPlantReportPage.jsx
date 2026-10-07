@@ -54,7 +54,7 @@ const AdminPlantReportPage = () => {
   const [stateList, setStateList] = useState([]);
   const [availablePlants, setAvailablePlants] = useState([]);
   const [loadingPlants, setLoadingPlants] = useState(true);
-
+const [companyName, setCompanyName] = useState('T&J Infra');
   // Data States
   const [fgStockData, setFgStockData] = useState([]); // Tab 1 - FG
   const [rmStockData, setRmStockData] = useState([]); // Tab 1 - RM
@@ -110,6 +110,37 @@ useEffect(() => {
       }
     };
     fetchPlantsData();
+  }, []);
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user;
+        if (!currentUser) return;
+
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        if (permData && permData.company_id) {
+          const { data: compData } = await supabase
+            .from('companies')
+            .select('company_name')
+            .eq('id', permData.company_id)
+            .maybeSingle();
+
+          if (compData && compData.company_name) {
+            setCompanyName(compData.company_name);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching company name for report:", err);
+      }
+    };
+
+    fetchCompanyName();
   }, []);
 
   useEffect(() => {
@@ -536,7 +567,7 @@ setOutwardTransporterData(Object.values(tMap).map(t => ({
           </style>
         </head>
         <body>
-          <h2>T&J Infra - ${title}</h2>
+          <h2>${companyName} - ${title}</h2>
           <table class="info-table">
             <tr><td>Plant / Site</td><td>${plantText}</td></tr>
             <tr><td>Date Period</td><td>${dateText}</td></tr>
@@ -626,7 +657,7 @@ const handleOutwardPDF = (groupData, groupType) => {
         </style>
       </head>
       <body>
-        <h2>T&J Infra - Outward (Dispatch) Report</h2>
+        <h2>{companyName} - Outward (Dispatch) Report</h2>
         <table class="info-table">
           <tr><td>${groupType === 'Site' ? 'Site Name' : 'Transporter Name'}</td><td>${groupData.name}</td></tr>
           <tr><td>Dispatched From (Plant)</td><td>${plantText}</td></tr>
@@ -697,7 +728,7 @@ const handleOutwardPDF = (groupData, groupType) => {
           </style>
         </head>
         <body>
-          <h2>T&J Infra - Material Inward Report</h2>
+          <h2>{companyName} - Material Inward Report</h2>
           <table class="info-table">
             <tr><td>Supplier Name</td><td>${vendor.vendorName}</td></tr>
             <tr><td>Plant / Site</td><td>${plantText}</td></tr>
@@ -741,7 +772,7 @@ const handleOutwardPDF = (groupData, groupType) => {
   
   <div style={{ display: 'flex', flexDirection: 'column' }}>
     <h2 style={{ margin: 0, fontSize: '17px', color: '#0f172a', fontWeight: 'bold' }}>
-    T&J Infra Master Report
+    {companyName} Master Report
     </h2>
     <span style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
       Corporate Dashboard & Operations Center

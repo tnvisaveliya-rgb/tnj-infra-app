@@ -1060,6 +1060,7 @@ let totalProducedQty = 0;
 
   if (totalMaterialConsumed > 0 && bom.material) {
     materialLedgerRows.push({
+      company_id: currentCompanyId,
       date: dprDate,
       plant_name: selectedPlant,
       material_name: bom.material,

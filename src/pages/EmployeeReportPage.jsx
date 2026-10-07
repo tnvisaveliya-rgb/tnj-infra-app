@@ -280,7 +280,7 @@ const fetchAllAttendance = async () => {
       
       {/* Print Header (Only visible on print) */}
       <div className="print-header" style={{ display: 'none', textAlign: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '20px', margin: '0 0 5px 0', color: '#000' }}>T&J Infra - Master Attendance Report</h1>
+Infra        <h1 style={{ fontSize: '20px', margin: '0 0 5px 0', color: '#000' }}>T&J  - Master Attendance Report</h1>
         <p style={{ fontSize: '12px', margin: 2, color: '#333' }}>
           <strong>Employee:</strong> {selectedEmployee || 'All'} | <strong>Site:</strong> {selectedSite || 'All'}
         </p>

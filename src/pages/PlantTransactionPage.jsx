@@ -14,6 +14,7 @@ export default function MasterTransactionHub({ adminUser }) {
 
   // --- 2. View Mode Toggle (Supervisor vs Labour) ---
   const [viewMode, setViewMode] = useState('SUPERVISOR'); 
+  const [companyName, setCompanyName] = useState('T&J Infra'); // 👈 ડિફોલ્ટ નામ
 
   // --- 3. Data States ---
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -90,6 +91,39 @@ useEffect(() => {
     fetchLocationsData();
     fetchPendingRequests();
   }, []);
+
+  // 🌟 ડેટાબેઝમાંથી કંપનીનું સાચું નામ ફેચ કરવા માટે
+  useEffect(() => {
+    const fetchCompanyName = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = adminUser || session?.user;
+        if (!currentUser) return;
+
+        const { data: permData } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        if (permData && permData.company_id) {
+          const { data: compData } = await supabase
+            .from('companies')
+            .select('company_name')
+            .eq('id', permData.company_id)
+            .maybeSingle();
+
+          if (compData && compData.company_name) {
+            setCompanyName(compData.company_name);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching company name for Master Hub:", err);
+      }
+    };
+
+    fetchCompanyName();
+  }, [adminUser]);
 
   useEffect(() => {
     let filtered = allLocationsDb;
@@ -593,7 +627,7 @@ useEffect(() => {
           </style>
         </head>
         <body>
-          <h2>T&J Infra - ${reportTitle}</h2>
+        <h2>${companyName} - ${reportTitle}</h2>
           <table class="info-table">
             <tr>
               <td><strong>Name:</strong> <span style="text-transform: capitalize;">${person.name}</span></td>
@@ -627,7 +661,7 @@ useEffect(() => {
           <ArrowLeft size={16} /> Back
         </button>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <h2 style={{ margin: 0, fontSize: '17px', color: '#0f172a', fontWeight: 'bold' }}>Master Transaction Hub</h2>
+          <h2 style={{ margin: 0, fontSize: '17px', color: '#0f172a', fontWeight: 'bold' }}>{companyName} Master Transaction Hub</h2>
           <span style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Fund Approval & Ledger Management</span>
         </div>
       </div>
