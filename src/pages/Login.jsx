@@ -27,10 +27,7 @@ function Login() {
         subdomain = parts[0];
       }
       
-      // Localhost par test karva mate
-      if (host === 'localhost') {
-        subdomain = 'shreeinfra';
-      }
+      
 
       const { data } = await supabase
         .from('companies')
