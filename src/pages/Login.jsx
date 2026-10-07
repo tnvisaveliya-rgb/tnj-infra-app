@@ -1,18 +1,52 @@
-import React, { useState, useEffect } from 'react' // useEffect add karyu
+import React, { useState, useEffect } from 'react' 
 import { supabase } from '../lib/supabase'
 import { useNavigate, Link } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'; // (તમારા ફોલ્ડર સ્ટ્રક્ચર મુજબ પાથ સરખો કરી લેવો)
+import { useAuth } from '../context/AuthContext'; 
 
 function Login() {
-  const [email, setEmail] = useState('') // અહીંથી ડિફોલ્ટ ઈમેલ કાઢી નાખ્યો છે
-  const [password, setPassword] = useState('') // અહીંથી ડિફોલ્ટ પાસવર્ડ કાઢી નાખ્યો છે
+  const [email, setEmail] = useState('') 
+  const [password, setPassword] = useState('') 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const navigate = useNavigate()
-// Inside your Login component, make sure it's defined:
-const { userPermissions } = useAuth(); // or useState
-
   
+  // 🌟 Dynamic Company Name ane Logo mate nava states
+  const [tenantName, setTenantName] = useState('T&J Infra')
+  const [tenantLogo, setTenantLogo] = useState(null)
+  
+  const navigate = useNavigate()
+  const { userPermissions } = useAuth(); 
+
+  // 🌟 Page load thay tyare Company no data lavva mate useEffect
+  useEffect(() => {
+    const fetchTenantData = async () => {
+      const host = window.location.hostname;
+      let subdomain = 'app';
+      
+      const parts = host.split('.');
+      if (parts.length >= 3 && parts[0] !== 'www') {
+        subdomain = parts[0];
+      }
+      
+      // Localhost par test karva mate
+      if (host === 'localhost') {
+        subdomain = 'shreeinfra';
+      }
+
+      const { data } = await supabase
+        .from('companies')
+        .select('company_name, logo_url')
+        .eq('subdomain', subdomain)
+        .maybeSingle();
+
+      if (data) {
+        setTenantName(data.company_name || 'T&J Infra');
+        setTenantLogo(data.logo_url);
+      }
+    };
+
+    fetchTenantData();
+  }, []);
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -26,7 +60,6 @@ const { userPermissions } = useAuth(); // or useState
 
       if (error) throw error
 
-      // 🌟 અહીં ઈમેલ ચેક કરીને પ્રોપર રીડાયરેક્ટ કરો
       const userEmail = (email || '').trim().toLowerCase()
 
       if (userEmail === 'infra.tnj@gmail.com') {
@@ -61,10 +94,21 @@ const { userPermissions } = useAuth(); // or useState
           border: '1px solid #e2e8f0'
         }}>
           
-          {/* Logo/Brand */}
+          {/* 🌟 Dynamic Logo ane Brand Name */}
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <h1 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>T&J Infra</h1>
-            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', fontWeight: '500' }}>Sign in to your management account</p>
+            {tenantLogo && (
+              <img 
+                src={tenantLogo} 
+                alt={`${tenantName} Logo`} 
+                style={{ height: '70px', marginBottom: '16px', borderRadius: '8px', objectFit: 'contain' }} 
+              />
+            )}
+            <h1 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
+              {tenantName}
+            </h1>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', fontWeight: '500' }}>
+              Sign in to your management account
+            </p>
           </div>
 
           {/* Error Message */}
@@ -131,7 +175,6 @@ const { userPermissions } = useAuth(); // or useState
               />
             </div>
 
-            {/* AHI NAVO FORGOT PASSWORD LINK MUKELO CHE */}
             <div style={{ textAlign: 'right', marginTop: '-10px' }}>
               <Link 
                 to="/forgot-password" 
@@ -140,9 +183,6 @@ const { userPermissions } = useAuth(); // or useState
                 Forgot password?
               </Link>
             </div>
-            {/* NAVO LINK AHI PURO THAY CHE */}
-
-          
 
             {/* Submit Button */}
             <button
