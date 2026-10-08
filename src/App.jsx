@@ -53,7 +53,7 @@ function SupervisorRedirectHandler() {
   }
 
   if (userEmail === 'infra.tnj@gmail.com') {
-    return <Navigate to="/Dashboard" replace />;
+    return <Navigate to="/admin-dashboard-stats" replace />;
   }
 
   const allowedTabs = userPermissions?.allowed_tabs || [];
@@ -299,34 +299,34 @@ function App() {
   const [tenantData, setTenantData] = useState(null);
   // 🌟 ૨. સબડોમેઇન પકડીને લોગો અને નામ લાવવા માટેનો નવો કોડ
   useEffect(() => {
-    const getTenantData = async () => {
-      const host = window.location.hostname; // e.g., shreeinfra.tnjinfra.in
+const getTenantData = async () => {
+      const host = window.location.hostname; 
       const parts = host.split('.');
       
-      // Default subdomain 'app' રાખીએ જો localhost હોય કે main domain હોય
       let currentSubdomain = 'app'; 
-      
       if (parts.length >= 3 && parts[0] !== 'www') {
-        currentSubdomain = parts[0]; // અહીં 'shreeinfra' મળી જશે
+        currentSubdomain = parts[0]; 
       }
 
-      // Supabase માંથી કંપનીનો ડેટા લાવીએ
-      const { data, error } = await supabase
-        .from('companies') // ⚠️ નોંધ: તમારા ટેબલનું નામ જો companies ન હોય તો અહીં સાચું નામ લખજો
+      // 🌟 .maybeSingle() ની જગ્યાએ .limit(1) વાપરો જેથી ક્યારેય 406 એરર ન આવે
+      const { data: companiesData, error } = await supabase
+        .from('companies') 
         .select('*')
         .eq('subdomain', currentSubdomain)
-        .single();
+        .limit(1);
+
+      const data = companiesData && companiesData.length > 0 ? companiesData[0] : null;
 
       if (data) {
         setTenantData(data);
-        // Website નું title અપડેટ થશે
-       document.title = `${data.company_name || 'T&J Infra'} - ERP Portal`;
+        document.title = `${data.company_name || 'T&J Infra'} - ERP Portal`;
         
-        // Browser tab નો લોગો (favicon) અપડેટ થશે
         const favicon = document.getElementById('dynamic-favicon');
         if (favicon && data.logo_url) {
           favicon.href = data.logo_url;
         }
+      } else {
+        console.warn("Subdomain database ma malyo nathi, default view chaluse.");
       }
     };
 

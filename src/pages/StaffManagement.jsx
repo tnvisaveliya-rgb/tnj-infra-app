@@ -236,110 +236,77 @@ const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolea
     setFormData({ ...formData, assigned_plants: updatedPlants })
   }
 const handleAddStaff = async (e) => {
-    e.preventDefault()
-    setError('')
+  e.preventDefault()
+  setError('')
 
-    if (!formData.full_name || !formData.email || !formData.password || !formData.mobile || !formData.role) {
-      setError('કૃપા કરીને બધી જરૂરી માહિતી ભરો.')
-      return
+  if (!formData.full_name || !formData.email || !formData.password || !formData.mobile || !formData.role) {
+    setError('કૃપા કરીને બધી જરૂરી માહિતી ભરો.')
+    return
+  }
+
+  setLoading(true)
+
+  try {
+    // 1. Admin no company_id melvo
+    const { data: { user }, error: authUserErr } = await supabase.auth.getUser();
+    if (authUserErr || !user) throw new Error("User session expired. Please relogin.");
+
+    const { data: profileData, error: profileErr } = await supabase
+      .from('user_profiles')
+      .select('company_id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileErr || !profileData?.company_id) {
+      throw new Error("Company ID malyo nathi.");
     }
 
-    setLoading(true)
+    const userCompanyId = profileData.company_id;
+    
+    // 🌟 Ahiya aakho email j login ID bani jase
+    const loginId = formData.email; 
 
-    try {
-      // 1. Admin no company_id melvo
-      const { data: { user }, error: authUserErr } = await supabase.auth.getUser();
-      if (authUserErr || !user) throw new Error("User session expired. Please relogin.");
-
-      const { data: profileData, error: profileErr } = await supabase
-        .from('user_profiles')
-        .select('company_id')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profileErr || !profileData?.company_id) {
-        throw new Error("Company ID malyo nathi.");
-      }
-
-      const userCompanyId = profileData.company_id;
-
-      // 2. Admin session save karo
-      const { data: { session: adminSession } } = await supabase.auth.getSession();
-
-      // 3. Auth ma navo user banavo
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+   const { data, error: fnError } = await supabase.functions.invoke('create-staff', {
+      body: {
+        full_name: formData.full_name,
         email: formData.email,
         password: formData.password,
-        options: {
-          data: {
-            full_name: formData.full_name,
-            role: formData.role
-          }
-        }
-      })
-
-      if (authError) throw authError;
-      const newUserId = authData.user?.id;
-      if (!newUserId) throw new Error("યુઝર આઈડી જનરેટ થવામાં ભૂલ થઈ છે.");
-
-      // 4. Admin session restore karo
-      if (adminSession) {
-        await supabase.auth.setSession({
-          access_token: adminSession.access_token,
-          refresh_token: adminSession.refresh_token
-        });
+        phone: formData.mobile,
+        role: formData.role,
+        company_id: userCompanyId,
+        login_id: formData.email,
+        allowed_tabs: formData.allowed_tabs,
+        assigned_sites: formData.assigned_sites,
+        assigned_plants: formData.assigned_plants
       }
+    });
 
-      // 5. user_permissions table ma entry karo
-      const { error: permError } = await supabase
-        .from('user_permissions')
-        .insert([
-          {
-            user_id: newUserId,
-            company_id: userCompanyId,
-            full_name: formData.full_name,
-            email: formData.email, 
-            mobile: formData.mobile,
-            role: formData.role,
-            allowed_tabs: formData.allowed_tabs,
-            assigned_sites: formData.assigned_sites,
-            assigned_plants: formData.assigned_plants
-          }
-        ]);
-
-      if (permError) throw permError;
-
-      // 6. 🌟 નવો ઉમેરેલો કોડ: ઓટોમેટિક બનેલા પ્રોફાઇલમાં company_id અપડેટ કરો
-      const { error: profUpdateErr } = await supabase
-        .from('user_profiles')
-        .update({ company_id: userCompanyId })
-        .eq('id', newUserId);
-        
-      if (profUpdateErr) {
-        console.error("Profile update error:", profUpdateErr.message);
-      }
-
-      alert('નવો સ્ટાફ અને સાઇટ પરમિશન સફળતાપૂર્વક ઉમેરાઈ ગઈ!');
-      setIsModalOpen(false);
-      setFormData({
-        full_name: '',
-        email: '',
-        password: '',
-        mobile: '',
-        role: 'Staff',
-        allowed_tabs: ['site_progress', 'plant_report'],
-        assigned_sites: [],
-        assigned_plants: []
-      });
-      fetchStaff();
-      
-    } catch (err) {
-      console.error('Error adding staff:', err)
-      setError(err.message || 'સ્ટાફ ઉમેરવામાં નિષ્ફળતા મળી.')
-    } finally { 
-      setLoading(false)
+    if (fnError) {
+      // 🌟 આનાથી એજ ફંક્શનની અંદરની અસલી એરર કન્સોલમાં દેખાશે
+      console.error("Edge Function Error Details:", fnError);
+      throw new Error(fnError.message || "Edge function failed");
     }
+    alert('નવો સ્ટાફ સફળતાપૂર્વક ઉમેરાઈ ગયો!');
+    setIsModalOpen(false);
+    setFormData({
+      full_name: '',
+      email: '',
+      password: '',
+      mobile: '',
+      role: 'Staff',
+      allowed_tabs: ['site_progress', 'plant_report'],
+      assigned_sites: [],
+      assigned_plants: []
+    });
+    fetchStaff();
+    
+  } catch (err) {
+    console.error('Error adding staff:', err)
+    setError(err.message || 'સ્ટાફ ઉમેરવામાં નિષ્ફળતા મળી.')
+  } finally { 
+    setLoading(false)
   }
+}
 
   const filteredEditSites = allSites.filter(site => editStateFilter === 'All' || site.state === editStateFilter)
   const filteredAddSites = allSites.filter(site => addStateFilter === 'All' || site.state === addStateFilter)

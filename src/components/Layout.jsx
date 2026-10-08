@@ -196,8 +196,17 @@ let formattedSiteDpr = (siteDprData || []).map(d => ({
         : notif.type === 'SITE_DPR' ? 'daily_reports'
         : 'site_material_inward';
 
-      await supabase.from(table).update({ reject_reason: null }).eq('id', notif.id);
-      fetchSupervisorNotifs(); // લિસ્ટ રિફ્રેશ કરો
+      // 🌟 id ને Number માં કન્વર્ટ કરો અને error ચેક કરો
+      const { error } = await supabase
+        .from(table)
+        .update({ reject_reason: null })
+        .eq('id', Number(notif.id));
+
+      if (error) {
+        console.error("Clear Notif Supabase Error:", error.message);
+      } else {
+        fetchSupervisorNotifs(); // લિસ્ટ રિફ્રેશ કરો
+      }
     } catch (err) {
       console.error("Clear Notif Error:", err);
     }
