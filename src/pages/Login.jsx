@@ -44,20 +44,41 @@ function Login() {
     fetchTenantData();
   }, []);
 
-  const handleLogin = async (e) => {
+ const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const userEmail = (email || '').trim().toLowerCase()
+
+      // 🌟 Master admin sivay badha mate company active che ke nahi check karo
+      if (userEmail !== 'infra.tnj@gmail.com') {
+        const host = window.location.hostname;
+        let subdomain = 'app';
+        const parts = host.split('.');
+        if (parts.length >= 3 && parts[0] !== 'www') {
+          subdomain = parts[0];
+        }
+
+        const { data: compData } = await supabase
+          .from('companies')
+          .select('is_active, company_name')
+          .eq('subdomain', subdomain)
+          .maybeSingle();
+
+        // Jo company disable hoy to login aatakavi do
+        if (compData && compData.is_active === false) {
+          throw new Error('Aa company nu account disable (bandh) karvama avyu che. Krupapa administrator no sampark karo.');
+        }
+      }
+
+      const { error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
       })
 
-      if (error) throw error
-
-      const userEmail = (email || '').trim().toLowerCase()
+      if (authError) throw authError
 
       if (userEmail === 'infra.tnj@gmail.com') {
         navigate('/Dashboard', { replace: true })

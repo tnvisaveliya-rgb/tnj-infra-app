@@ -102,6 +102,68 @@ function AppRoutes({ notifications, isNotifOpen, setIsNotifOpen }) {
 function AuthListenerWrapper({ children, setNotifications }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const userEmail = (user?.email || '').trim().toLowerCase(); // 👈 Aa line add karvani chhe
+useEffect(() => {
+    if (!user || !user.id || userEmail === 'infra.tnj@gmail.com') return;
+
+    // 1. Page load thay tyare check karo ke company active che ke nahi
+    const checkCompanyStatus = async () => {
+      try {
+        const { data: perm } = await supabase
+          .from('user_permissions')
+          .select('company_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (perm?.company_id) {
+          const { data: comp } = await supabase
+            .from('companies')
+            .select('is_active')
+            .eq('id', perm.company_id)
+            .maybeSingle();
+
+          if (comp && comp.is_active === false) {
+            await supabase.auth.signOut();
+            navigate('/login', { replace: true });
+          }
+        }
+      } catch (err) {
+        console.error("Error checking company status:", err);
+      }
+    };
+
+    checkCompanyStatus();
+
+    // 2. Realtime Channel: Jo admin company disable kare to live logout karavo
+    const companyChannel = supabase
+      .channel('company-disable-monitor')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'companies' },
+        async (payload) => {
+          try {
+            const { data: perm } = await supabase
+              .from('user_permissions')
+              .select('company_id')
+              .eq('user_id', user.id)
+              .maybeSingle();
+
+            if (perm?.company_id === payload.new.id && payload.new.is_active === false) {
+              await supabase.auth.signOut();
+              navigate('/login', { replace: true });
+              alert('Tamari company account disable karvama avyu che, tethi tamne logout karvama avya che.');
+            }
+          } catch (err) {
+            console.error("Error in realtime company check:", err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(companyChannel);
+    };
+  }, [user, userEmail, navigate]);
 
 const fetchNotifications = async () => {
     try {
