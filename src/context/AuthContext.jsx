@@ -23,7 +23,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
           setUserPermissions({
             assigned_plants: ['All'],
             assigned_sites: ['All'],
-            allowed_tabs: ['dashboard', 'crm', 'site_progress', 'plant_report', 'employee_dashboard']
+            allowed_tabs: ['dashboard', 'site_progress', 'plant_report', 'employee_dashboard']
           });
           return;
         }

@@ -6,14 +6,14 @@ import ProtectedRoute from './components/ProtectedRoute'
 import { supabase } from "./lib/supabase"; 
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import CRM from './pages/CRM'
+
 import SupervisorDashboard from './pages/SupervisorDashboard'
 
 import AddSiteVendorPage from './pages/AddSiteVendorPage'
 import AddPlantVendorPage from './pages/AddPlantVendorPage'
 import SiteReportPage from './pages/SiteReportPage'
 import AdminPlantReportPage from './pages/AdminPlantReportPage'
-import CrmReportPage from './pages/CrmReportPage'
+
 import EmployeeReportPage from './pages/EmployeeReportPage'
 import StaffManagement from './pages/StaffManagement'
 import SiteTransactionPage from './pages/SiteTransactionPage'
@@ -52,11 +52,7 @@ function SupervisorRedirectHandler() {
     );
   }
 
-  if (userEmail === 'infra.tnj@gmail.com') {
-    return <Navigate to="/admin-dashboard-stats" replace />;
-  }
-
-  const allowedTabs = userPermissions?.allowed_tabs || [];
+ const allowedTabs = userPermissions?.allowed_tabs || [];
 
   if (allowedTabs.includes('site_progress')) {
     return <Navigate to="/siteemployee-dashboard" replace />;
@@ -74,40 +70,26 @@ function AppRoutes({ notifications, isNotifOpen, setIsNotifOpen }) {
   const userEmail = (user?.email || '').trim().toLowerCase()
 
   return (
-    <Routes>
-      {userEmail === 'infra.tnj@gmail.com' ? (
-        <>
-          <Route path="/Dashboard" element={<Dashboard />} />
-          <Route path="/crm" element={<CRM />} />
-          <Route path="/supervisor-dashboard" element={<SupervisorDashboard />} />
-          <Route path="/plantemployee-dashboard" element={<PlantEmployeeDashboard />} />
-          <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
-          <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
-          <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
-          <Route path="/site-report" element={<SiteReportPage />} />
-          <Route path="/Admin-plant-report" element={<AdminPlantReportPage />} />
-          <Route path="/crm-report" element={<CrmReportPage />} />
-          <Route path="/employee-report" element={<EmployeeReportPage />} />
-          <Route path="/staff-management" element={<StaffManagement />} />
-          <Route path="/site-transaction" element={<SiteTransactionPage />} />
-          <Route path="/plant-transaction" element={<PlantTransactionPage />} />
-          <Route path="/admin-dashboard-stats" element={<Admindashboardstats />} />
-          <Route path="*" element={<Navigate to="/admin-dashboard-stats" replace />} />
-        </>
-      ) : (
+ <Routes>
+  {user?.email?.trim().toLowerCase() === 'infra.tnj@gmail.com' ? (
+    <>
+      <Route path="/admin-dashboard-stats" element={<Admindashboardstats />} />
+      <Route path="*" element={<Navigate to="/admin-dashboard-stats" replace />} />
+    </>
+  ) : (
         <>
           <Route path="/supervisor-dashboard" element={<SupervisorRedirectHandler />} />
           <Route path="/plantemployee-dashboard" element={<PlantEmployeeDashboard />} />
           <Route path="/siteemployee-dashboard" element={<SiteEmployeeDashboard />} />
           <Route path="/Dashboard" element={<Dashboard />} />
-          <Route path="/crm" element={<CRM />} />
+      
           <Route path="/site-transaction" element={<SiteTransactionPage />} />
           <Route path="/plant-transaction" element={<PlantTransactionPage />} />
           <Route path="/add-site-vendor" element={<AddSiteVendorPage />} />
           <Route path="/add-plant-vendor" element={<AddPlantVendorPage />} />
           <Route path="/site-report" element={<SiteReportPage />} />
           <Route path="/Admin-plant-report" element={<AdminPlantReportPage />} />
-          <Route path="/crm-report" element={<CrmReportPage />} />
+     
           <Route path="/employee-report" element={<EmployeeReportPage />} />
           <Route path="/staff-management" element={<StaffManagement />} />
           <Route path="*" element={<Navigate to="/supervisor-dashboard" replace />} />

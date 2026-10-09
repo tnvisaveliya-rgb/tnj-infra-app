@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { ArrowUpRight, Send, Plus, Trash2 } from 'lucide-react';
-import { COMPANY_LOGO_BASE64 } from '../services/logoConfig';
+
 import ConfirmModal from '../components/ConfirmModal';
 export default function PlantOutwardPage({ user }) {
   const [plants, setPlants] = useState([]);

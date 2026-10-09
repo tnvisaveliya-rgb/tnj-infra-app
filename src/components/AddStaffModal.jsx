@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 // ઉપલબ્ધ ટેબ્સની યાદી જે ચેકબોક્સમાં દેખાશે
 const AVAILABLE_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'crm', label: 'CRM' },
+
   { id: 'site_progress', label: 'Site Daily Progress Report' },
   { id: 'plant_report', label: 'Plant Report' },
   { id: 'site_transaction', label: 'Site Transactions' },

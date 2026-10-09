@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { RotateCcw, Send, Plus, Trash2 } from 'lucide-react';
-import { COMPANY_LOGO_BASE64 } from '../services/logoConfig';
+
 
 
 export default function SiteMaterialReturnPage({ user }) {

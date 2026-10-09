@@ -5,7 +5,7 @@ import { X, Loader2, UserPlus, Trash2, Shield, Edit3, Phone, Users, ArrowLeft, S
 
 const AVAILABLE_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'crm', label: 'CRM' },
+
   { id: 'site_progress', label: 'Site Daily Progress Report' },
   { id: 'plant_report', label: 'Plant Report' }
 ]
@@ -82,19 +82,26 @@ const loadPlants = async () => {
 const uniqueStates = ['All', ...new Set(allSites.map(s => s.state).filter(Boolean))]
   const uniquePlantStates = ['All', ...new Set(plantsList.map(p => p.state).filter(Boolean))] // 👈 Plant માટે રાજ્યોનું લિસ્ટ
 
- const deleteStaff = async (id) => {
-    if (confirm("Shu tame aa staff ne delete karva mango cho?")) {
-      // 1. user_permissions mathi delete
-      const { error: permError } = await supabase.from('user_permissions').delete().eq('user_id', id);
-      
-      // 2. user_profiles mathi pan delete karo
-      const { error: profError } = await supabase.from('user_profiles').delete().eq('id', id);
+const deleteStaff = async (id) => {
+    const staffObj = staffList.find(s => s.user_id === id);
+    if (staffObj && staffObj.role === 'Company Admin') {
+      alert("Company Admin ne ahiya thi delete kari shakay nahi!");
+      return;
+    }
 
-      if (!permError) {
+    if (confirm("Shu tame aa staff ne authentication ane database mathi permanent delete karva mango cho?")) {
+      try {
+        // 🌟 Edge Function કોલ કરો જે Auth અને Database બંને સાફ કરશે
+        const { error: fnError } = await supabase.functions.invoke('delete-staff', {
+          body: { user_id: id }
+        });
+
+        if (fnError) throw fnError;
+
         fetchStaff();
-        alert("Staff database mathi delete thai gayo che!\n\n(Note: Ene login karto rokva mate Supabase Dashboard ma Auth > Users mathi manual delete karvo padse)");
-      } else {
-        alert("Delete karvama error aavi: " + permError.message);
+        alert("સ્ટાફ સફળતાપૂર્વક ઓથેન્ટિકેશન અને ડેટાબેઝમાંથી ડિલીટ થઈ ગયો છે!");
+      } catch (err) {
+        alert("ડિલિટ કરવામાં એરર આવી: " + err.message);
       }
     }
   }
@@ -524,10 +531,11 @@ const handleAddStaff = async (e) => {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '12px', marginTop: '10px' }}>
                 
-                {/* 👇 નવું ઉમેરેલું Delete બટન (Edit Modal ની અંદર) */}
-                <button type="button" onClick={() => { deleteStaff(editingStaff.user_id); setEditingStaff(null); }} style={{ padding: '8px 14px', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px' }}>
-                  <Trash2 size={16} /> Delete
-                </button>
+               {editingStaff.role !== 'Admin' && (
+  <button type="button" onClick={() => { deleteStaff(editingStaff.user_id); setEditingStaff(null); }} style={{ padding: '8px 14px', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px' }}>
+    <Trash2 size={16} /> Delete
+  </button>
+)}
 
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button type="button" onClick={() => setEditingStaff(null)} style={{ padding: '10px 18px', backgroundColor: '#e2e8f0', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', color: '#475569', fontSize: '13px' }}>Cancel</button>

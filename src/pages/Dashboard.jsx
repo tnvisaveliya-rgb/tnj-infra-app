@@ -54,7 +54,7 @@ function Dashboard() {
       title: "🎛️ Master Management",
       items: [
         { id: 'Core Master ', label: '1. Core Master', icon: FolderKanban, color: '#059669', path: '/add-plant-vendor' },
-        { id: 'staff_management', label: '2. Staff Management', icon: Users, color: '#db2777', path: '/staff-management' },
+       
       ]
     },
     {
@@ -65,6 +65,17 @@ function Dashboard() {
         { id: 'site_report', label: '4. Site Report', icon: ClipboardList, color: '#2563eb', path: '/site-report' },
       ]
     },
+     {
+      title: "📊 Staff Reports & Analytics",
+      items: [
+        
+        { id: 'employee_report', label: '7. Employee Report', icon: Users, color: '#db2777', path: '/employee-report' },
+         { id: 'staff_management', label: '2. Staff Management', icon: Users, color: '#db2777', path: '/staff-management' },
+      ]
+    },
+
+
+
     {
       title: "📑 Site and Plant Transaction Report",
       items: [
@@ -72,15 +83,10 @@ function Dashboard() {
         { id: 'plant_Transaction', label: '5. Plant and Site Transaction', icon: Receipt, color: '#0891b2', path: '/plant-transaction' },
         
       ]
-    },
-    {
-      title: "📊 Reports & Analytics",
-      items: [
-        
-        { id: 'employee_report', label: '7. Employee Report', icon: Users, color: '#db2777', path: '/employee-report' },
-        { id: 'crm_report', label: '8. CRM Report', icon: Briefcase, color: '#d97706', path: '/crm-report' },
-      ]
     }
+
+
+   
   ]
 
   return (

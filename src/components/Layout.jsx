@@ -25,7 +25,12 @@ const [isAdmin, setIsAdmin] = useState(false);
   const [supervisorNotifs, setSupervisorNotifs] = useState([]);
   const [companyDetails, setCompanyDetails] = useState(null);
   // 🌟 ડેટાબેઝમાંથી રોલ ચેક કરવા માટે useEffect ઉમેરો
-  useEffect(() => {
+ useEffect(() => {
+    if (userEmail === 'infra.tnj@gmail.com') {
+      setIsAdmin(true);
+      return; // માસ્ટર એડમિન માટે પરમિશન ક્વેરી રન જ નહીં થાય
+    }
+
     const checkAdminRole = async () => {
       if (!user) return;
       const { data } = await supabase
@@ -41,17 +46,18 @@ const [isAdmin, setIsAdmin] = useState(false);
       }
     };
     checkAdminRole();
-  }, [user]);
+  }, [user, userEmail]);
 
   useEffect(() => {
+    if (userEmail === 'infra.tnj@gmail.com') return; // માસ્ટર એડમિન માટે નોટિફિકેશન સ્કીપ
+
     fetchDprRequests();
     fetchInwardRequests();
     fetchOutwardRequests();
     fetchExpenseRequests(); 
     fetchSiteDprRequests();
     fetchSiteInwardRequests();
-
-    fetchSupervisorNotifs(); // 👈 નવું ફંક્શન કોલ કર્યું
+    fetchSupervisorNotifs();
   }, [user, userEmail]);
 useEffect(() => {
   const fetchCompanyDetails = async () => {
@@ -424,7 +430,7 @@ const handlesignout = async () => {
         .from('user_permissions')
         .select('allowed_tabs')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
       
       if (!error && data?.allowed_tabs) {
         setAllowedTabs(data.allowed_tabs);
@@ -436,13 +442,15 @@ const handlesignout = async () => {
     fetchPermissions();
   }, [user, userEmail]);
 
-  // બધા ઉપલબ્ધ નેવિગેશન ઓપ્શન્સ
-  const allNavItems = [
+// બધા ઉપલબ્ધ નેવિગેશન ઓપ્શન્સ
+  const allNavItems = userEmail === 'infra.tnj@gmail.com' ? [
+    { id: 'admin_stats', path: '/admin-dashboard-stats', label: 'Companies Management', icon: Building2 },
+  ] : [
     { id: 'dashboard', path: '/Dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'crm', path: '/crm', label: 'CRM', icon: Building2 },
+
     { id: 'site_progress', path: '/siteemployee-dashboard', label: 'Site Daily Progress Report', icon: Receipt },
     { id: 'plant_report', path: '/plantemployee-dashboard', label: 'Plant Report', icon: FileText },
-  ]
+  ];
 
   const getFilteredNavItems = () => {
     if (isAdmin) {

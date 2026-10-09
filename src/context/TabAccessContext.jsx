@@ -28,7 +28,7 @@ export function TabAccessProvider({ children }) {
 
     // Admin gets all tabs
     if (userEmail === 'infra.tnj@gmail.com') {
-      setAllowedTabs(['dashboard', 'crm', 'site_progress', 'plant_report', 'site_transaction', 'plant_transaction'])
+      setAllowedTabs(['dashboard', 'site_progress', 'plant_report', 'site_transaction', 'plant_transaction'])
       setLoading(false)
       isFetchingRef.current = false
       return
