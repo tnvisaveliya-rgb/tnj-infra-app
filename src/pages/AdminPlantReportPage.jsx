@@ -54,7 +54,7 @@ const AdminPlantReportPage = () => {
   const [stateList, setStateList] = useState([]);
   const [availablePlants, setAvailablePlants] = useState([]);
   const [loadingPlants, setLoadingPlants] = useState(true);
-const [companyName, setCompanyName] = useState('T&J Infra');
+
   // Data States
   const [fgStockData, setFgStockData] = useState([]); // Tab 1 - FG
   const [rmStockData, setRmStockData] = useState([]); // Tab 1 - RM
@@ -68,7 +68,9 @@ const [companyName, setCompanyName] = useState('T&J Infra');
   
   const [vendorData, setVendorData] = useState([]); // Tab 3
   const [rawMaterialInwardData, setRawMaterialInwardData] = useState([]); // Tab 3
-  
+  // 🌟 LocalStorage mathi junu company name pela j load karlo jethi delay na thaye
+  const [companyName, setCompanyName] = useState(() => localStorage.getItem('current_company_name') || '');
+  const [loading, setLoading] = useState(true);
   const [loadingReports, setLoadingReports] = useState(false);
 
 useEffect(() => {

@@ -14,7 +14,8 @@ export default function AdminDashboardStats() {
     address: '',
     email: '',
     password: '',
-     recoveryEmail: '' // 👈 Navu field
+     recoveryEmail: '' ,
+     max_plants: 100// 👈 Navu field
   });
   const [logoFile, setLogoFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,8 @@ export default function AdminDashboardStats() {
     address: '',
     subdomain: '',
     logo_url: '',
-    is_active: true
+    is_active: true,
+    max_plants: 100
   });
   const [editLogoFile, setEditLogoFile] = useState(null); // 👈 નવો લોગો અપલોડ કરવા માટે
   const [updating, setUpdating] = useState(false);
@@ -90,6 +92,7 @@ export default function AdminDashboardStats() {
           admin_email: formData.email,
           admin_password: formData.password,
           recovery_email: formData.recoveryEmail,
+          max_plants: parseInt(formData.max_plants) || 100,
         },
       });
 
@@ -117,6 +120,7 @@ export default function AdminDashboardStats() {
       address: comp.address || '',
       subdomain: comp.subdomain || '',
       logo_url: comp.logo_url || '',
+      max_plants: comp.max_plants || 100,
       is_active: comp.is_active !== false
     });
     setEditLogoFile(null);
@@ -158,6 +162,7 @@ export default function AdminDashboardStats() {
           address: editForm.address,
           subdomain: editForm.subdomain,
           logo_url: updatedLogoUrl, // નવી કે જૂની URL અહીં સેવ થશે
+         max_plants: parseInt(editForm.max_plants) || 100,
           is_active: editForm.is_active
         })
         .eq('id', editingCompany.id);
@@ -351,6 +356,18 @@ export default function AdminDashboardStats() {
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Company Address *</label>
                 <textarea name="address" rows="3" value={editForm.address} onChange={handleEditChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box', resize: 'vertical' }} required />
               </div>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Max Plants Limit (Subscription)</label>
+                <input 
+                  type="number" 
+                  name="max_plants" 
+                  value={editForm.max_plants} 
+                  onChange={handleEditChange} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} 
+                  min="1"
+                  required 
+                />
+              </div>
 
               {/* 🌟 Current Logo Preview & Change Option */}
               <div>
@@ -428,6 +445,19 @@ export default function AdminDashboardStats() {
               <div>
                 <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Recovery Email (For Password Reset)</label>
                 <input type="email" name="recoveryEmail" value={formData.recoveryEmail} onChange={handleChange} style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} placeholder="client-recovery@gmail.com" />
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>Max Plants Limit (Subscription)</label>
+                <input 
+                  type="number" 
+                  name="max_plants" 
+                  value={formData.max_plants} 
+                  onChange={handleChange} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }} 
+                  placeholder="100" 
+                  min="1"
+                  required 
+                />
               </div>
 
               <hr style={{ margin: '10px 0', border: '0', borderTop: '1px solid #e2e8f0' }} />

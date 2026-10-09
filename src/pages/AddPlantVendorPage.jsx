@@ -193,6 +193,31 @@ setTransporters(tData || []);
         .single();
 
       if (profileError || !profileData) throw new Error("Company ID fetching failed.");
+      const companyId = profileData.company_id;
+
+      // 🌟 1. Companies ટેબલમાંથી આ કંપનીની max_plants લિમિટ ચેક કરો
+      const { data: companyData, error: compErr } = await supabase
+        .from('companies')
+        .select('max_plants') 
+        .eq('id', companyId)
+        .single();
+
+      if (compErr) throw compErr;
+      const maxAllowedPlants = companyData?.max_plants || 100; // જો ડિફૉલ્ટ સેટ ન હોય તો 100 ગણશે
+
+      // 🌟 2. હાલમાં આ કંપનીના કેટલા પ્લાન્ટ્સ એડ થયેલા છે તેની ગણતરી કરો
+      const { count, error: countErr } = await supabase
+        .from('plants')
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', companyId);
+
+      if (countErr) throw countErr;
+
+      // 🌟 3. જો લિમિટ પૂરી થઈ ગઈ હોય તો પ્લાન્ટ એડ થતો અટકાવી દો
+      if (count >= maxAllowedPlants) {
+        showAlert(`⚠️ તમારી સબસ્ક્રિપ્શન પ્લાન લિમિટ પૂરી થઈ ગઈ છે! તમે ફક્ત ${maxAllowedPlants} જ પ્લાન્ટ્સ ઉમેરી શકો છો.`);
+        return;
+      }
 
       // 🎯 Logo Upload Logic (જો લોગો સિલેક્ટ કર્યો હોય તો)
       let logo_url = null;
