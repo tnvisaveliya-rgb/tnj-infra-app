@@ -10,8 +10,9 @@ function Login() {
   const [error, setError] = useState('')
   
   // 🌟 Dynamic Company Name ane Logo mate nava states
-  const [tenantName, setTenantName] = useState('T&J Infra')
-  const [tenantLogo, setTenantLogo] = useState(null)
+// 🌟 શરુઆતમાં ખાલી અથવા LocalStorage માંથી નામ લો જેથી ફ્લેશ ન થાય
+  const [tenantName, setTenantName] = useState(() => localStorage.getItem('current_tenant_name') || '')
+  const [tenantLogo, setTenantLogo] = useState(() => localStorage.getItem('current_tenant_logo') || null)
   
   const navigate = useNavigate()
   const { userPermissions } = useAuth(); 
@@ -25,7 +26,7 @@ function Login() {
       const parts = host.split('.');
       if (parts.length >= 3 && parts[0] !== 'www') {
         subdomain = parts[0];
-      }
+      } 
       
       
 
@@ -38,6 +39,37 @@ function Login() {
       if (data) {
         setTenantName(data.company_name || 'T&J Infra');
         setTenantLogo(data.logo_url);
+
+
+     setTenantName(compName);
+        setTenantLogo(compLogo);
+        // 🌟 LocalStorage માં સેવ કરો જેથી નેક્સ્ટ ટાઈમ તરત જ દેખાય
+        localStorage.setItem('current_tenant_name', compName);
+        if (compLogo) localStorage.setItem('current_tenant_logo', compLogo);
+
+
+        document.title = `${compName} - Login Panel`;
+    
+      
+        
+
+        // 🌟 1. Browser Tab Title Update karo
+        document.title = `${compName} - Login Panel`;
+
+        // 🌟 2. WhatsApp / Social Media Preview Meta Tags Update karo
+        const ogTitleMeta = document.getElementById('meta-title');
+        if (ogTitleMeta) ogTitleMeta.setAttribute('content', `${compName} ERP Portal`);
+
+        const ogImageMeta = document.getElementById('meta-image');
+        if (ogImageMeta && compLogo) {
+          ogImageMeta.setAttribute('content', compLogo);
+        }
+
+        // 🌟 3. Browser Favicon (Logo) Update karo
+        const faviconLink = document.getElementById('dynamic-favicon');
+        if (faviconLink && compLogo) {
+          faviconLink.href = compLogo;
+        }
       }
     };
 
